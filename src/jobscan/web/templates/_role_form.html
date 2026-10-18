@@ -1,0 +1,37 @@
+<h1>{{ role.title }}</h1>
+<p class="muted">{{ role.company }} &middot; {{ role.location }} &middot; {{ role.portal }} {{ role.job_id }}</p>
+{% set link = role.link | safe_link %}
+<dl class="facts">
+  <dt>Link</dt><dd>{% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer">{{ link }}</a>{% endif %}</dd>
+  <dt>Posted (IST)</dt><dd>{{ role | posted }}{% if role.raw_relative %} <span class="muted">(LinkedIn said "{{ role.raw_relative }}")</span>{% endif %}</dd>
+  <dt>Fetched (IST)</dt><dd>{{ role.fetched_on | ist }}</dd>
+  <dt>Matched phrase</dt><dd>{{ role.matched_phrase }}</dd>
+  {% if role.possible_duplicate_of %}<dt>Possible duplicate of</dt><dd>{{ role.possible_duplicate_of }}</dd>{% endif %}
+</dl>
+
+<form method="post" class="edit" action="{{ url_for('role_save', portal=role.portal, job_id=role.job_id) }}">
+  <input type="hidden" name="next" value="{{ next }}">
+  <label>Status
+    <select name="status">
+      {% for s in statuses %}<option value="{{ s }}" {% if form.get('status') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  {% if errors.get('status') %}<p class="error">{{ errors['status'] }}</p>{% endif %}
+
+  <label>Applied On (YYYY-MM-DD)
+    <input type="text" name="applied_on" value="{{ form.get('applied_on', '') }}" placeholder="set automatically when Applied">
+  </label>
+  {% if errors.get('applied_on') %}<p class="error">{{ errors['applied_on'] }}</p>{% endif %}
+
+  <label>Contact person
+    <input type="text" name="contact_person" value="{{ form.get('contact_person', '') }}">
+  </label>
+  {% if errors.get('contact_person') %}<p class="error">{{ errors['contact_person'] }}</p>{% endif %}
+
+  <label>Comments
+    <textarea name="comments" rows="6">{{ form.get('comments', '') }}</textarea>
+  </label>
+  {% if errors.get('comments') %}<p class="error">{{ errors['comments'] }}</p>{% endif %}
+
+  <button type="submit">Save</button>
+</form>

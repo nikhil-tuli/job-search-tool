@@ -1,0 +1,521 @@
+"""All reads and writes against the SQLite database."""
+
+from __future__ import annotations
+
+import sqlite3
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta
+
+from .models import (
+    DEFAULT_STATUS,
+    STATUSES,
+    DepthStat,
+    FetchDay,
+    KeywordRecord,
+    NewRole,
+    PageStat,
+    Phrase,
+    Role,
+    RoleFilter,
+    RunSummary,
+    SkippedTitle,
+)
+from .timeutil import is_day, now_ist, to_iso
+
+RUN_RUNNING = "running"
+RUN_SUCCESS = "success"
+RUN_PARTIAL = "partial"
+RUN_FAILED = "failed"
+RUN_STATUSES = (RUN_RUNNING, RUN_SUCCESS, RUN_PARTIAL, RUN_FAILED)
+
+
+class StoreError(ValueError):
+    """Invalid input to a store operation. Nothing was written."""
+
+
+def _like_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _split_key(key: str) -> tuple[str, str]:
+    portal, sep, job_id = key.partition("|")
+    if not sep or not portal or not job_id:
+        raise StoreError(f"invalid role key: {key!r}")
+    return portal, job_id
+
+
+def _role(row: sqlite3.Row) -> Role:
+    return Role(
+        portal=row["portal"],
+        job_id=row["job_id"],
+        title=row["title"],
+        company=row["company"],
+        location=row["location"],
+        link=row["link"],
+        posted_on=row["posted_on"],
+        posted_precision=row["posted_precision"],
+        fetched_on=row["fetched_on"],
+        actively_hiring=bool(row["actively_hiring"]),
+        matched_phrase=row["matched_phrase"],
+        possible_duplicate_of=row["possible_duplicate_of"],
+        status=row["status"],
+        applied_on=row["applied_on"],
+        contact_person=row["contact_person"],
+        comments=row["comments"],
+        raw_datetime=row["raw_datetime"],
+        raw_relative=row["raw_relative"],
+        first_run_id=row["first_run_id"],
+    )
+
+
+def _run(row: sqlite3.Row) -> RunSummary:
+    return RunSummary(
+        id=row["id"],
+        started_on=row["started_on"],
+        finished_on=row["finished_on"],
+        status=row["status"],
+        window_seconds=row["window_seconds"],
+        keywords_total=row["keywords_total"],
+        keywords_done=row["keywords_done"],
+        pages=row["pages"],
+        cards_seen=row["cards_seen"],
+        matched=row["matched"],
+        new_roles=row["new_roles"],
+        possible_dups=row["possible_dups"],
+        throttled=row["throttled"],
+        retries=row["retries"],
+        failed_pages=row["failed_pages"],
+        malformed_cards=row["malformed_cards"],
+        note=row["note"],
+    )
+
+
+class Store:
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self._depth = 0
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        return self._conn
+
+    def close(self) -> None:
+        self._conn.close()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Atomic block. Nested use joins the outer transaction."""
+        if self._depth:
+            self._depth += 1
+            try:
+                yield
+            finally:
+                self._depth -= 1
+            return
+        self._conn.execute("BEGIN IMMEDIATE")
+        self._depth = 1
+        try:
+            yield
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        else:
+            self._conn.execute("COMMIT")
+        finally:
+            self._depth = 0
+
+    # ---- config -------------------------------------------------------------------------
+
+    def get_config_raw(self) -> dict[str, str]:
+        rows = self._conn.execute("SELECT key, value FROM config").fetchall()
+        return {row["key"]: row["value"] for row in rows}
+
+    def set_config_raw(self, values: dict[str, str]) -> None:
+        with self.transaction():
+            self._conn.executemany(
+                "INSERT INTO config (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                list(values.items()),
+            )
+
+    # ---- phrases ------------------------------------------------------------------------
+
+    def list_phrases(self) -> list[Phrase]:
+        rows = self._conn.execute(
+            "SELECT id, phrase, use_as_keyword, use_for_match FROM phrases ORDER BY position, id"
+        ).fetchall()
+        return [
+            Phrase(r["id"], r["phrase"], bool(r["use_as_keyword"]), bool(r["use_for_match"]))
+            for r in rows
+        ]
+
+    def replace_phrases(self, phrases: Sequence[tuple[str, bool, bool]]) -> None:
+        """Replace the whole phrase list atomically. Blank or duplicate phrases are rejected."""
+        cleaned: list[tuple[str, bool, bool]] = []
+        seen: set[str] = set()
+        for text, as_keyword, for_match in phrases:
+            text = " ".join(text.split())
+            if not text:
+                raise StoreError("phrase must not be blank")
+            if text.casefold() in seen:
+                raise StoreError(f"duplicate phrase: {text}")
+            seen.add(text.casefold())
+            cleaned.append((text, as_keyword, for_match))
+        with self.transaction():
+            self._conn.execute("DELETE FROM phrases")
+            self._conn.executemany(
+                "INSERT INTO phrases (phrase, use_as_keyword, use_for_match, position) "
+                "VALUES (?, ?, ?, ?)",
+                [(t, int(k), int(m), i) for i, (t, k, m) in enumerate(cleaned)],
+            )
+
+    # ---- roles --------------------------------------------------------------------------
+
+    def role_exists(self, portal: str, job_id: str) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM roles WHERE portal = ? AND job_id = ?", (portal, job_id)
+        ).fetchone()
+        return row is not None
+
+    def find_duplicate(
+        self, dup_key: str | None, *, exclude_job_id: str | None = None
+    ) -> str | None:
+        """Key ('portal|job_id') of the earliest stored role with the same dup key."""
+        if dup_key is None:
+            return None
+        row = self._conn.execute(
+            "SELECT portal, job_id FROM roles WHERE dup_key = ? AND job_id IS NOT ? "
+            "ORDER BY fetched_on, job_id LIMIT 1",
+            (dup_key, exclude_job_id),
+        ).fetchone()
+        return None if row is None else f"{row['portal']}|{row['job_id']}"
+
+    def insert_role(self, role: NewRole) -> bool:
+        """Insert a role. Returns False, leaving the stored row untouched, if the key exists."""
+        cursor = self._conn.execute(
+            "INSERT OR IGNORE INTO roles (portal, job_id, title, company, location, link, "
+            "posted_on, posted_precision, fetched_on, actively_hiring, matched_phrase, "
+            "possible_duplicate_of, dup_key, raw_datetime, raw_relative, first_run_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                role.portal,
+                role.job_id,
+                role.title,
+                role.company,
+                role.location,
+                role.link,
+                role.posted_on,
+                role.posted_precision,
+                role.fetched_on,
+                int(role.actively_hiring),
+                role.matched_phrase,
+                role.possible_duplicate_of,
+                role.dup_key,
+                role.raw_datetime,
+                role.raw_relative,
+                role.run_id,
+            ),
+        )
+        return cursor.rowcount == 1
+
+    def get_role(self, portal: str, job_id: str) -> Role | None:
+        row = self._conn.execute(
+            "SELECT * FROM roles WHERE portal = ? AND job_id = ?", (portal, job_id)
+        ).fetchone()
+        return None if row is None else _role(row)
+
+    @staticmethod
+    def _where(flt: RoleFilter) -> tuple[str, list[object]]:
+        clauses: list[str] = []
+        params: list[object] = []
+        query = flt.query.strip()
+        if query:
+            like = f"%{_like_escape(query)}%"
+            clauses.append(
+                "(title LIKE ? ESCAPE '\\' OR company LIKE ? ESCAPE '\\' "
+                "OR location LIKE ? ESCAPE '\\' OR comments LIKE ? ESCAPE '\\' "
+                "OR contact_person LIKE ? ESCAPE '\\')"
+            )
+            params.extend([like] * 5)
+        if flt.status:
+            if flt.status not in STATUSES:
+                raise StoreError(f"unknown status: {flt.status!r}")
+            clauses.append("status = ?")
+            params.append(flt.status)
+        if flt.duplicates_only:
+            clauses.append("possible_duplicate_of IS NOT NULL")
+        if flt.fetched_on:
+            if not is_day(flt.fetched_on):
+                raise StoreError(f"invalid fetch date: {flt.fetched_on!r}")
+            # Timestamps are stored in IST, so the first ten characters are the IST day.
+            clauses.append("substr(fetched_on, 1, 10) = ?")
+            params.append(flt.fetched_on)
+        return (" WHERE " + " AND ".join(clauses)) if clauses else "", params
+
+    def count_roles(self, flt: RoleFilter | None = None) -> int:
+        where, params = self._where(flt or RoleFilter())
+        row = self._conn.execute(f"SELECT COUNT(*) FROM roles{where}", params).fetchone()
+        return int(row[0])
+
+    def list_roles(
+        self, flt: RoleFilter | None = None, *, limit: int | None = None, offset: int = 0
+    ) -> list[Role]:
+        """Newest fetched first; ties ordered by posted time (newest first), then job id."""
+        where, params = self._where(flt or RoleFilter())
+        sql = (
+            f"SELECT * FROM roles{where} "
+            "ORDER BY fetched_on DESC, COALESCE(posted_on, '') DESC, job_id DESC"
+        )
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params = [*params, limit, max(offset, 0)]
+        return [_role(r) for r in self._conn.execute(sql, params).fetchall()]
+
+    def fetch_summary(self) -> list[FetchDay]:
+        """Roles per IST fetch day and current status, newest day first.
+
+        Days between the first and last fetch with no new roles are included with zeros, so a
+        missed scan is visible. Every status in STATUSES has an entry on every day.
+        """
+        counts: dict[str, dict[str, int]] = {}
+        for row in self._conn.execute(
+            "SELECT substr(fetched_on, 1, 10) AS day, status, COUNT(*) AS n "
+            "FROM roles GROUP BY day, status"
+        ):
+            counts.setdefault(row["day"], {})[row["status"]] = int(row["n"])
+        if not counts:
+            return []
+        first = date.fromisoformat(min(counts))
+        last = date.fromisoformat(max(counts))
+        days: list[FetchDay] = []
+        current = last
+        while current >= first:
+            day = current.isoformat()
+            found = counts.get(day, {})
+            by_status = {status: found.get(status, 0) for status in STATUSES}
+            days.append(FetchDay(day, sum(by_status.values()), by_status))
+            current -= timedelta(days=1)
+        return days
+
+    def update_status(
+        self, keys: Iterable[str], status: str, *, today: datetime | None = None
+    ) -> int:
+        """Set a status on many roles atomically. Any invalid input changes nothing.
+
+        Applied sets Applied On to today (IST) when empty; Not Applied clears it; other
+        statuses leave it as it is.
+        """
+        if status not in STATUSES:
+            raise StoreError(f"unknown status: {status!r}")
+        unique = list(dict.fromkeys(keys))
+        if not unique:
+            raise StoreError("no roles selected")
+        pairs = [_split_key(k) for k in unique]
+        today_iso = to_iso(today or now_ist())
+        with self.transaction():
+            missing = [
+                k for k, (p, j) in zip(unique, pairs, strict=True) if not self.role_exists(p, j)
+            ]
+            if missing:
+                raise StoreError(f"unknown role: {missing[0]}")
+            for portal, job_id in pairs:
+                if status == "Applied":
+                    self._conn.execute(
+                        "UPDATE roles SET status = ?, applied_on = COALESCE(applied_on, ?) "
+                        "WHERE portal = ? AND job_id = ?",
+                        (status, today_iso, portal, job_id),
+                    )
+                elif status == DEFAULT_STATUS:
+                    self._conn.execute(
+                        "UPDATE roles SET status = ?, applied_on = NULL "
+                        "WHERE portal = ? AND job_id = ?",
+                        (status, portal, job_id),
+                    )
+                else:
+                    self._conn.execute(
+                        "UPDATE roles SET status = ? WHERE portal = ? AND job_id = ?",
+                        (status, portal, job_id),
+                    )
+        return len(pairs)
+
+    def update_details(
+        self,
+        portal: str,
+        job_id: str,
+        *,
+        status: str,
+        applied_on: str | None,
+        contact_person: str,
+        comments: str,
+    ) -> None:
+        """Save the editable fields of one role. applied_on is an ISO timestamp or None."""
+        if status not in STATUSES:
+            raise StoreError(f"unknown status: {status!r}")
+        cursor = self._conn.execute(
+            "UPDATE roles SET status = ?, applied_on = ?, contact_person = ?, comments = ? "
+            "WHERE portal = ? AND job_id = ?",
+            (
+                status,
+                applied_on,
+                contact_person.strip(),
+                comments.strip(),
+                portal,
+                job_id,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise StoreError(f"unknown role: {portal}|{job_id}")
+
+    # ---- runs ---------------------------------------------------------------------------
+
+    def start_run(self, *, window_seconds: int, keywords_total: int) -> int:
+        cursor = self._conn.execute(
+            "INSERT INTO runs (started_on, status, window_seconds, keywords_total) "
+            "VALUES (?, ?, ?, ?)",
+            (to_iso(now_ist()), RUN_RUNNING, window_seconds, keywords_total),
+        )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def finish_run(self, run_id: int, status: str, note: str = "") -> None:
+        if status not in RUN_STATUSES or status == RUN_RUNNING:
+            raise StoreError(f"invalid final run status: {status!r}")
+        cursor = self._conn.execute(
+            "UPDATE runs SET status = ?, finished_on = ?, note = ? WHERE id = ?",
+            (status, to_iso(now_ist()), note, run_id),
+        )
+        if cursor.rowcount != 1:
+            raise StoreError(f"unknown run: {run_id}")
+
+    def fail_stale_runs(self, note: str = "Interrupted: process ended without finishing") -> int:
+        """Mark runs still 'running' as failed. Call only while holding the run lock."""
+        cursor = self._conn.execute(
+            "UPDATE runs SET status = ?, finished_on = ?, note = ? WHERE status = ?",
+            (RUN_FAILED, to_iso(now_ist()), note, RUN_RUNNING),
+        )
+        return cursor.rowcount
+
+    def record_keyword(self, run_id: int, record: KeywordRecord) -> None:
+        self._conn.execute(
+            "INSERT INTO run_keywords (run_id, keyword, pages, cards, matched, new_roles, "
+            "possible_dups, throttled, retries, failed_pages, malformed, completed, stopped_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                record.keyword,
+                record.pages,
+                record.cards,
+                record.matched,
+                record.new_roles,
+                record.possible_dups,
+                record.throttled,
+                record.retries,
+                record.failed_pages,
+                record.malformed,
+                int(record.completed),
+                record.stopped_by,
+            ),
+        )
+
+    def record_pages(self, run_id: int, keyword: str, pages: Iterable[PageStat]) -> None:
+        self._conn.executemany(
+            "INSERT INTO run_pages (run_id, keyword, page_index, cards, matched) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [(run_id, keyword, p.page_index, p.cards, p.matched) for p in pages],
+        )
+
+    def add_phrase_matches(self, run_id: int, counts: dict[str, int]) -> None:
+        self._conn.executemany(
+            "INSERT INTO run_phrase_matches (run_id, phrase, matches) VALUES (?, ?, ?) "
+            "ON CONFLICT(run_id, phrase) DO UPDATE SET matches = matches + excluded.matches",
+            [(run_id, phrase, n) for phrase, n in counts.items() if n > 0],
+        )
+
+    def get_run(self, run_id: int) -> RunSummary | None:
+        row = self._conn.execute("SELECT * FROM run_summary WHERE id = ?", (run_id,)).fetchone()
+        return None if row is None else _run(row)
+
+    def list_runs(self, limit: int = 50) -> list[RunSummary]:
+        rows = self._conn.execute(
+            "SELECT * FROM run_summary ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [_run(r) for r in rows]
+
+    def latest_run(self) -> RunSummary | None:
+        runs = self.list_runs(1)
+        return runs[0] if runs else None
+
+    def last_successful_run(self) -> RunSummary | None:
+        row = self._conn.execute(
+            "SELECT * FROM run_summary WHERE status = ? ORDER BY id DESC LIMIT 1", (RUN_SUCCESS,)
+        ).fetchone()
+        return None if row is None else _run(row)
+
+    def keyword_records(self, run_id: int) -> list[KeywordRecord]:
+        rows = self._conn.execute(
+            "SELECT * FROM run_keywords WHERE run_id = ? ORDER BY id", (run_id,)
+        ).fetchall()
+        return [
+            KeywordRecord(
+                keyword=r["keyword"],
+                pages=r["pages"],
+                cards=r["cards"],
+                matched=r["matched"],
+                new_roles=r["new_roles"],
+                possible_dups=r["possible_dups"],
+                throttled=r["throttled"],
+                retries=r["retries"],
+                failed_pages=r["failed_pages"],
+                malformed=r["malformed"],
+                completed=bool(r["completed"]),
+                stopped_by=r["stopped_by"],
+            )
+            for r in rows
+        ]
+
+    def depth_stats(self, run_id: int) -> list[DepthStat]:
+        rows = self._conn.execute(
+            "SELECT page_index, SUM(cards) AS cards, SUM(matched) AS matched FROM run_pages "
+            "WHERE run_id = ? GROUP BY page_index ORDER BY page_index",
+            (run_id,),
+        ).fetchall()
+        return [DepthStat(r["page_index"], r["cards"], r["matched"]) for r in rows]
+
+    def phrase_matches(self, run_id: int) -> list[tuple[str, int]]:
+        rows = self._conn.execute(
+            "SELECT phrase, matches FROM run_phrase_matches WHERE run_id = ? "
+            "ORDER BY matches DESC, phrase",
+            (run_id,),
+        ).fetchall()
+        return [(r["phrase"], r["matches"]) for r in rows]
+
+    # ---- skipped titles -----------------------------------------------------------------
+
+    def add_skipped(self, run_id: int, rows: Iterable[tuple[str, str, str, str, str]]) -> None:
+        """Rows are (portal, job_id, title, company, fetched_on). Repeats in a run are ignored."""
+        self._conn.executemany(
+            "INSERT OR IGNORE INTO skipped_titles (run_id, portal, job_id, title, company, "
+            "fetched_on) VALUES (?, ?, ?, ?, ?, ?)",
+            [(run_id, *row) for row in rows],
+        )
+
+    def list_skipped(self, run_id: int | None = None, limit: int = 500) -> list[SkippedTitle]:
+        sql = "SELECT * FROM skipped_titles"
+        params: list[object] = []
+        if run_id is not None:
+            sql += " WHERE run_id = ?"
+            params.append(run_id)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        return [
+            SkippedTitle(
+                r["run_id"], r["portal"], r["job_id"], r["title"], r["company"], r["fetched_on"]
+            )
+            for r in self._conn.execute(sql, params).fetchall()
+        ]
+
+    def purge_skipped(self, retention_days: int, *, now: datetime | None = None) -> int:
+        cutoff = to_iso((now or now_ist()) - timedelta(days=retention_days))
+        cursor = self._conn.execute("DELETE FROM skipped_titles WHERE fetched_on < ?", (cutoff,))
+        return cursor.rowcount

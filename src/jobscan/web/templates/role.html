@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}{{ role.title }}{% endblock %}
+{% block content %}
+<p><a href="{{ next }}">&larr; Back</a></p>
+{% include "_role_form.html" %}
+{% endblock %}

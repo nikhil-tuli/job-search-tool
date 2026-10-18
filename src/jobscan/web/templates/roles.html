@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Roles{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>Roles <span class="muted">{{ total }}</span></h1>
+  <p class="muted">
+    Last successful run:
+    {% if last_success %}{{ (last_success.finished_on or last_success.started_on) | ist }} IST{% else %}none yet{% endif %}
+  </p>
+</div>
+
+<form class="filters" method="get" action="{{ url_for('roles') }}">
+  <input type="search" name="q" value="{{ filters.get('q', '') }}" placeholder="Search title, company, location, notes" aria-label="Search">
+  <select name="status" aria-label="Status filter">
+    <option value="">Any status</option>
+    {% for s in statuses %}<option value="{{ s }}" {% if filters.get('status') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  {% if filters.get('fetched') %}
+  <input type="hidden" name="fetched" value="{{ filters['fetched'] }}">
+  <span class="tag chip">Fetched {{ filters['fetched'] }} <a href="{{ url_for('roles', **without(filters, 'fetched')) }}" aria-label="Remove date filter">&times;</a></span>
+  {% endif %}
+  <label class="check"><input type="checkbox" name="dup" value="1" {% if filters.get('dup') %}checked{% endif %}> Possible duplicates only</label>
+  <button type="submit">Filter</button>
+  <a href="{{ url_for('roles') }}">Clear</a>
+  <a class="right" href="{{ url_for('export_csv', **filters) }}">Export CSV</a>
+</form>
+
+<form id="bulk" class="bulk" method="post" action="{{ url_for('set_status') }}">
+  <input type="hidden" name="next" value="{{ here }}">
+  <span>Selected:</span>
+  <select name="status" aria-label="Status for selected roles">
+    {% for s in statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+  </select>
+  <button type="submit">Apply to selected</button>
+</form>
+
+{% if roles %}
+<table class="roles" data-filter-status="{{ filters.get('status', '') }}">
+  <thead>
+    <tr>
+      <th><input type="checkbox" id="all" aria-label="Select all on this page"></th>
+      <th>Title</th><th>Company</th><th>Location</th><th>Posted (IST)</th><th>Fetched (IST)</th>
+      <th>Status</th><th>Applied</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in roles %}
+    <tr class="row" data-panel="{{ url_for('role_page', portal=r.portal, job_id=r.job_id, next=here, partial=1) }}">
+      <td><input type="checkbox" name="ids" value="{{ r.key }}" form="bulk" aria-label="Select {{ r.title }}"></td>
+      <td>
+        <a class="row-link" href="{{ url_for('role_page', portal=r.portal, job_id=r.job_id, next=here) }}">{{ r.title }}</a>
+        {% if r.actively_hiring %}<span class="tag">Actively hiring</span>{% endif %}
+        {% if r.possible_duplicate_of %}<span class="tag warn" title="Same company, title and city as {{ r.possible_duplicate_of }}">Possible duplicate</span>{% endif %}
+      </td>
+      <td>{{ r.company }}</td>
+      <td>{{ r.location }}</td>
+      <td class="nw">{{ r | posted }}</td>
+      <td class="nw">{{ r.fetched_on | ist }}</td>
+      <td>
+        <form method="post" action="{{ url_for('set_status') }}" class="inline">
+          <input type="hidden" name="ids" value="{{ r.key }}">
+          <input type="hidden" name="next" value="{{ here }}">
+          <select name="status" aria-label="Status of {{ r.title }}" data-autosave>
+            {% for s in statuses %}<option value="{{ s }}" {% if r.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+          <span class="note" aria-live="polite"></span>
+          <noscript><button type="submit">Set</button></noscript>
+        </form>
+      </td>
+      <td class="nw applied">{{ r.applied_on | ist_date }}</td>
+      <td>{% set link = r.link | safe_link %}{% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer">Open</a>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if pages > 1 %}
+<nav class="pager">
+  {% if page > 1 %}<a href="{{ url_for('roles', page=page - 1, **filters) }}">Previous</a>{% endif %}
+  <span>Page {{ page }} of {{ pages }}</span>
+  {% if page < pages %}<a href="{{ url_for('roles', page=page + 1, **filters) }}">Next</a>{% endif %}
+</nav>
+{% endif %}
+{% else %}
+<p class="empty">No roles match. Run <code>jobscan scan</code> in a terminal to fetch some.</p>
+{% endif %}
+
+<div id="scrim" hidden></div>
+<aside id="panel" role="dialog" aria-modal="true" aria-label="Role details" hidden>
+  <button type="button" id="panel-close" class="plain" aria-label="Close">&times;</button>
+  <div id="panel-body"></div>
+</aside>
+<script src="{{ url_for('static', filename='panel.js') }}"></script>
+<script src="{{ url_for('static', filename='autosave.js') }}"></script>
+<script>
+  var all = document.getElementById('all');
+  if (all) {
+    all.addEventListener('change', function () {
+      document.querySelectorAll('input[name=ids][form=bulk]').forEach(function (box) { box.checked = all.checked; });
+    });
+  }
+</script>
+{% endblock %}

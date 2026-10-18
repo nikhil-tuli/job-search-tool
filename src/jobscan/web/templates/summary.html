@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Summary{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>Summary <span class="muted">{{ grand_total }} roles</span></h1>
+  <p class="muted">
+    Roles by the day they were first fetched (IST) and their status now. Click a number to see those roles.
+    Last successful run:
+    {% if last_success %}{{ (last_success.finished_on or last_success.started_on) | ist }} IST{% else %}none yet{% endif %}
+  </p>
+</div>
+
+{% if days %}
+<div class="scroll-x">
+<table class="pivot">
+  <thead>
+    <tr>
+      <th>Fetched on</th><th class="num">Fetched</th>
+      {% for s in workflow %}<th class="num">{{ s }}</th>{% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+  {% for d in days %}
+    <tr {% if not d.total %}class="quiet"{% endif %}>
+      <td class="nw">{{ d.day }} <span class="muted">{{ d.day | weekday }}</span></td>
+      <td class="num">{% if d.total %}<a href="{{ url_for('roles', fetched=d.day) }}">{{ d.total }}</a>{% else %}<span class="muted">0</span>{% endif %}</td>
+      {% for s in workflow %}
+        {% set n = d.by_status[s] %}
+        <td class="num">{% if n %}<a href="{{ url_for('roles', fetched=d.day, status=s) }}">{{ n }}</a>{% else %}<span class="muted">&ndash;</span>{% endif %}</td>
+      {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <th>All days</th>
+      <th class="num"><a href="{{ url_for('roles') }}">{{ grand_total }}</a></th>
+      {% for s in workflow %}
+        <th class="num">{% if totals[s] %}<a href="{{ url_for('roles', status=s) }}">{{ totals[s] }}</a>{% else %}<span class="muted">&ndash;</span>{% endif %}</th>
+      {% endfor %}
+    </tr>
+  </tfoot>
+</table>
+</div>
+{% else %}
+<p class="empty">No roles yet. Run <code>jobscan scan</code> in a terminal to fetch some.</p>
+{% endif %}
+{% endblock %}
