@@ -110,3 +110,5 @@ scripts/scan.sh                 # scan and keep the Mac awake
   and the parser in `src/jobscan/parser.py` needs updating.
 - Exit codes: 0 success, 3 partial, 1 failed, 2 not started (bad config, too soon, or another
   scan running).
+
+  **Disclaimer - Uses LinkedIn’s public, logged-out listings. For personal use. Check LinkedIn’s terms before using.**
