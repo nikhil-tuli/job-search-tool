@@ -2,23 +2,28 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 
 from .models import (
     DEFAULT_STATUS,
     STATUSES,
+    Cv,
     DepthStat,
     FetchDay,
+    JobDetail,
     KeywordRecord,
     NewRole,
     PageStat,
     Phrase,
     Role,
     RoleFilter,
+    RoleScore,
     RunSummary,
+    ScoringRun,
     SkippedTitle,
 )
 from .timeutil import is_day, now_ist, to_iso
@@ -32,6 +37,68 @@ RUN_STATUSES = (RUN_RUNNING, RUN_SUCCESS, RUN_PARTIAL, RUN_FAILED)
 
 class StoreError(ValueError):
     """Invalid input to a store operation. Nothing was written."""
+
+
+MAX_DETAIL_ATTEMPTS = 3
+SCORING_COUNTERS = frozenset(
+    {
+        "considered",
+        "excluded",
+        "no_description",
+        "selected",
+        "scored",
+        "strong",
+        "partial",
+        "weak",
+        "failed",
+        "texts_embedded",
+        "texts_cached",
+        "requests",
+        "tokens",
+        "tokens_reported",
+    }
+)
+SCORING_STATUSES = ("running", "success", "partial", "failed")
+_IN_CHUNK = 500  # stays well under SQLite's limit on bound variables
+
+
+def _scoring_run(row: sqlite3.Row) -> ScoringRun:
+    return ScoringRun(
+        id=row["id"],
+        started_on=row["started_on"],
+        finished_on=row["finished_on"],
+        trigger=row["trigger"],
+        status=row["status"],
+        considered=row["considered"],
+        excluded=row["excluded"],
+        excluded_by_reason=json.loads(row["excluded_by_reason"]),
+        no_description=row["no_description"],
+        selected=row["selected"],
+        scored=row["scored"],
+        strong=row["strong"],
+        partial=row["partial"],
+        weak=row["weak"],
+        failed=row["failed"],
+        texts_embedded=row["texts_embedded"],
+        texts_cached=row["texts_cached"],
+        requests=row["requests"],
+        tokens=row["tokens"],
+        tokens_reported=bool(row["tokens_reported"]),
+        note=row["note"],
+    )
+
+
+def _role_score(row: sqlite3.Row) -> RoleScore:
+    return RoleScore(
+        portal=row["portal"],
+        job_id=row["job_id"],
+        keyword_raw=row["keyword_raw"],
+        semantic_raw=row["semantic_raw"],
+        chunks=row["chunks"],
+        inputs=row["inputs"],
+        scored_on=row["scored_on"],
+        run_id=row["run_id"],
+    )
 
 
 def _like_escape(text: str) -> str:
@@ -66,6 +133,11 @@ def _role(row: sqlite3.Row) -> Role:
         raw_datetime=row["raw_datetime"],
         raw_relative=row["raw_relative"],
         first_run_id=row["first_run_id"],
+        description=row["description"],
+        seniority=row["seniority"],
+        employment_type=row["employment_type"],
+        industries=row["industries"],
+        job_function=row["job_function"],
     )
 
 
@@ -235,9 +307,9 @@ class Store:
             clauses.append(
                 "(title LIKE ? ESCAPE '\\' OR company LIKE ? ESCAPE '\\' "
                 "OR location LIKE ? ESCAPE '\\' OR comments LIKE ? ESCAPE '\\' "
-                "OR contact_person LIKE ? ESCAPE '\\')"
+                "OR contact_person LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')"
             )
-            params.extend([like] * 5)
+            params.extend([like] * 6)
         if flt.status:
             if flt.status not in STATUSES:
                 raise StoreError(f"unknown status: {flt.status!r}")
@@ -271,6 +343,48 @@ class Store:
             sql += " LIMIT ? OFFSET ?"
             params = [*params, limit, max(offset, 0)]
         return [_role(r) for r in self._conn.execute(sql, params).fetchall()]
+
+    # ---- job descriptions -----------------------------------------------------------------
+
+    def pending_details(self, since: str, limit: int) -> list[tuple[str, str]]:
+        """(portal, job_id) of roles still without a description, newest first.
+
+        Only roles fetched at or after `since` are considered, and a role that has failed
+        MAX_DETAIL_ATTEMPTS times is given up on.
+        """
+        if limit <= 0:
+            return []
+        rows = self._conn.execute(
+            "SELECT portal, job_id FROM roles "
+            "WHERE description IS NULL AND detail_attempts < ? AND fetched_on >= ? "
+            "ORDER BY fetched_on DESC, job_id DESC LIMIT ?",
+            (MAX_DETAIL_ATTEMPTS, since, limit),
+        ).fetchall()
+        return [(r["portal"], r["job_id"]) for r in rows]
+
+    def save_detail(self, portal: str, job_id: str, detail: JobDetail, *, when: str) -> None:
+        self._conn.execute(
+            "UPDATE roles SET description = ?, seniority = ?, employment_type = ?, "
+            "industries = ?, job_function = ?, detail_fetched_on = ? "
+            "WHERE portal = ? AND job_id = ?",
+            (
+                detail.description,
+                detail.seniority,
+                detail.employment_type,
+                detail.industries,
+                detail.job_function,
+                when,
+                portal,
+                job_id,
+            ),
+        )
+
+    def record_detail_failure(self, portal: str, job_id: str) -> None:
+        self._conn.execute(
+            "UPDATE roles SET detail_attempts = detail_attempts + 1 "
+            "WHERE portal = ? AND job_id = ?",
+            (portal, job_id),
+        )
 
     def fetch_summary(self) -> list[FetchDay]:
         """Roles per IST fetch day and current status, newest day first.
@@ -519,3 +633,142 @@ class Store:
         cutoff = to_iso((now or now_ist()) - timedelta(days=retention_days))
         cursor = self._conn.execute("DELETE FROM skipped_titles WHERE fetched_on < ?", (cutoff,))
         return cursor.rowcount
+
+    # ---- CV, embeddings and scores -----------------------------------------------------------
+
+    def get_cv(self) -> Cv | None:
+        row = self._conn.execute("SELECT * FROM cv WHERE id = 1").fetchone()
+        if row is None:
+            return None
+        return Cv(row["filename"], row["text"], row["sha"], row["uploaded_on"])
+
+    def get_cv_chunks(self) -> list[tuple[str, str]]:
+        """(text, text hash) of the CV's chunks, in CV order."""
+        rows = self._conn.execute("SELECT text, text_hash FROM cv_chunks ORDER BY position")
+        return [(r["text"], r["text_hash"]) for r in rows]
+
+    def save_cv(self, cv: Cv, chunks: Sequence[tuple[str, str]]) -> None:
+        """Replace the CV and its chunks. Vectors of chunks that no longer exist are dropped."""
+        with self.transaction():
+            old = {text_hash for _, text_hash in self.get_cv_chunks()}
+            self._conn.execute("DELETE FROM cv_chunks")
+            self._conn.execute(
+                "INSERT INTO cv (id, filename, text, sha, uploaded_on) VALUES (1, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET filename = excluded.filename, "
+                "text = excluded.text, sha = excluded.sha, uploaded_on = excluded.uploaded_on",
+                (cv.filename, cv.text, cv.sha, cv.uploaded_on),
+            )
+            self._conn.executemany(
+                "INSERT INTO cv_chunks (position, text, text_hash) VALUES (?, ?, ?)",
+                [(i, text, text_hash) for i, (text, text_hash) in enumerate(chunks)],
+            )
+            gone = sorted(old - {text_hash for _, text_hash in chunks})
+            for start in range(0, len(gone), _IN_CHUNK):
+                part = gone[start : start + _IN_CHUNK]
+                marks = ",".join("?" * len(part))
+                self._conn.execute(f"DELETE FROM embeddings WHERE text_hash IN ({marks})", part)
+
+    def get_embeddings(self, hashes: Iterable[str], space: str) -> dict[str, bytes]:
+        wanted = list(dict.fromkeys(hashes))
+        found: dict[str, bytes] = {}
+        for start in range(0, len(wanted), _IN_CHUNK):
+            part = wanted[start : start + _IN_CHUNK]
+            marks = ",".join("?" * len(part))
+            rows = self._conn.execute(
+                f"SELECT text_hash, vector FROM embeddings WHERE space = ? "
+                f"AND text_hash IN ({marks})",
+                [space, *part],
+            )
+            found.update({r["text_hash"]: bytes(r["vector"]) for r in rows})
+        return found
+
+    def save_embeddings(self, space: str, vectors: Mapping[str, bytes]) -> None:
+        with self.transaction():
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO embeddings (text_hash, space, vector) VALUES (?, ?, ?)",
+                [(h, space, blob) for h, blob in vectors.items()],
+            )
+
+    def get_scores(self) -> dict[str, RoleScore]:
+        rows = self._conn.execute("SELECT * FROM role_scores").fetchall()
+        return {score.key: score for score in map(_role_score, rows)}
+
+    def save_score(self, score: RoleScore) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO role_scores (portal, job_id, keyword_raw, semantic_raw, "
+            "chunks, inputs, scored_on, run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                score.portal,
+                score.job_id,
+                score.keyword_raw,
+                score.semantic_raw,
+                score.chunks,
+                score.inputs,
+                score.scored_on,
+                score.run_id,
+            ),
+        )
+
+    # ---- scoring runs -------------------------------------------------------------------------
+
+    def start_scoring_run(self, trigger: str, *, when: str) -> int:
+        cursor = self._conn.execute(
+            "INSERT INTO scoring_runs (started_on, trigger, status) VALUES (?, ?, 'running')",
+            (when, trigger),
+        )
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
+
+    def update_scoring_run(
+        self,
+        run_id: int,
+        counters: Mapping[str, int],
+        *,
+        excluded_by_reason: Mapping[str, int] | None = None,
+    ) -> None:
+        unknown = set(counters) - SCORING_COUNTERS
+        if unknown:
+            raise StoreError(f"unknown scoring counter: {sorted(unknown)[0]}")
+        assignments = [f"{name} = ?" for name in counters]
+        params: list[object] = list(counters.values())
+        if excluded_by_reason is not None:
+            assignments.append("excluded_by_reason = ?")
+            params.append(json.dumps(dict(excluded_by_reason), sort_keys=True))
+        if assignments:
+            self._conn.execute(
+                f"UPDATE scoring_runs SET {', '.join(assignments)} WHERE id = ?", [*params, run_id]
+            )
+
+    def finish_scoring_run(self, run_id: int, status: str, note: str, *, when: str) -> None:
+        if status not in SCORING_STATUSES or status == "running":
+            raise StoreError(f"invalid scoring run status: {status!r}")
+        self._conn.execute(
+            "UPDATE scoring_runs SET status = ?, note = ?, finished_on = ? WHERE id = ?",
+            (status, note, when, run_id),
+        )
+
+    def fail_stale_scoring_runs(self, *, when: str) -> int:
+        cursor = self._conn.execute(
+            "UPDATE scoring_runs SET status = 'failed', finished_on = ?, "
+            "note = 'Interrupted: process ended without finishing' WHERE status = 'running'",
+            (when,),
+        )
+        return cursor.rowcount
+
+    def get_scoring_run(self, run_id: int) -> ScoringRun | None:
+        row = self._conn.execute("SELECT * FROM scoring_runs WHERE id = ?", (run_id,)).fetchone()
+        return None if row is None else _scoring_run(row)
+
+    def list_scoring_runs(self, limit: int = 10) -> list[ScoringRun]:
+        rows = self._conn.execute(
+            "SELECT * FROM scoring_runs ORDER BY started_on DESC, id DESC LIMIT ?", (limit,)
+        )
+        return [_scoring_run(r) for r in rows]
+
+    def texts_embedded_since(self, since: str) -> int:
+        """Texts sent to the embedding service in runs that started at or after `since`."""
+        row = self._conn.execute(
+            "SELECT COALESCE(SUM(texts_embedded), 0) FROM scoring_runs WHERE started_on >= ?",
+            (since,),
+        ).fetchone()
+        return int(row[0])

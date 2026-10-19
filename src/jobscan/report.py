@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import IO, TextIO
 
+from .models import ScoringRun
 from .timeutil import format_display, now_ist, to_iso
 
 
@@ -35,3 +36,27 @@ class Reporter:
 def log_name(started: str) -> str:
     """File name for a run log, from an ISO timestamp: 2026-10-15T09-05-00.log."""
     return started[:19].replace(":", "-") + ".log"
+
+
+def scoring_summary(run: ScoringRun, *, daily_used: int, daily_limit: int) -> list[str]:
+    """Terminal lines for a finished scoring run: what was scored, skipped and spent."""
+    lines = [
+        f"Scoring run #{run.id} {run.status}: {run.scored} scored "
+        f"({run.strong} strong, {run.partial} partial, {run.weak} weak), {run.failed} not scored"
+    ]
+    skipped = [f"{n} {reason}" for reason, n in sorted(run.excluded_by_reason.items())]
+    lines.append(
+        f"  Skipped: {run.excluded} excluded by rule"
+        + (f" ({', '.join(skipped)})" if skipped else "")
+        + f", {run.no_description} without a description"
+    )
+    if run.requests or run.texts_cached:
+        basis = "reported" if run.tokens_reported else "estimated"
+        lines.append(
+            f"  Embeddings: {run.texts_embedded} texts in {run.requests} requests "
+            f"({run.texts_cached} reused), {run.tokens} tokens {basis}; "
+            f"{daily_used} of {daily_limit} texts used in the last 24 hours"
+        )
+    if run.note:
+        lines.append(f"  Note: {run.note}")
+    return lines

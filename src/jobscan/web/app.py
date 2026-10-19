@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import math
+import os
 import secrets
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from typing import Any
 from urllib.parse import urlparse
 
@@ -21,11 +22,31 @@ from flask import (
 )
 from werkzeug.wrappers import Response as WerkzeugResponse
 
-from ..config import Config, ConfigError
+from ..config import LIST_SETTINGS, Config, ConfigError
+from ..cv import MAX_UPLOAD_BYTES, CvError, extract_text, sha_of
+from ..embeddings import API_KEY_ENV, Embedder
+from ..fit_filters import FitResult, FitRules, evaluate
 from ..matching import MATCH_MODES
-from ..models import SORTED_STATUSES, STATUSES, Role, RoleFilter
+from ..models import SORTED_STATUSES, STATUSES, Cv, Role, RoleFilter
+from ..scoring import (
+    DAILY_WINDOW,
+    TRIGGER_ROLE,
+    Scorer,
+    ScoringUnavailable,
+    cv_chunks,
+    gemini_from_env,
+    plan_scoring,
+)
 from ..store import Store, StoreError
-from ..timeutil import format_display, has_time_of_day, is_day, now_ist, weekday_short
+from ..timeutil import (
+    format_display,
+    from_iso,
+    has_time_of_day,
+    is_day,
+    now_ist,
+    to_iso,
+    weekday_short,
+)
 from .forms import (
     NEW_PHRASE_ROWS,
     parse_config_form,
@@ -33,12 +54,32 @@ from .forms import (
     roles_to_csv,
     safe_next,
 )
+from .scores import ScoreView, score_views
 
 PAGE_SIZE = 100
+FIT_CHOICES = ("eligible", "excluded")
+SCORE_CHOICES = ("strong", "partial", "weak", "unscored")
+SORT_CHOICES = ("score",)
+SCORE_WAIT_SECONDS = 15.0  # the app handles one request at a time, so a button must not wait long
+TRIGGER_LABELS = {"scan": "After a scan", "manual": "jobscan score", "role": "Score this role"}
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]", "::1"})
 SAFE_SITES = frozenset({"same-origin", "none"})
 
 # (field, label, hint) in the order they appear on the Config page.
+GROUP_INFO = {
+    "Scoring": (
+        "Scores are saved as raw keyword and meaning values. The weights, floors and bands here "
+        "apply as soon as you save and refresh, with no new run. Chunk weights, top matches, "
+        "chunk size and the chunk cap change the saved values, so roles are re-scored at the "
+        "next scan or jobscan score, using stored embeddings (no new API calls)."
+    ),
+    "Fit filters": (
+        "Fit filters apply immediately. Save, then refresh the Roles tab and every role is "
+        "re-checked against these values. No scan is needed, and nothing is stored or hidden. "
+        "Search and pacing settings still apply from the next scan."
+    ),
+}
+
 SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
     (
         "Search",
@@ -82,6 +123,159 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
         ),
     ),
     (
+        "Job descriptions",
+        (
+            (
+                "detail_max_per_run",
+                "Descriptions to fetch per scan",
+                "One extra request each. 0 turns description fetching off",
+            ),
+            (
+                "detail_max_age_days",
+                "Only for roles fetched in the last (days)",
+                "Older roles without a description are left alone",
+            ),
+        ),
+    ),
+    (
+        "Fit filters",
+        (
+            (
+                "fit_recency_days",
+                "Only roles fetched in the last (days)",
+                "Older roles are tagged Excluded: recency",
+            ),
+            (
+                "fit_min_years",
+                "Minimum years of experience asked",
+                "Roles asking for fewer are excluded. 0 turns it off. Roles naming no years stay",
+            ),
+            (
+                "fit_junior_words",
+                "Junior words in the title",
+                "Comma separated. Associate Director and similar senior titles are not caught",
+            ),
+            (
+                "fit_junior_levels",
+                "Junior LinkedIn levels",
+                "Comma separated, matched against the Seniority level shown on the role",
+            ),
+            (
+                "fit_excluded_companies",
+                "Excluded companies",
+                "Comma separated. Amazon also catches Amazon Development Centre",
+            ),
+            (
+                "fit_skip_statuses",
+                "Skip roles with these statuses",
+                "Comma separated, from the status list",
+            ),
+            (
+                "fit_deny_keywords",
+                "Deny keywords in the title",
+                "Comma separated. Whole words or phrases, title only",
+            ),
+        ),
+    ),
+    (
+        "Scoring",
+        (
+            (
+                "score_after_scan",
+                "Score after each scan",
+                "1 scores new roles at the end of a scan, 0 only on demand",
+            ),
+            (
+                "score_weight_keyword",
+                "Keyword share of the score (%)",
+                "The rest is the meaning (embedding) score. 0 to 100",
+            ),
+            (
+                "score_weight_requirement",
+                "Chunk weight: requirements",
+                "Matches on requirement text count this much",
+            ),
+            (
+                "score_weight_responsibility",
+                "Chunk weight: responsibilities",
+                "Also used for text before any heading",
+            ),
+            (
+                "score_weight_company",
+                "Chunk weight: company text",
+                "0 skips company text. Above 0 embeds it too",
+            ),
+            (
+                "score_top_k",
+                "Top CV matches per chunk",
+                "1 uses only the closest CV chunk. 2 or 3 averages the closest few",
+            ),
+            (
+                "score_chunk_words",
+                "Target chunk size (words)",
+                "Neighbouring bullets are packed to about this size. Smaller means more API calls",
+            ),
+            ("score_max_chunks", "Most chunks per role", "Requirement chunks are kept first"),
+            (
+                "score_kw_floor",
+                "Keyword coverage worth 0",
+                "Raw coverage at or below this scores 0",
+            ),
+            (
+                "score_kw_ceiling",
+                "Keyword coverage worth 100",
+                "Raw coverage at or above this scores 100",
+            ),
+            (
+                "score_sem_floor",
+                "Similarity worth 0",
+                "Raw cosine similarity at or below this scores 0",
+            ),
+            (
+                "score_sem_ceiling",
+                "Similarity worth 100",
+                "Raw cosine similarity at or above this scores 100",
+            ),
+            ("score_strong_min", "Strong fit from", "Scores at or above this are Strong"),
+            (
+                "score_partial_min",
+                "Partial fit from",
+                "Scores from here up to Strong are Partial, below are Weak",
+            ),
+        ),
+    ),
+    (
+        "Embeddings (Gemini)",
+        (
+            (
+                "embed_model",
+                "Model",
+                "Changing it re-embeds everything. Vectors of different models are never mixed",
+            ),
+            (
+                "embed_dims",
+                "Vector size",
+                "Numbers kept per vector (768 of 3072). Changing it re-embeds",
+            ),
+            ("embed_batch_size", "Texts per request", "Up to 100"),
+            (
+                "embed_texts_per_minute",
+                "Texts per minute",
+                "Free tier shows 100 requests per minute; kept below it",
+            ),
+            (
+                "embed_tokens_per_minute",
+                "Tokens per minute",
+                "Free tier shows 30,000; kept below it",
+            ),
+            (
+                "embed_daily_limit",
+                "Texts per 24 hours",
+                "Free tier shows 1,000 requests a day. Counted per text to be safe",
+            ),
+        ),
+    ),
+    (
         "Runs and retention",
         (
             ("min_gap_between_runs_minutes", "Minimum gap between runs (min)", "--force overrides"),
@@ -103,9 +297,11 @@ def create_app(
     *,
     secret_key: str | None = None,
     allowed_hosts: Collection[str] = LOOPBACK_HOSTS,
+    make_embedder: Callable[[Config], Embedder] = gemini_from_env,
 ) -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = secret_key or secrets.token_hex(32)
+    app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES + 512 * 1024  # the file plus form fields
     allowed = frozenset(h.lower() for h in allowed_hosts)
 
     # ---- request guards -------------------------------------------------------------------
@@ -136,6 +332,7 @@ def create_app(
     @app.errorhandler(400)
     @app.errorhandler(403)
     @app.errorhandler(404)
+    @app.errorhandler(413)
     def http_error(error: Any) -> tuple[str, int]:
         code = getattr(error, "code", 500)
         message = getattr(error, "description", "")
@@ -150,6 +347,18 @@ def create_app(
     @app.template_filter("weekday")
     def weekday(day: str) -> str:
         return weekday_short(day)
+
+    @app.template_filter("duration")
+    def duration(run: Any) -> str:
+        if not run.finished_on:
+            return "running"
+        seconds = round((from_iso(run.finished_on) - from_iso(run.started_on)).total_seconds())
+        minutes, secs = divmod(seconds, 60)
+        return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+
+    @app.template_filter("trigger")
+    def trigger(value: str) -> str:
+        return TRIGGER_LABELS.get(value, value)
 
     @app.template_filter("ist_date")
     def ist_date(value: str | None) -> str:
@@ -183,6 +392,9 @@ def create_app(
         query = args.get("q", "").strip()
         dup = args.get("dup", "") == "1"
         fetched = args.get("fetched", "")
+        fit = args.get("fit", "")
+        score = args.get("score", "")
+        sort = args.get("sort", "")
         flt = RoleFilter(
             query=query,
             status=status if status in STATUSES else None,
@@ -194,6 +406,9 @@ def create_app(
             "status": flt.status or "",
             "dup": "1" if dup else "",
             "fetched": flt.fetched_on or "",
+            "fit": fit if fit in FIT_CHOICES else "",
+            "score": score if score in SCORE_CHOICES else "",
+            "sort": sort if sort in SORT_CHOICES else "",
         }
         return flt, {k: v for k, v in shown.items() if v}
 
@@ -201,17 +416,60 @@ def create_app(
     def index() -> WerkzeugResponse:
         return redirect(url_for("roles"))
 
+    def current_config() -> Config:
+        try:
+            return Config.from_raw(store.get_config_raw())
+        except ConfigError:
+            return Config()
+
+    def fit_filtered(rows: list[Role], fit: str) -> tuple[list[Role], dict[str, FitResult]]:
+        """Fit result for every row, and only the rows matching the Fit choice when one is set."""
+        rules, now = FitRules.from_config(current_config()), now_ist()
+        results = {r.key: evaluate(r, rules, now) for r in rows}
+        if fit in FIT_CHOICES:
+            wanted = fit == "eligible"
+            rows = [r for r in rows if results[r.key].eligible == wanted]
+        return rows, results
+
+    def scored_filtered(
+        rows: list[Role], views: Mapping[str, ScoreView], choice: str, sort: str
+    ) -> list[Role]:
+        """Rows with the chosen score band (or none), best fit first when asked."""
+        if choice == "unscored":
+            rows = [r for r in rows if r.key not in views]
+        elif choice:
+            rows = [r for r in rows if r.key in views and views[r.key].band == choice]
+        if sort == "score":
+            # Stable, so equal scores keep the newest-first order. Unscored roles go last.
+            rows = sorted(rows, key=lambda r: -views[r.key].final if r.key in views else 1)
+        return rows
+
     @app.get("/roles")
     def roles() -> str:
         flt, active = read_filter(request.args)
-        total = store.count_roles(flt)
-        pages = max(1, math.ceil(total / PAGE_SIZE))
+        fit, score_choice, sort = (active.get(k, "") for k in ("fit", "score", "sort"))
         try:
             page = int(request.args.get("page", "1"))
         except ValueError:
             page = 1
-        page = min(max(page, 1), pages)
-        rows = store.list_roles(flt, limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE)
+        config, cv = current_config(), store.get_cv()
+        if fit or score_choice or sort:
+            # Fit and score are worked out in Python, so filter and sort first, then cut the page.
+            filtered, fits = fit_filtered(store.list_roles(flt), fit)
+            views = score_views(store, config, cv, filtered)
+            matching = scored_filtered(filtered, views, score_choice, sort)
+            total = len(matching)
+            pages = max(1, math.ceil(total / PAGE_SIZE))
+            page = min(max(page, 1), pages)
+            rows = matching[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
+        else:
+            total = store.count_roles(flt)
+            pages = max(1, math.ceil(total / PAGE_SIZE))
+            page = min(max(page, 1), pages)
+            rows, fits = fit_filtered(
+                store.list_roles(flt, limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE), fit
+            )
+            views = score_views(store, config, cv, rows)
         here_args: dict[str, Any] = {**active}
         if page > 1:
             here_args["page"] = page
@@ -219,6 +477,9 @@ def create_app(
         return render_template(
             "roles.html",
             roles=rows,
+            fits=fits,
+            scores=views,
+            has_cv=cv is not None,
             total=total,
             page=page,
             pages=pages,
@@ -256,6 +517,36 @@ def create_app(
         flash(error or f"{count} role(s) set to {status}.", "error" if error else "ok")
         return redirect(target)
 
+    def role_context(role: Role) -> dict[str, Any]:
+        config, cv = current_config(), store.get_cv()
+        return {
+            "role": role,
+            "fit": evaluate(role, FitRules.from_config(config), now_ist()),
+            "score": score_views(store, config, cv, [role]).get(role.key),
+            "has_cv": cv is not None,
+        }
+
+    def score_one(role: Role) -> tuple[str, ScoreView | None]:
+        """Score one role now, whatever its fit result. Returns a message and the new score."""
+        config = current_config()
+        scorer = Scorer(
+            store=store,
+            config=config,
+            make_embedder=make_embedder,
+            emit=lambda _line: None,
+            max_wait=SCORE_WAIT_SECONDS,
+        )
+        try:
+            run = scorer.run(TRIGGER_ROLE, only=[role])
+        except ScoringUnavailable:
+            return "Upload your CV on the CV page first.", None
+        if run.scored:
+            view = score_views(store, config, store.get_cv(), [role])[role.key]
+            return f"Scored {view.final} ({view.band} fit).", view
+        if run.no_description:
+            return "This role has no description yet, so there is nothing to score.", None
+        return run.note or "Could not score this role.", None
+
     @app.get("/roles/<portal>/<job_id>")
     def role_page(portal: str, job_id: str) -> str:
         role = store.get_role(portal, job_id)
@@ -265,7 +556,7 @@ def create_app(
         template = "_role_form.html" if request.args.get("partial") else "role.html"
         return render_template(
             template,
-            role=role,
+            **role_context(role),
             form=_role_values(role),
             errors={},
             next=safe_next(request.args.get("next"), url_for("roles")),
@@ -283,7 +574,11 @@ def create_app(
             template = "_role_form.html" if panel else "role.html"
             return (
                 render_template(
-                    template, role=role, form=dict(request.form), errors=errors, next=target
+                    template,
+                    **role_context(role),
+                    form=dict(request.form),
+                    errors=errors,
+                    next=target,
                 ),
                 400,
             )
@@ -302,10 +597,34 @@ def create_app(
         flash("Saved.", "ok")
         return redirect(target)
 
+    @app.post("/roles/<portal>/<job_id>/score")
+    def role_score(portal: str, job_id: str) -> WerkzeugResponse | tuple[Response, int] | Response:
+        role = store.get_role(portal, job_id)
+        if role is None:
+            abort(404, "Role not found")
+        message, view = score_one(role)
+        if request.headers.get("X-Panel") == "1":
+            if view is None:
+                return jsonify(message=message), 400
+            return jsonify(
+                message=message,
+                score={
+                    "final": view.final,
+                    "band": view.band,
+                    "detail": f"Keywords {view.keyword}, meaning {view.semantic}, "
+                    f"{view.chunks} chunks, scored {format_display(view.scored_on)}",
+                },
+            )
+        flash(message, "ok" if view else "error")
+        return redirect(safe_next(request.form.get("next"), url_for("roles")))
+
     @app.get("/export.csv")
     def export_csv() -> Response:
-        flt, _ = read_filter(request.args)
-        body = roles_to_csv(store.list_roles(flt))
+        flt, active = read_filter(request.args)
+        rows, _ = fit_filtered(store.list_roles(flt), active.get("fit", ""))
+        views = score_views(store, current_config(), store.get_cv(), rows)
+        rows = scored_filtered(rows, views, active.get("score", ""), active.get("sort", ""))
+        body = roles_to_csv(rows, views)
         stamp = now_ist().strftime("%Y-%m-%d_%H%M")
         return Response(
             body,
@@ -313,7 +632,71 @@ def create_app(
             headers={"Content-Disposition": f'attachment; filename="roles_{stamp}.csv"'},
         )
 
+    # ---- CV -------------------------------------------------------------------------------
+
+    def render_cv(error: str = "", status: int = 200) -> tuple[str, int]:
+        config, cv = current_config(), store.get_cv()
+        pending = plan_scoring(store, config, cv, now_ist()) if cv else None
+        return (
+            render_template(
+                "cv.html",
+                cv=cv,
+                words=len(cv.text.split()) if cv else 0,
+                chunks=[text for text, _ in store.get_cv_chunks()],
+                pending=len(pending.selected) if pending else 0,
+                key_set=bool(os.environ.get(API_KEY_ENV)),
+                key_name=API_KEY_ENV,
+                max_mb=MAX_UPLOAD_BYTES // (1024 * 1024),
+                error=error,
+            ),
+            status,
+        )
+
+    @app.get("/cv")
+    def cv_page() -> tuple[str, int]:
+        return render_cv()
+
+    @app.post("/cv")
+    def cv_upload() -> tuple[str, int] | WerkzeugResponse:
+        upload = request.files.get("cv")
+        if upload is None or not upload.filename:
+            return render_cv("Choose a file to upload.", 400)
+        name = os.path.basename(upload.filename.replace("\\", "/"))[:200]
+        try:
+            text = extract_text(name, upload.read(MAX_UPLOAD_BYTES + 1))
+            chunks = cv_chunks(text)
+        except CvError as exc:
+            return render_cv(str(exc), 400)
+        if not chunks:
+            return render_cv("No usable text was found in this file.", 400)
+        existing = store.get_cv()
+        if existing is not None and existing.sha == sha_of(text):
+            flash("This is the same CV as before, so nothing changed.", "ok")
+            return redirect(url_for("cv_page"))
+        cv = Cv(filename=name, text=text, sha=sha_of(text), uploaded_on=to_iso(now_ist()))
+        store.save_cv(cv, chunks)
+        waiting = len(plan_scoring(store, current_config(), cv, now_ist()).selected)
+        flash(
+            f"CV saved as {len(chunks)} chunks. {waiting} roles will be scored at the next scan, "
+            "or run jobscan score in a terminal to do it now.",
+            "ok",
+        )
+        return redirect(url_for("cv_page"))
+
     # ---- summary --------------------------------------------------------------------------
+
+    def scoring_context() -> dict[str, Any]:
+        config, cv = current_config(), store.get_cv()
+        history = store.list_scoring_runs(10)
+        waiting = plan_scoring(store, config, cv, now_ist()) if cv else None
+        return {
+            "cv": cv,
+            "score_runs": history,
+            "score_latest": history[0] if history else None,
+            "score_waiting": len(waiting.selected) if waiting else 0,
+            "daily_used": store.texts_embedded_since(to_iso(now_ist() - DAILY_WINDOW)),
+            "daily_limit": config.embed_daily_limit,
+        }
 
     @app.get("/summary")
     def summary() -> str:
@@ -326,6 +709,7 @@ def create_app(
             totals=totals,
             grand_total=sum(d.total for d in days),
             last_success=store.last_successful_run(),
+            **scoring_context(),
         )
 
     # ---- run log --------------------------------------------------------------------------
@@ -374,6 +758,8 @@ def create_app(
             render_template(
                 "config.html",
                 groups=SETTING_GROUPS,
+                group_info=GROUP_INFO,
+                list_settings=LIST_SETTINGS,
                 values=raw,
                 phrases=rows,
                 errors=errors,

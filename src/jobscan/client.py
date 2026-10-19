@@ -14,9 +14,11 @@ from typing import Protocol
 import requests
 
 from .config import Config
-from .parser import ParsedPage, has_job_urns, parse_page
+from .models import JobDetail
+from .parser import ParsedPage, has_job_urns, parse_detail, parse_page
 
 SEARCH_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+DETAIL_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
 PAGE_SIZE = 10
 STUB_MIN_BYTES = 20_000
 _META_REFRESH_RE = re.compile(r"<meta[^>]+http-equiv=[\"']?refresh", re.IGNORECASE)
@@ -45,6 +47,39 @@ class FetchResult:
 
 class PageFetcher(Protocol):
     def fetch_page(self, keyword: str, page_index: int) -> FetchResult: ...
+
+
+class DetailOutcome(enum.Enum):
+    OK = "ok"  # description found
+    NO_DESCRIPTION = "no_description"  # posting gone or page without a description
+    THROTTLED = "throttled"  # transient refusal or failure; try again later
+
+
+@dataclass(frozen=True)
+class DetailResult:
+    outcome: DetailOutcome
+    detail: JobDetail | None = None
+    note: str = ""
+
+
+class DetailFetcher(Protocol):
+    def fetch_detail(self, job_id: str) -> DetailResult: ...
+
+
+def classify_detail_response(status: int, body: str) -> DetailResult:
+    """Turn the HTTP status and body of a job posting page into an outcome."""
+    if status in (400, 404, 410):
+        return DetailResult(DetailOutcome.NO_DESCRIPTION, note=f"HTTP {status}")
+    if status in _THROTTLE_STATUSES or status >= 500:
+        return DetailResult(DetailOutcome.THROTTLED, note=f"HTTP {status}")
+    if status != 200:
+        return DetailResult(DetailOutcome.THROTTLED, note=f"unexpected HTTP {status}")
+    detail = parse_detail(body)
+    if detail is not None:
+        return DetailResult(DetailOutcome.OK, detail=detail)
+    if "decoratedJobPostingId" in body or "top-card-layout" in body:
+        return DetailResult(DetailOutcome.NO_DESCRIPTION, note="posting page without a description")
+    return DetailResult(DetailOutcome.THROTTLED, note="not a job posting page")
 
 
 def classify_response(status: int, body: str) -> FetchResult:
@@ -92,11 +127,13 @@ class LinkedInClient:
         session: requests.Session | None = None,
         *,
         base_url: str = SEARCH_URL,
+        detail_url: str = DETAIL_URL,
         timeout: float = 20.0,
     ) -> None:
         self._config = config
         self._session = session or requests.Session()
         self._base_url = base_url
+        self._detail_url = detail_url
         self._timeout = timeout
         self._session.headers.update(
             {
@@ -118,6 +155,20 @@ class LinkedInClient:
         except requests.RequestException as exc:
             return FetchResult(Outcome.THROTTLED, detail=f"network error: {type(exc).__name__}")
         return classify_response(response.status_code, body)
+
+    def fetch_detail(self, job_id: str) -> DetailResult:
+        try:
+            response = self._session.get(
+                self._detail_url.format(job_id=job_id),
+                timeout=self._timeout,
+                allow_redirects=False,
+            )
+            body = response.text
+        except requests.RequestException as exc:
+            return DetailResult(
+                DetailOutcome.THROTTLED, note=f"network error: {type(exc).__name__}"
+            )
+        return classify_detail_response(response.status_code, body)
 
     def close(self) -> None:
         self._session.close()

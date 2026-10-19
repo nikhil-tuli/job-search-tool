@@ -6,8 +6,35 @@
   <dt>Posted (IST)</dt><dd>{{ role | posted }}{% if role.raw_relative %} <span class="muted">(LinkedIn said "{{ role.raw_relative }}")</span>{% endif %}</dd>
   <dt>Fetched (IST)</dt><dd>{{ role.fetched_on | ist }}</dd>
   <dt>Matched phrase</dt><dd>{{ role.matched_phrase }}</dd>
+  {% if fit %}<dt>Fit filter</dt><dd>{% if fit.eligible %}Eligible{% else %}<span class="tag out">{{ fit.label }}</span><ul class="reasons">{% for reason in fit.reasons %}<li>{{ reason.detail }}</li>{% endfor %}</ul>{% endif %}</dd>{% endif %}
+  <dt>Fit score</dt>
+  <dd id="score-fact">
+    {% if score %}
+    <span class="band {{ score.band }}" data-score-band>{{ score.final }}</span> <span data-score-label>{{ score.band | capitalize }} fit</span>
+    <br><small data-score-detail>Keywords {{ score.keyword }}, meaning {{ score.semantic }}, {{ score.chunks }} chunks, scored {{ score.scored_on | ist }}</small>
+    {% if score.stale %}<br><small class="stale-note">Out of date: made with an earlier CV or settings. Run jobscan score.</small>{% endif %}
+    {% else %}
+    <span class="muted" data-score-label>Not scored</span>
+    {% endif %}
+    <form method="post" class="score-form" action="{{ url_for('role_score', portal=role.portal, job_id=role.job_id) }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <button type="submit" {% if not has_cv %}disabled title="Upload your CV on the CV page first"{% endif %}>{% if score %}Re-score this role{% else %}Score this role{% endif %}</button>
+      <span class="note" aria-live="polite"></span>
+    </form>
+  </dd>
   {% if role.possible_duplicate_of %}<dt>Possible duplicate of</dt><dd>{{ role.possible_duplicate_of }}</dd>{% endif %}
+  {% if role.seniority %}<dt>Seniority</dt><dd>{{ role.seniority }}</dd>{% endif %}
+  {% if role.employment_type %}<dt>Employment type</dt><dd>{{ role.employment_type }}</dd>{% endif %}
+  {% if role.job_function %}<dt>Job function</dt><dd>{{ role.job_function }}</dd>{% endif %}
+  {% if role.industries %}<dt>Industries</dt><dd>{{ role.industries }}</dd>{% endif %}
 </dl>
+
+<h2 class="sub">Job description</h2>
+{% if role.description %}
+<div class="desc" tabindex="0">{{ role.description }}</div>
+{% else %}
+<p class="muted">No description saved yet. It is fetched during a scan, for recent roles only.</p>
+{% endif %}
 
 <form method="post" class="edit" action="{{ url_for('role_save', portal=role.portal, job_id=role.job_id) }}">
   <input type="hidden" name="next" value="{{ next }}">

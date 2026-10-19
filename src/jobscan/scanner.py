@@ -6,9 +6,9 @@ import random
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from .client import PAGE_SIZE, FetchResult, Outcome, PageFetcher
+from .client import PAGE_SIZE, DetailFetcher, DetailOutcome, FetchResult, Outcome, PageFetcher
 from .config import Config
 from .matching import TitleMatcher, dup_key
 from .models import PORTAL_LINKEDIN, KeywordRecord, NewRole, PageStat
@@ -23,6 +23,7 @@ STOP_LAYOUT = "layout_changed"
 STOP_INTERRUPTED = "interrupted"
 
 _COMPLETED_STOPS = frozenset({STOP_END, STOP_EMPTY_PAGES, STOP_PAGE_CAP})
+_DETAIL_THROTTLES_BEFORE_STOP = 2
 
 
 class ScanSetupError(ValueError):
@@ -51,6 +52,7 @@ class Scanner:
         *,
         store: Store,
         fetcher: PageFetcher,
+        details: DetailFetcher | None = None,
         config: Config,
         emit: Callable[[str], None] = print,
         sleep: Callable[[float], None],
@@ -59,6 +61,7 @@ class Scanner:
     ) -> None:
         self._store = store
         self._fetcher = fetcher
+        self._details = details
         self._config = config
         self._emit = emit
         self._sleep = sleep
@@ -93,6 +96,7 @@ class Scanner:
         records: list[KeywordRecord] = []
         try:
             self._scan_keywords(run_id, keywords, matcher, records)
+            self._fetch_details(records)
         except KeyboardInterrupt:
             self._store.finish_run(run_id, RUN_FAILED, "Interrupted by user")
             raise
@@ -282,6 +286,56 @@ class Scanner:
             attempt += 1
             record.retries += 1
             self._wait(cfg.retry_wait_min, cfg.retry_wait_max, f"retry {attempt}/{cfg.retry_count}")
+
+    # ---- job descriptions ----------------------------------------------------------------
+
+    def _fetch_details(self, records: list[KeywordRecord]) -> None:
+        """Fetch the description of recent roles that do not have one yet.
+
+        A problem here never fails the scan: the roles are already saved, and a role that
+        could not be fetched is simply tried again on a later scan.
+        """
+        cfg = self._config
+        if self._details is None or cfg.detail_max_per_run <= 0:
+            return
+        if any(r.stopped_by in (STOP_ABORTED, STOP_LAYOUT) for r in records):
+            self._emit("Descriptions: skipped because the search was cut short")
+            return
+        since = to_iso(self._clock() - timedelta(days=cfg.detail_max_age_days))
+        pending = self._store.pending_details(since, cfg.detail_max_per_run)
+        if not pending:
+            return
+        self._emit(f"Descriptions: fetching {len(pending)} role(s)")
+        saved = failed = throttled_in_row = 0
+        failed_ids: set[str] = set()
+        stopped = False
+        for portal, job_id in pending:
+            self._wait(cfg.delay_seconds_min, cfg.delay_seconds_max, None)
+            result = self._details.fetch_detail(job_id)
+            if result.outcome is DetailOutcome.THROTTLED:
+                throttled_in_row += 1
+                self._emit(f"  description {job_id}: throttled ({result.note})")
+                if throttled_in_row >= _DETAIL_THROTTLES_BEFORE_STOP:
+                    stopped = True
+                    break
+                self._wait(cfg.retry_wait_min, cfg.retry_wait_max, "next description")
+                continue
+            throttled_in_row = 0
+            if result.outcome is DetailOutcome.OK and result.detail is not None:
+                self._store.save_detail(portal, job_id, result.detail, when=to_iso(self._clock()))
+                saved += 1
+            else:
+                self._store.record_detail_failure(portal, job_id)
+                failed += 1
+                failed_ids.add(job_id)
+                self._emit(f"  description {job_id}: none ({result.note})")
+        waiting = self._store.pending_details(since, 1_000_000)
+        left = sum(1 for _, job_id in waiting if job_id not in failed_ids)
+        self._emit(f"Descriptions: {saved} saved, {failed} without one, {left} left for later")
+        if stopped:
+            self._warnings.append(
+                f"Descriptions stopped after repeated throttling ({left} left for the next scan)"
+            )
 
     # ---- results ------------------------------------------------------------------------
 

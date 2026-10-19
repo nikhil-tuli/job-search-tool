@@ -7,10 +7,12 @@ is rejected with a clear message instead of failing in the middle of a run.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
 
 from .matching import MATCH_MODES
+from .models import STATUSES
 
 VERIFIED_WINDOW_SECONDS = 86_400  # Only this value has been confirmed against LinkedIn.
 
@@ -41,6 +43,40 @@ class Config:
     abort_after_consecutive_throttles: int = 5
     min_gap_between_runs_minutes: int = 60
     skipped_titles_retention_days: int = 7
+    detail_max_per_run: int = 60
+    detail_max_age_days: int = 3
+    fit_recency_days: int = 1
+    fit_min_years: int = 3
+    fit_junior_words: str = "intern, internship, junior, jr, trainee, associate"
+    fit_junior_levels: str = "Internship, Entry level"
+    fit_excluded_companies: str = "Amazon, Intuit"
+    fit_skip_statuses: str = "Applied, Closed, Skipped, Not relevant"
+    fit_deny_keywords: str = "sales, warehouse, SAP functional"
+    score_after_scan: int = 1
+    score_weight_keyword: int = 40
+    score_weight_requirement: float = 2.0
+    score_weight_responsibility: float = 1.0
+    score_weight_company: float = 0.0
+    score_top_k: int = 1
+    score_max_chunks: int = 40
+    score_chunk_words: int = 40
+    score_kw_floor: float = 0.08
+    score_kw_ceiling: float = 0.20
+    score_sem_floor: float = 0.50
+    score_sem_ceiling: float = 0.85
+    score_strong_min: int = 70
+    score_partial_min: int = 50
+    embed_model: str = "gemini-embedding-001"
+    embed_dims: int = 768
+    embed_batch_size: int = 20
+    embed_texts_per_minute: int = 90
+    embed_tokens_per_minute: int = 25_000
+    embed_daily_limit: int = 1_000
+
+    @property
+    def embed_space(self) -> str:
+        """Names the vector space. Vectors from different spaces are never compared."""
+        return f"{self.embed_model}@{self.embed_dims}"
 
     @property
     def window_is_verified(self) -> bool:
@@ -73,6 +109,14 @@ class Config:
                 and low_value > high_value
             ):
                 errors[low_key] = f"must not exceed {high_key}"
+        for low_key, high_key in _ORDERED_PAIRS:
+            low_value, high_value = values.get(low_key), values.get(high_key)
+            if (
+                isinstance(low_value, int | float)
+                and isinstance(high_value, int | float)
+                and low_value >= high_value
+            ):
+                errors[low_key] = f"must be below {high_key}"
         if errors:
             raise ConfigError(errors)
         return cls(**values)  # type: ignore[arg-type]
@@ -93,7 +137,47 @@ _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
     "abort_after_consecutive_throttles": (int, 1, 50),
     "min_gap_between_runs_minutes": (int, 0, 1_440),
     "skipped_titles_retention_days": (int, 1, 365),
+    "detail_max_per_run": (int, 0, 500),
+    "detail_max_age_days": (int, 1, 30),
+    "fit_recency_days": (int, 1, 365),
+    "fit_min_years": (int, 0, 30),
+    "score_after_scan": (int, 0, 1),
+    "score_weight_keyword": (int, 0, 100),
+    "score_weight_requirement": (float, 0, 10),
+    "score_weight_responsibility": (float, 0, 10),
+    "score_weight_company": (float, 0, 10),
+    "score_top_k": (int, 1, 5),
+    "score_max_chunks": (int, 5, 200),
+    "score_chunk_words": (int, 10, 100),
+    "score_kw_floor": (float, 0, 1),
+    "score_kw_ceiling": (float, 0, 1),
+    "score_sem_floor": (float, 0, 1),
+    "score_sem_ceiling": (float, 0, 1),
+    "score_strong_min": (int, 1, 100),
+    "score_partial_min": (int, 1, 100),
+    "embed_dims": (int, 128, 3072),
+    "embed_batch_size": (int, 1, 100),
+    "embed_texts_per_minute": (int, 1, 10_000),
+    "embed_tokens_per_minute": (int, 1_000, 10_000_000),
+    "embed_daily_limit": (int, 1, 1_000_000),
 }
+# Settings holding a comma-separated list. They are stored tidy: "a, b, c".
+LIST_SETTINGS = (
+    "fit_junior_words",
+    "fit_junior_levels",
+    "fit_excluded_companies",
+    "fit_skip_statuses",
+    "fit_deny_keywords",
+)
+MAX_LIST_ITEMS = 100
+MAX_LIST_ITEM_CHARS = 80
+# (low, high): low must stay strictly below high.
+_ORDERED_PAIRS = (
+    ("score_kw_floor", "score_kw_ceiling"),
+    ("score_sem_floor", "score_sem_ceiling"),
+    ("score_partial_min", "score_strong_min"),
+)
+_MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 _RANGE_PAIRS = (
     ("delay_seconds_min", "delay_seconds_max"),
     ("keyword_pause_min", "keyword_pause_max"),
@@ -137,3 +221,45 @@ def _parse_text_fields(
         values["geo_id"] = geo_id
     else:
         errors["geo_id"] = "must be digits only"
+
+    model = raw.get("embed_model", defaults.embed_model).strip()
+    if _MODEL_NAME.fullmatch(model):
+        values["embed_model"] = model
+    else:
+        errors["embed_model"] = "letters, digits, dots, dashes and underscores only"
+
+    for key in LIST_SETTINGS:
+        try:
+            items = split_list(raw.get(key, getattr(defaults, key)))
+            if key == "fit_skip_statuses":
+                items = _canonical_statuses(items)
+            _check_list(items)
+        except ValueError as exc:
+            errors[key] = str(exc)
+        else:
+            values[key] = ", ".join(items)
+
+
+def split_list(text: str) -> tuple[str, ...]:
+    """Items of a comma or line separated list: trimmed, no blanks, no repeats (any case)."""
+    items: dict[str, str] = {}
+    for part in text.replace("\n", ",").split(","):
+        item = " ".join(part.split())
+        if item:
+            items.setdefault(item.casefold(), item)
+    return tuple(items.values())
+
+
+def _check_list(items: tuple[str, ...]) -> None:
+    if len(items) > MAX_LIST_ITEMS:
+        raise ValueError(f"at most {MAX_LIST_ITEMS} items")
+    if any(len(item) > MAX_LIST_ITEM_CHARS for item in items):
+        raise ValueError(f"each item must be at most {MAX_LIST_ITEM_CHARS} characters")
+
+
+def _canonical_statuses(items: tuple[str, ...]) -> tuple[str, ...]:
+    by_name = {status.casefold(): status for status in STATUSES}
+    unknown = [item for item in items if item.casefold() not in by_name]
+    if unknown:
+        raise ValueError(f"not a status: {', '.join(unknown)}")
+    return tuple(by_name[item.casefold()] for item in items)

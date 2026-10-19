@@ -1,5 +1,49 @@
 {% extends "base.html" %}
-{% block title %}Summary{% endblock %}
+{% block title %}Summary
+<h2>Scoring</h2>
+{% if not cv %}
+<p class="muted">No CV uploaded. <a href="{{ url_for('cv_page') }}">Upload one</a> to rank roles by fit.</p>
+{% else %}
+<p class="muted">
+  {% if score_latest %}
+  Last scored {{ (score_latest.finished_on or score_latest.started_on) | ist }} IST
+  ({{ score_latest.trigger | trigger }}, <span class="status {{ score_latest.status }}">{{ score_latest.status }}</span>, {{ score_latest | duration }}).
+  {% else %}Nothing scored yet.{% endif %}
+  {% if score_waiting %}{{ score_waiting }} roles waiting: run <code>jobscan score</code> or wait for the next scan.{% else %}No roles waiting.{% endif %}
+  Embedding use in the last 24 hours: {{ '{:,}'.format(daily_used) }} of {{ '{:,}'.format(daily_limit) }} texts.
+</p>
+{% if score_latest %}
+<div class="scroll-x">
+<table class="pivot scoring">
+  <thead>
+    <tr>
+      <th>Run</th><th>Started (IST)</th><th>Trigger</th><th>Status</th><th>Took</th>
+      <th class="num">Considered</th><th class="num">Excluded</th><th class="num">No description</th>
+      <th class="num">Scored</th><th class="num">Strong</th><th class="num">Partial</th><th class="num">Weak</th><th class="num">Not scored</th>
+      <th class="num">Texts</th><th class="num">Reused</th><th class="num">Requests</th><th class="num">Tokens</th><th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in score_runs %}
+    <tr>
+      <td>#{{ r.id }}</td><td class="nw">{{ r.started_on | ist }}</td><td class="nw">{{ r.trigger | trigger }}</td>
+      <td><span class="status {{ r.status }}">{{ r.status }}</span></td><td class="nw">{{ r | duration }}</td>
+      <td class="num">{{ r.considered }}</td>
+      <td class="num" {% if r.excluded_by_reason %}title="{% for reason, n in r.excluded_by_reason.items() | sort %}{{ n }} {{ reason }}{% if not loop.last %}, {% endif %}{% endfor %}"{% endif %}>{{ r.excluded }}</td>
+      <td class="num">{{ r.no_description }}</td>
+      <td class="num">{{ r.scored }}</td><td class="num">{{ r.strong }}</td><td class="num">{{ r.partial }}</td><td class="num">{{ r.weak }}</td><td class="num">{{ r.failed }}</td>
+      <td class="num">{{ r.texts_embedded }}</td><td class="num">{{ r.texts_cached }}</td><td class="num">{{ r.requests }}</td>
+      <td class="num" {% if not r.tokens_reported and r.tokens %}title="Estimated: the service did not report usage"{% endif %}>{{ '{:,}'.format(r.tokens) }}{% if not r.tokens_reported and r.tokens %}*{% endif %}</td>
+      <td class="muted">{{ r.note }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted">* tokens are estimated when the service does not report them. Hover Excluded for the reasons.</p>
+{% endif %}
+{% endif %}
+{% endblock %}
 {% block content %}
 <div class="head">
   <h1>Summary <span class="muted">{{ grand_total }} roles</span></h1>
@@ -44,5 +88,49 @@
 </div>
 {% else %}
 <p class="empty">No roles yet. Run <code>jobscan scan</code> in a terminal to fetch some.</p>
+{% endif %}
+
+<h2>Scoring</h2>
+{% if not cv %}
+<p class="muted">No CV uploaded. <a href="{{ url_for('cv_page') }}">Upload one</a> to rank roles by fit.</p>
+{% else %}
+<p class="muted">
+  {% if score_latest %}
+  Last scored {{ (score_latest.finished_on or score_latest.started_on) | ist }} IST
+  ({{ score_latest.trigger | trigger }}, <span class="status {{ score_latest.status }}">{{ score_latest.status }}</span>, {{ score_latest | duration }}).
+  {% else %}Nothing scored yet.{% endif %}
+  {% if score_waiting %}{{ score_waiting }} roles waiting: run <code>jobscan score</code> or wait for the next scan.{% else %}No roles waiting.{% endif %}
+  Embedding use in the last 24 hours: {{ '{:,}'.format(daily_used) }} of {{ '{:,}'.format(daily_limit) }} texts.
+</p>
+{% if score_latest %}
+<div class="scroll-x">
+<table class="pivot scoring">
+  <thead>
+    <tr>
+      <th>Run</th><th>Started (IST)</th><th>Trigger</th><th>Status</th><th>Took</th>
+      <th class="num">Considered</th><th class="num">Excluded</th><th class="num">No description</th>
+      <th class="num">Scored</th><th class="num">Strong</th><th class="num">Partial</th><th class="num">Weak</th><th class="num">Not scored</th>
+      <th class="num">Texts</th><th class="num">Reused</th><th class="num">Requests</th><th class="num">Tokens</th><th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in score_runs %}
+    <tr>
+      <td>#{{ r.id }}</td><td class="nw">{{ r.started_on | ist }}</td><td class="nw">{{ r.trigger | trigger }}</td>
+      <td><span class="status {{ r.status }}">{{ r.status }}</span></td><td class="nw">{{ r | duration }}</td>
+      <td class="num">{{ r.considered }}</td>
+      <td class="num" {% if r.excluded_by_reason %}title="{% for reason, n in r.excluded_by_reason.items() | sort %}{{ n }} {{ reason }}{% if not loop.last %}, {% endif %}{% endfor %}"{% endif %}>{{ r.excluded }}</td>
+      <td class="num">{{ r.no_description }}</td>
+      <td class="num">{{ r.scored }}</td><td class="num">{{ r.strong }}</td><td class="num">{{ r.partial }}</td><td class="num">{{ r.weak }}</td><td class="num">{{ r.failed }}</td>
+      <td class="num">{{ r.texts_embedded }}</td><td class="num">{{ r.texts_cached }}</td><td class="num">{{ r.requests }}</td>
+      <td class="num" {% if not r.tokens_reported and r.tokens %}title="Estimated: the service did not report usage"{% endif %}>{{ '{:,}'.format(r.tokens) }}{% if not r.tokens_reported and r.tokens %}*{% endif %}</td>
+      <td class="muted">{{ r.note }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted">* tokens are estimated when the service does not report them. Hover Excluded for the reasons.</p>
+{% endif %}
 {% endif %}
 {% endblock %}

@@ -84,6 +84,17 @@ class NewRole:
     run_id: int
 
 
+@dataclass(frozen=True)
+class JobDetail:
+    """What a job's own page adds: the description text and LinkedIn's criteria list."""
+
+    description: str
+    seniority: str | None = None
+    employment_type: str | None = None
+    industries: str | None = None
+    job_function: str | None = None
+
+
 @dataclass
 class KeywordRecord:
     """Counters for one keyword search within a run (mutable while the search runs)."""
@@ -149,6 +160,11 @@ class Role:
     raw_datetime: str | None
     raw_relative: str | None
     first_run_id: int | None
+    description: str | None = None
+    seniority: str | None = None
+    employment_type: str | None = None
+    industries: str | None = None
+    job_function: str | None = None
 
     @property
     def key(self) -> str:
@@ -201,3 +217,56 @@ class SkippedTitle:
     title: str
     company: str
     fetched_on: str
+
+
+@dataclass(frozen=True)
+class Cv:
+    """The uploaded CV: its extracted text, and a fingerprint that names this exact version."""
+
+    filename: str
+    text: str
+    sha: str
+    uploaded_on: str
+
+
+@dataclass(frozen=True)
+class RoleScore:
+    """What scoring saved for one role. Raw values only: weights and bands apply on read."""
+
+    portal: str
+    job_id: str
+    keyword_raw: float  # share of the role's keywords the CV covers, 0 to 1
+    semantic_raw: float  # weighted best-match cosine similarity, about 0 to 1
+    chunks: int
+    inputs: str  # fingerprint of everything the score was computed from
+    scored_on: str
+    run_id: int | None
+
+    @property
+    def key(self) -> str:
+        return f"{self.portal}|{self.job_id}"
+
+
+@dataclass(frozen=True)
+class ScoringRun:
+    id: int
+    started_on: str
+    finished_on: str | None
+    trigger: str
+    status: str
+    considered: int
+    excluded: int
+    excluded_by_reason: dict[str, int]
+    no_description: int
+    selected: int
+    scored: int
+    strong: int
+    partial: int
+    weak: int
+    failed: int
+    texts_embedded: int
+    texts_cached: int
+    requests: int
+    tokens: int
+    tokens_reported: bool
+    note: str

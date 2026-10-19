@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 
-from .models import Card
+from .models import Card, JobDetail
 
 JOB_URN_RE = re.compile(r"jobPosting:(\d+)")
 JOB_LINK_TEMPLATE = "https://www.linkedin.com/jobs/view/{job_id}"
@@ -58,3 +58,52 @@ def parse_page(html: str) -> ParsedPage:
             )
         )
     return ParsedPage(cards=cards, malformed=malformed)
+
+
+MAX_DESCRIPTION_CHARS = 30_000
+_CRITERIA_FIELDS = {
+    "seniority level": "seniority",
+    "employment type": "employment_type",
+    "industries": "industries",
+    "job function": "job_function",
+}
+_LIST_TAGS = ("ul", "ol")
+_BLOCK_TAGS = ("p", "div", "h1", "h2", "h3", "h4", "h5", "h6")
+
+
+def _description_text(markup: Tag) -> str:
+    """Plain text of a description block, keeping line breaks and bullet points."""
+    for br in markup.find_all("br"):
+        br.replace_with("\n")
+    for item in markup.find_all("li"):
+        item.insert(0, "\n- ")
+    for block in markup.find_all(_LIST_TAGS):
+        block.insert(0, "\n")
+        block.append("\n")
+    for block in markup.find_all(_BLOCK_TAGS):
+        block.insert(0, "\n\n")
+        block.append("\n\n")
+    lines = [" ".join(line.split()) for line in markup.get_text().splitlines()]
+    text = "\n".join(lines).strip()
+    while "\n\n\n" in text:
+        text = text.replace("\n\n\n", "\n\n")
+    return text[:MAX_DESCRIPTION_CHARS]
+
+
+def parse_detail(html: str) -> JobDetail | None:
+    """Description and criteria from a job posting page; None if there is no description."""
+    soup = BeautifulSoup(html, "html.parser")
+    markup = soup.select_one("div.show-more-less-html__markup")
+    if markup is None:
+        return None
+    description = _description_text(markup)
+    if not description:
+        return None
+    found: dict[str, str] = {}
+    for item in soup.select("li.description__job-criteria-item"):
+        label = _text(item.select_one(".description__job-criteria-subheader")).lower()
+        value = _text(item.select_one(".description__job-criteria-text"))
+        field = _CRITERIA_FIELDS.get(label)
+        if field and value:
+            found[field] = value
+    return JobDetail(description=description, **found)

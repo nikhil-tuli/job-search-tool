@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from jobscan.parser import has_job_urns, parse_page
+from pathlib import Path
+
+from jobscan.parser import MAX_DESCRIPTION_CHARS, has_job_urns, parse_detail, parse_page
 from tests.helpers import FakeCard, card_html, page_html, real_card_html, stub_html
 
 
@@ -101,3 +103,73 @@ def test_has_job_urns() -> None:
     assert has_job_urns(card_html(FakeCard("701", "TPM")))
     assert not has_job_urns(stub_html())
     assert not has_job_urns("")
+
+
+# ---- job posting page ----------------------------------------------------------------------
+
+DETAIL_FIXTURE = Path(__file__).parent / "fixtures" / "job_detail_real.html"
+
+
+def _page(description: str, criteria: str = "") -> str:
+    return (
+        '<div class="show-more-less-html__markup relative overflow-hidden">'
+        + description
+        + "</div>"
+        + criteria
+    )
+
+
+def test_real_posting_description_and_criteria() -> None:
+    detail = parse_detail(DETAIL_FIXTURE.read_text(encoding="utf-8"))
+    assert detail is not None
+    assert detail.description.startswith("A.P. Moller - Maersk is an integrated logistics company")
+    assert detail.description.rstrip().endswith("accommodationrequests@maersk.com.")
+    assert "Key roles and responsibilities include:" in detail.description
+    assert "- Responsible for managing the implementation of TOS new versions" in detail.description
+    assert "Skill Set" in detail.description
+    assert "<" not in detail.description
+    assert "\n\n\n" not in detail.description
+    assert detail.seniority == "Not Applicable"
+    assert detail.employment_type == "Full-time"
+    assert detail.industries == "Transportation, Logistics, Supply Chain and Storage"
+    assert detail.job_function is None
+
+
+def test_breaks_lists_and_paragraphs_become_lines() -> None:
+    html = _page("Intro<br><br><ul><li>One</li><li>Two<br></li></ul>After<p>Para</p>")
+    detail = parse_detail(html)
+    assert detail is not None
+    assert detail.description == "Intro\n\n- One\n- Two\n\nAfter\n\nPara"
+
+
+def test_entities_are_decoded_and_markup_is_dropped() -> None:
+    detail = parse_detail(_page("R&amp;D <strong>lead</strong> &lt;b&gt; <script>x()</script>"))
+    assert detail is not None
+    assert detail.description.startswith("R&D lead <b>")
+
+
+def test_criteria_with_unknown_labels_are_ignored() -> None:
+    criteria = (
+        '<ul><li class="description__job-criteria-item">'
+        '<h3 class="description__job-criteria-subheader"> Job function </h3>'
+        '<span class="description__job-criteria-text"> Engineering </span></li>'
+        '<li class="description__job-criteria-item">'
+        '<h3 class="description__job-criteria-subheader">Something new</h3>'
+        '<span class="description__job-criteria-text">x</span></li></ul>'
+    )
+    detail = parse_detail(_page("Text", criteria))
+    assert detail is not None
+    assert detail.job_function == "Engineering"
+    assert detail.seniority is None
+
+
+def test_page_without_a_description_gives_none() -> None:
+    assert parse_detail("<html><body><h2>Technical Project Manager</h2></body></html>") is None
+    assert parse_detail("") is None
+    assert parse_detail(_page("  <br> <br>  ")) is None
+
+
+def test_very_long_descriptions_are_cut() -> None:
+    detail = parse_detail(_page("word " * 20_000))
+    assert detail is not None
+    assert len(detail.description) <= MAX_DESCRIPTION_CHARS

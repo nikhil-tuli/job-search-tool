@@ -9,11 +9,24 @@ import pytest
 
 from jobscan import db
 from jobscan.config import Config
-from jobscan.models import RoleFilter
+from jobscan.models import NewRole, RoleFilter
 from jobscan.scanner import Scanner, ScanSetupError
 from jobscan.store import RUN_FAILED, RUN_PARTIAL, RUN_SUCCESS, Store
 from jobscan.timeutil import IST, to_iso
-from tests.fakes import DM, TPM, ScriptedFetcher, card, end, layout, ok, throttled
+from tests.fakes import (
+    DM,
+    TPM,
+    ScriptedDetails,
+    ScriptedFetcher,
+    card,
+    detail_none,
+    detail_ok,
+    detail_throttled,
+    end,
+    layout,
+    ok,
+    throttled,
+)
 
 NOW = datetime(2026, 10, 15, 9, 0, tzinfo=IST)
 
@@ -32,14 +45,22 @@ def cfg() -> Config:
 
 
 class Harness:
-    def __init__(self, store: Store, cfg: Config, script: dict) -> None:  # type: ignore[type-arg]
+    def __init__(
+        self,
+        store: Store,
+        cfg: Config,
+        script: dict,  # type: ignore[type-arg]
+        details: ScriptedDetails | None = None,
+    ) -> None:
         self.store = store
         self.fetcher = ScriptedFetcher(script)
+        self.details = details
         self.sleeps: list[float] = []
         self.lines: list[str] = []
         self.scanner = Scanner(
             store=store,
             fetcher=self.fetcher,
+            details=details,
             config=cfg,
             emit=self.lines.append,
             sleep=self.sleeps.append,
@@ -496,3 +517,191 @@ def test_no_match_phrases_refuses_to_start(store: Store, cfg: Config) -> None:
     with pytest.raises(ScanSetupError, match="matching"):
         Harness(store, cfg, {}).run()
     assert store.latest_run() is None
+
+
+# ---- job descriptions ----------------------------------------------------------------------
+
+
+def described(store: Store, cfg: Config, *, ids: tuple[str, ...] = ("1", "2", "3")) -> Harness:
+    """A scan that finds the given roles, with a description fetcher attached."""
+    one_keyword(store)
+    cards = [card(job_id) for job_id in ids]
+    return Harness(
+        store, cfg, {(TPM, 0): [ok(*cards)], (TPM, 1): [end()]}, details=ScriptedDetails()
+    )
+
+
+def test_descriptions_are_fetched_and_stored_for_new_roles(store: Store, cfg: Config) -> None:
+    h = described(store, cfg)
+    assert h.details is not None
+    h.details.script["2"] = [detail_ok("Own the roadmap.", seniority="Director")]
+    result = h.run()
+    assert result.status == RUN_SUCCESS
+    assert result.note == ""
+    assert sorted(h.details.calls) == ["1", "2", "3"]
+    role = store.get_role("LinkedIn", "2")
+    assert role is not None
+    assert (role.description, role.seniority) == ("Own the roadmap.", "Director")
+    assert any("Descriptions: 3 saved" in line for line in h.lines)
+
+
+def test_a_described_role_is_not_fetched_again(store: Store, cfg: Config) -> None:
+    h = described(store, cfg, ids=("1",))
+    h.run()
+    assert h.details is not None
+    assert h.details.calls == ["1"]
+    h2 = Harness(
+        store, cfg, {(TPM, 0): [ok(card("1"))], (TPM, 1): [end()]}, details=ScriptedDetails()
+    )
+    h2.run()
+    assert h2.details is not None
+    assert h2.details.calls == []
+
+
+def test_description_requests_are_paced(store: Store, cfg: Config) -> None:
+    h = described(store, cfg)
+    h.run()
+    assert len(h.sleeps) >= 3
+    detail_waits = h.sleeps[-3:]
+    assert all(cfg.delay_seconds_min <= w <= cfg.delay_seconds_max for w in detail_waits)
+
+
+def test_no_detail_fetcher_means_no_description_phase(store: Store, cfg: Config) -> None:
+    one_keyword(store)
+    h = Harness(store, cfg, {(TPM, 0): [ok(card("1"))], (TPM, 1): [end()]})
+    assert h.run().status == RUN_SUCCESS
+    role = store.get_role("LinkedIn", "1")
+    assert role is not None
+    assert role.description is None
+
+
+def test_zero_cap_turns_descriptions_off(store: Store, cfg: Config) -> None:
+    h = described(store, replace(cfg, detail_max_per_run=0))
+    h.run()
+    assert h.details is not None
+    assert h.details.calls == []
+
+
+def test_cap_limits_requests_and_leaves_the_rest_for_later(store: Store, cfg: Config) -> None:
+    h = described(store, replace(cfg, detail_max_per_run=2))
+    h.run()
+    assert h.details is not None
+    assert len(h.details.calls) == 2
+    assert any("1 left for later" in line for line in h.lines)
+    assert len(store.pending_details("2000-01-01", 10)) == 1
+
+
+def test_a_missing_description_counts_an_attempt_and_is_given_up_after_three(
+    store: Store, cfg: Config
+) -> None:
+    for _ in range(3):
+        one_keyword(store)
+        h = Harness(
+            store,
+            cfg,
+            {(TPM, 0): [ok(card("1"))], (TPM, 1): [end()]},
+            details=ScriptedDetails({"1": [detail_none("HTTP 404")]}),
+        )
+        h.run()
+    assert store.pending_details("2000-01-01", 10) == []
+    h4 = Harness(
+        store, cfg, {(TPM, 0): [ok(card("1"))], (TPM, 1): [end()]}, details=ScriptedDetails()
+    )
+    h4.run()
+    assert h4.details is not None
+    assert h4.details.calls == []
+
+
+def test_throttled_descriptions_do_not_use_up_attempts(store: Store, cfg: Config) -> None:
+    h = described(store, cfg, ids=("1",))
+    assert h.details is not None
+    h.details.script["1"] = [detail_throttled()]
+    h.run()
+    assert len(store.pending_details("2000-01-01", 10)) == 1
+    role = store.get_role("LinkedIn", "1")
+    assert role is not None
+    assert role.description is None
+
+
+def test_repeated_throttling_stops_the_phase_but_not_the_scan(store: Store, cfg: Config) -> None:
+    h = described(store, cfg, ids=("1", "2", "3", "4"))
+    assert h.details is not None
+    for job_id in ("1", "2", "3", "4"):
+        h.details.script[job_id] = [detail_throttled()]
+    result = h.run()
+    assert result.status == RUN_SUCCESS
+    assert len(h.details.calls) == 2
+    assert "Descriptions stopped after repeated throttling" in result.note
+    assert len(store.list_roles()) == 4
+
+
+def test_a_throttle_between_successes_does_not_stop_the_phase(store: Store, cfg: Config) -> None:
+    h = described(store, cfg)
+    assert h.details is not None
+    h.details.script["2"] = [detail_throttled()]
+    h.run()
+    assert h.details.calls.count("2") == 1
+    described_ids = {r.job_id for r in store.list_roles() if r.description}
+    assert len(described_ids) == 2
+
+
+def test_descriptions_are_skipped_when_the_search_was_cut_short(store: Store, cfg: Config) -> None:
+    one_keyword(store)
+    h = Harness(
+        store,
+        replace(cfg, abort_after_consecutive_throttles=1),
+        {(TPM, 0): [throttled()]},
+        details=ScriptedDetails(),
+    )
+    h.run()
+    assert h.details is not None
+    assert h.details.calls == []
+    assert any("skipped because the search was cut short" in line for line in h.lines)
+
+
+def seed_role(store: Store, job_id: str, fetched: datetime) -> None:
+    """A role saved by an earlier scan, without a description."""
+    run = store.start_run(window_seconds=86400, keywords_total=1)
+    store.insert_role(
+        NewRole(
+            portal="LinkedIn",
+            job_id=job_id,
+            title=TPM,
+            company="Acme",
+            location="Pune",
+            link="https://x",
+            posted_on=None,
+            posted_precision="day",
+            fetched_on=to_iso(fetched),
+            actively_hiring=False,
+            matched_phrase=TPM,
+            possible_duplicate_of=None,
+            dup_key=None,
+            raw_datetime=None,
+            raw_relative=None,
+            run_id=run,
+        )
+    )
+
+
+def test_old_roles_are_not_backfilled(store: Store, cfg: Config) -> None:
+    one_keyword(store)
+    seed_role(store, "9", NOW - timedelta(days=10))
+    h = Harness(
+        store, cfg, {(TPM, 0): [ok(card("1"))], (TPM, 1): [end()]}, details=ScriptedDetails()
+    )
+    h.run()
+    assert h.details is not None
+    assert h.details.calls == ["1"]
+
+
+def test_a_recent_role_without_a_description_is_retried(store: Store, cfg: Config) -> None:
+    one_keyword(store)
+    seed_role(store, "9", NOW - timedelta(days=1))
+    h = Harness(store, cfg, {(TPM, 0): [end()]}, details=ScriptedDetails())
+    h.run()
+    assert h.details is not None
+    assert h.details.calls == ["9"]
+    role = store.get_role("LinkedIn", "9")
+    assert role is not None
+    assert role.description == "Description of 9"

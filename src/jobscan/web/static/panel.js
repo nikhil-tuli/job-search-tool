@@ -21,6 +21,8 @@
     saved = snapshot();
     var f = form();
     if (f) { f.addEventListener('submit', submit); }
+    var sf = body.querySelector('form.score-form');
+    if (sf) { sf.addEventListener('submit', scoreSubmit); }
     var first = body.querySelector('select, input[type=text], textarea');
     if (first) { first.focus(); }
   }
@@ -82,6 +84,57 @@
       var b = f2 && f2.querySelector('button[type=submit]');
       if (b) { b.disabled = false; }
     });
+  }
+
+  function scoreSubmit(event) {
+    event.preventDefault();
+    var f = event.target;
+    var token = loadToken;
+    var button = f.querySelector('button');
+    var note = f.querySelector('.note');
+    button.disabled = true;
+    note.textContent = 'Scoring…';
+    fetch(f.action, {
+      method: 'POST',
+      body: new URLSearchParams(new FormData(f)),
+      headers: { 'X-Panel': '1' }
+    }).then(function (r) {
+      return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (res) {
+      if (token !== loadToken) { return; }
+      note.textContent = res.data.message;
+      button.disabled = false;
+      if (res.ok) { showScore(res.data.score, button); }
+    }).catch(function () {
+      if (token !== loadToken) { return; }
+      note.textContent = 'Could not score. Try again.';
+      button.disabled = false;
+    });
+  }
+
+  function showScore(score, button) {
+    var label = score.band.charAt(0).toUpperCase() + score.band.slice(1);
+    var fact = body.querySelector('#score-fact');
+    var band = fact.querySelector('[data-score-band]');
+    if (!band) {
+      var none = fact.querySelector('[data-score-label]');
+      if (none) { none.parentNode.removeChild(none); }
+      fact.insertAdjacentHTML('afterbegin', '<span class="band" data-score-band></span> <span data-score-label></span><br><small data-score-detail></small>');
+      band = fact.querySelector('[data-score-band]');
+    }
+    band.className = 'band ' + score.band;
+    band.textContent = score.final;
+    fact.querySelector('[data-score-label]').textContent = label + ' fit';
+    fact.querySelector('[data-score-detail]').textContent = score.detail;
+    var stale = fact.querySelector('.stale-note');
+    if (stale) { stale.parentNode.removeChild(stale); }
+    button.textContent = 'Re-score this role';
+    var cell = rows[current].querySelector('td.score');
+    if (cell) {
+      cell.innerHTML = '<span class="band ' + score.band + '"></span> <small></small>';
+      cell.querySelector('.band').textContent = score.final;
+      cell.querySelector('small').textContent = label;
+    }
   }
 
   function applySaved(data) {

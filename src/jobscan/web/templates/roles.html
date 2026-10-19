@@ -10,10 +10,23 @@
 </div>
 
 <form class="filters" method="get" action="{{ url_for('roles') }}">
-  <input type="search" name="q" value="{{ filters.get('q', '') }}" placeholder="Search title, company, location, notes" aria-label="Search">
+  <input type="search" name="q" value="{{ filters.get('q', '') }}" placeholder="Search title, company, location, notes, description" aria-label="Search">
   <select name="status" aria-label="Status filter">
     <option value="">Any status</option>
     {% for s in statuses %}<option value="{{ s }}" {% if filters.get('status') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  <select name="fit" aria-label="Fit filter">
+    <option value="">Any fit</option>
+    <option value="eligible" {% if filters.get('fit') == 'eligible' %}selected{% endif %}>Eligible</option>
+    <option value="excluded" {% if filters.get('fit') == 'excluded' %}selected{% endif %}>Excluded</option>
+  </select>
+  <select name="score" aria-label="Score filter">
+    <option value="">Any score</option>
+    {% for value, label in (('strong', 'Strong fit'), ('partial', 'Partial fit'), ('weak', 'Weak fit'), ('unscored', 'Unscored')) %}<option value="{{ value }}" {% if filters.get('score') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="sort" aria-label="Sort order">
+    <option value="">Newest first</option>
+    <option value="score" {% if filters.get('sort') == 'score' %}selected{% endif %}>Best fit first</option>
   </select>
   {% if filters.get('fetched') %}
   <input type="hidden" name="fetched" value="{{ filters['fetched'] }}">
@@ -40,7 +53,7 @@
     <tr>
       <th><input type="checkbox" id="all" aria-label="Select all on this page"></th>
       <th>Title</th><th>Company</th><th>Location</th><th>Posted (IST)</th><th>Fetched (IST)</th>
-      <th>Status</th><th>Applied</th><th></th>
+      <th>Fit</th><th>Score</th><th>Status</th><th>Applied</th><th></th>
     </tr>
   </thead>
   <tbody>
@@ -56,6 +69,12 @@
       <td>{{ r.location }}</td>
       <td class="nw">{{ r | posted }}</td>
       <td class="nw">{{ r.fetched_on | ist }}</td>
+      {% set fit = fits[r.key] %}
+      <td class="nw fit">
+        {% if fit.eligible %}<span class="muted">Eligible</span>{% else %}<span class="tag out" title="{{ fit.summary }}">{{ fit.label }}</span>{% if fit.more %}<span class="muted" title="{{ fit.summary }}">+{{ fit.more }}</span>{% endif %}{% endif %}
+      </td>
+      {% set sc = scores.get(r.key) %}
+      <td class="nw score">{% if sc %}<span class="band {{ sc.band }}{% if sc.stale %} stale{% endif %}" title="{{ sc.detail }}">{{ sc.final }}</span> <small>{{ sc.band | capitalize }}</small>{% else %}<span class="muted">&ndash;</span>{% endif %}</td>
       <td>
         <form method="post" action="{{ url_for('set_status') }}" class="inline">
           <input type="hidden" name="ids" value="{{ r.key }}">

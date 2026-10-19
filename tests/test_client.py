@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import ClassVar
 from urllib.parse import parse_qs, urlparse
 
@@ -10,10 +11,13 @@ import pytest
 import requests
 
 from jobscan.client import (
+    DETAIL_URL,
     SEARCH_URL,
+    DetailOutcome,
     LinkedInClient,
     Outcome,
     build_params,
+    classify_detail_response,
     classify_response,
 )
 from jobscan.config import Config
@@ -160,3 +164,101 @@ def test_timeout_is_throttled() -> None:
 
 def test_default_url_is_the_guest_endpoint() -> None:
     assert SEARCH_URL.endswith("/jobs-guest/jobs/api/seeMoreJobPostings/search")
+
+
+# ---- job posting page ----------------------------------------------------------------------
+
+_REAL_POSTING = (Path(__file__).parent / "fixtures" / "job_detail_real.html").read_text(
+    encoding="utf-8"
+)
+
+
+def test_detail_200_with_description_is_ok() -> None:
+    result = classify_detail_response(200, _REAL_POSTING)
+    assert result.outcome is DetailOutcome.OK
+    assert result.detail is not None
+    assert "APM Terminals" in result.detail.description
+
+
+@pytest.mark.parametrize("status", [400, 404, 410])
+def test_detail_gone_statuses_mean_no_description(status: int) -> None:
+    result = classify_detail_response(status, "")
+    assert result.outcome is DetailOutcome.NO_DESCRIPTION
+    assert str(status) in result.note
+
+
+@pytest.mark.parametrize("status", [429, 403, 999, 500, 503])
+def test_detail_throttle_statuses(status: int) -> None:
+    assert classify_detail_response(status, stub_html()).outcome is DetailOutcome.THROTTLED
+
+
+@pytest.mark.parametrize("status", [301, 302, 401])
+def test_detail_unexpected_statuses_are_transient(status: int) -> None:
+    assert classify_detail_response(status, "").outcome is DetailOutcome.THROTTLED
+
+
+def test_detail_posting_page_without_description_is_not_retried_forever() -> None:
+    body = '<section class="top-card-layout"><h2>Title</h2></section>'
+    assert classify_detail_response(200, body).outcome is DetailOutcome.NO_DESCRIPTION
+
+
+@pytest.mark.parametrize("body", ["", stub_html(), "<html>Please wait</html>"])
+def test_detail_200_that_is_not_a_posting_is_transient(body: str) -> None:
+    assert classify_detail_response(200, body).outcome is DetailOutcome.THROTTLED
+
+
+class _DetailHandler(BaseHTTPRequestHandler):
+    seen: ClassVar[list[str]] = []
+
+    def do_GET(self) -> None:
+        _DetailHandler.seen.append(self.path)
+        job_id = self.path.rsplit("/", 1)[-1]
+        status, body = {
+            "1": (200, _REAL_POSTING),
+            "2": (404, ""),
+            "3": (429, stub_html()),
+        }.get(job_id, (404, ""))
+        data = body.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+
+def test_client_fetches_job_pages_over_http() -> None:
+    _DetailHandler.seen = []
+    httpd = HTTPServer(("127.0.0.1", 0), _DetailHandler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    client = LinkedInClient(
+        Config(), detail_url=f"http://127.0.0.1:{httpd.server_port}/jobPosting/{{job_id}}"
+    )
+    try:
+        got = [client.fetch_detail(job_id).outcome for job_id in ("1", "2", "3")]
+    finally:
+        client.close()
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join()
+    assert got == [DetailOutcome.OK, DetailOutcome.NO_DESCRIPTION, DetailOutcome.THROTTLED]
+    assert _DetailHandler.seen == ["/jobPosting/1", "/jobPosting/2", "/jobPosting/3"]
+
+
+def test_job_page_network_errors_are_transient() -> None:
+    client = LinkedInClient(Config(), detail_url="http://127.0.0.1:9/jobPosting/{job_id}")
+    try:
+        result = client.fetch_detail("1")
+    finally:
+        client.close()
+    assert result.outcome is DetailOutcome.THROTTLED
+    assert "network error" in result.note
+
+
+def test_real_detail_url_points_at_the_guest_posting_api() -> None:
+    assert DETAIL_URL.format(job_id="42") == (
+        "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/42"
+    )

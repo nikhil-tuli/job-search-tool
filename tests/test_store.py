@@ -11,12 +11,14 @@ from jobscan import db
 from jobscan.models import (
     DEFAULT_PHRASES,
     STATUSES,
+    JobDetail,
     KeywordRecord,
     NewRole,
     PageStat,
     RoleFilter,
 )
 from jobscan.store import (
+    MAX_DETAIL_ATTEMPTS,
     RUN_FAILED,
     RUN_PARTIAL,
     RUN_SUCCESS,
@@ -764,7 +766,7 @@ def test_migration_5_adds_new_phrases_once_and_keeps_edits(tmp_path: Path) -> No
     mine = next(r for r in rows if r["phrase"] == "it project manager")
     assert (mine["use_as_keyword"], mine["use_for_match"]) == (0, 1)
     assert all(r["use_as_keyword"] == 1 for r in rows if r["phrase"] != "it project manager")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION == 5
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     conn.close()
 
 
@@ -835,3 +837,99 @@ def test_fetched_on_filter_combines_with_status(store: Store, run_id: int) -> No
 def test_fetched_on_filter_rejects_malformed_dates(store: Store, bad: str) -> None:
     with pytest.raises(StoreError):
         store.count_roles(RoleFilter(fetched_on=bad))
+
+
+# ---- job descriptions ----------------------------------------------------------------------
+
+
+def test_migration_6_adds_description_columns_and_keeps_every_row(tmp_path: Path) -> None:
+    conn = db.connect(tmp_path / "v5.db")
+    for version in (1, 2, 3, 4, 5):
+        conn.execute("BEGIN IMMEDIATE")
+        db.MIGRATIONS[version - 1](conn)
+        conn.execute(f"PRAGMA user_version = {version}")
+        conn.execute("COMMIT")
+    conn.execute(
+        "INSERT INTO roles (portal, job_id, title, company, location, link, posted_precision, "
+        "fetched_on, matched_phrase, status, contact_person, comments) "
+        "VALUES ('LinkedIn', '1', 'TPM', 'Acme', 'Pune', 'https://x', 'hour', "
+        "'2026-10-15T09:00:00+05:30', 'TPM', 'Applied', 'Priya', 'note')"
+    )
+
+    db.migrate(conn)
+
+    store = Store(conn)
+    role = store.get_role("LinkedIn", "1")
+    assert role is not None
+    assert (role.status, role.contact_person, role.comments) == ("Applied", "Priya", "note")
+    assert role.description is None
+    assert store.pending_details("2000-01-01", 5) == [("LinkedIn", "1")]
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    conn.close()
+
+
+def test_save_detail_stores_text_and_criteria(store: Store, run_id: int) -> None:
+    store.insert_role(make_role("1", run_id=run_id))
+    detail = JobDetail("Lead programs.", seniority="Director", industries="Software")
+    store.save_detail("LinkedIn", "1", detail, when="2026-10-16T10:00:00+05:30")
+    role = store.get_role("LinkedIn", "1")
+    assert role is not None
+    assert role.description == "Lead programs."
+    assert (role.seniority, role.industries, role.employment_type) == ("Director", "Software", None)
+    assert store.pending_details("2000-01-01", 5) == []
+
+
+def test_pending_details_filters_orders_and_limits(store: Store, run_id: int) -> None:
+    for job_id, day in (("1", "2026-10-10"), ("2", "2026-10-14"), ("3", "2026-10-15")):
+        store.insert_role(make_role(job_id, run_id=run_id, fetched_on=f"{day}T09:00:00+05:30"))
+    store.save_detail("LinkedIn", "3", JobDetail("done"), when="2026-10-15T10:00:00+05:30")
+    assert store.pending_details("2026-10-12T00:00:00+05:30", 10) == [("LinkedIn", "2")]
+    assert store.pending_details("2026-10-01T00:00:00+05:30", 10) == [
+        ("LinkedIn", "2"),
+        ("LinkedIn", "1"),
+    ]
+    assert store.pending_details("2026-10-01T00:00:00+05:30", 1) == [("LinkedIn", "2")]
+    assert store.pending_details("2026-10-01T00:00:00+05:30", 0) == []
+
+
+def test_a_role_is_given_up_after_the_attempt_limit(store: Store, run_id: int) -> None:
+    store.insert_role(make_role("1", run_id=run_id))
+    for attempt in range(MAX_DETAIL_ATTEMPTS):
+        assert store.pending_details("2000-01-01", 5) == [("LinkedIn", "1")], attempt
+        store.record_detail_failure("LinkedIn", "1")
+    assert store.pending_details("2000-01-01", 5) == []
+
+
+def test_search_matches_the_description(store: Store, run_id: int) -> None:
+    store.insert_role(make_role("1", run_id=run_id))
+    store.insert_role(make_role("2", run_id=run_id))
+    store.save_detail(
+        "LinkedIn", "2", JobDetail("Experience with payment gateways and 100% uptime"), when="x"
+    )
+    assert {r.job_id for r in store.list_roles(RoleFilter(query="payment gateways"))} == {"2"}
+    assert {r.job_id for r in store.list_roles(RoleFilter(query="100%"))} == {"2"}
+    assert store.count_roles(RoleFilter(query="kubernetes")) == 0
+
+
+def test_scoring_tables_exist(store: Store) -> None:
+    names = {
+        r[0] for r in store.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+    assert {"cv", "cv_chunks", "embeddings", "scoring_runs", "role_scores"} <= names
+
+
+def test_upgrade_from_version_6_adds_scoring_and_keeps_roles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    latest, migrations = db.SCHEMA_VERSION, db.MIGRATIONS
+    conn = db.connect(tmp_path / "old.db")
+    with monkeypatch.context() as old:
+        old.setattr(db, "SCHEMA_VERSION", 6)
+        old.setattr(db, "MIGRATIONS", migrations[:6])
+        db.migrate(conn)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'cv'").fetchone() is None
+    db.migrate(conn)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == latest
+    assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'role_scores'").fetchone()
+    conn.close()

@@ -9,6 +9,7 @@ import pytest
 
 from jobscan import cli
 from jobscan.cli import EXIT_FAILED, EXIT_INTERRUPTED, EXIT_OK, EXIT_PARTIAL, EXIT_USAGE, main
+from jobscan.client import DetailOutcome, DetailResult
 from jobscan.db import SCHEMA_VERSION
 from jobscan.lock import AlreadyRunningError, RunLock
 from jobscan.store import RUN_SUCCESS
@@ -264,6 +265,9 @@ def test_scan_uses_and_closes_the_real_client_when_none_is_injected(
         def close(self) -> None:
             self.closed = True
 
+        def fetch_detail(self, job_id: str) -> DetailResult:
+            return DetailResult(DetailOutcome.NO_DESCRIPTION, note="HTTP 404")
+
     def factory(config: object) -> ClosingFetcher:
         fetcher = ClosingFetcher(SCRIPT_OK)
         created.append(fetcher)
@@ -300,3 +304,27 @@ def test_python_dash_m_entry_point(db_path: Path, monkeypatch: pytest.MonkeyPatc
     with pytest.raises(SystemExit) as info:
         runpy.run_module("jobscan", run_name="__main__")
     assert info.value.code == EXIT_OK
+
+
+def test_scan_fetches_descriptions_with_the_detail_fetcher(db_path: Path) -> None:
+    from tests.fakes import ScriptedDetails
+
+    details = ScriptedDetails()
+    out = io.StringIO()
+    code = main(
+        ["--db", str(db_path), "scan"],
+        out=out,
+        fetcher=ScriptedFetcher(SCRIPT_OK),
+        detail_fetcher=details,
+        sleep=lambda _s: None,
+    )
+    assert code == EXIT_OK
+    assert details.calls == ["1"]  # the Chef card did not match a title phrase
+    assert "Descriptions: 1 saved" in out.getvalue()
+    store = cli.open_store(db_path)
+    try:
+        role = store.get_role("LinkedIn", "1")
+    finally:
+        store.close()
+    assert role is not None
+    assert role.description == "Description of 1"

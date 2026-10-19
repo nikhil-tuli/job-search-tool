@@ -12,15 +12,26 @@ from pathlib import Path
 from typing import TextIO
 
 from . import __version__
-from .client import LinkedInClient, PageFetcher
+from .client import DetailFetcher, LinkedInClient, PageFetcher
 from .config import Config, ConfigError
 from .db import SchemaTooNewError, connect, migrate
+from .embeddings import Embedder
 from .lock import AlreadyRunningError, RunLock
 from .models import STATUSES, RoleFilter
-from .report import Reporter, log_name
+from .report import Reporter, log_name, scoring_summary
 from .scanner import Scanner, ScanSetupError
+from .scoring import (
+    DAILY_WINDOW,
+    TRIGGER_MANUAL,
+    TRIGGER_SCAN,
+    Scorer,
+    ScoringUnavailable,
+    gemini_from_env,
+)
 from .store import RUN_FAILED, RUN_PARTIAL, RUN_SUCCESS, Store
 from .timeutil import format_display, from_iso, now_ist, to_iso
+
+EmbedderFactory = Callable[[Config], Embedder]
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -52,6 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=5000)
 
     sub.add_parser("status", help="show last run and role counts")
+    sub.add_parser("score", help="score roles against your CV (also runs after each scan)")
     return parser
 
 
@@ -92,6 +104,79 @@ def cmd_status(store: Store, out: TextIO) -> int:
     return EXIT_OK
 
 
+def run_scoring(
+    store: Store,
+    config: Config,
+    trigger: str,
+    emit: Callable[[str], None],
+    make_embedder: EmbedderFactory,
+    sleep: Callable[[float], None],
+) -> bool:
+    """Score pending roles and print the summary. False when there was no CV to score against."""
+    store.fail_stale_scoring_runs(when=to_iso(now_ist()))
+    scorer = Scorer(store=store, config=config, make_embedder=make_embedder, emit=emit, sleep=sleep)
+    try:
+        run = scorer.run(trigger)
+    except ScoringUnavailable:
+        emit("Scoring skipped: no CV uploaded. Upload one on the CV page of the app.")
+        return False
+    used = store.texts_embedded_since(to_iso(now_ist() - DAILY_WINDOW))
+    for line in scoring_summary(run, daily_used=used, daily_limit=config.embed_daily_limit):
+        emit(line)
+    return True
+
+
+def score_after_scan(
+    store: Store,
+    config: Config,
+    emit: Callable[[str], None],
+    make_embedder: EmbedderFactory,
+    sleep: Callable[[float], None],
+) -> bool:
+    """Score new roles at the end of a scan. A scoring problem never changes the scan's result.
+
+    Returns True when the user interrupted scoring.
+    """
+    try:
+        run_scoring(store, config, TRIGGER_SCAN, emit, make_embedder, sleep)
+    except KeyboardInterrupt:
+        return True
+    except Exception as exc:  # the scan already succeeded; report the bug and keep that result
+        emit(f"Scoring failed unexpectedly ({type(exc).__name__}: {exc}). The scan is unaffected.")
+    return False
+
+
+def cmd_score(
+    store: Store,
+    db_path: Path,
+    *,
+    out: TextIO,
+    make_embedder: EmbedderFactory,
+    sleep: Callable[[float], None],
+) -> int:
+    try:
+        config = Config.from_raw(store.get_config_raw())
+    except ConfigError as exc:
+        print("Configuration is invalid; nothing was scored:", file=out)
+        for key, message in exc.errors.items():
+            print(f"  {key}: {message}", file=out)
+        return EXIT_USAGE
+    reporter = Reporter(out, db_path.parent / "runs" / log_name(to_iso(now_ist())))
+    try:
+        try:
+            found_cv = run_scoring(
+                store, config, TRIGGER_MANUAL, reporter.line, make_embedder, sleep
+            )
+        except KeyboardInterrupt:
+            return EXIT_INTERRUPTED
+        if not found_cv:
+            return EXIT_USAGE
+        latest = store.list_scoring_runs(1)[0]
+        return {"success": EXIT_OK, "partial": EXIT_PARTIAL}.get(latest.status, EXIT_FAILED)
+    finally:
+        reporter.close()
+
+
 def cmd_scan(
     store: Store,
     db_path: Path,
@@ -99,6 +184,8 @@ def cmd_scan(
     force: bool,
     out: TextIO,
     fetcher: PageFetcher | None,
+    detail_fetcher: DetailFetcher | None = None,
+    make_embedder: EmbedderFactory = gemini_from_env,
     sleep: Callable[[float], None],
     rng: random.Random | None,
 ) -> int:
@@ -154,9 +241,11 @@ def cmd_scan(
         if fetcher is None:
             own_client = LinkedInClient(config)
             fetcher = own_client
+            detail_fetcher = own_client
         scanner = Scanner(
             store=store,
             fetcher=fetcher,
+            details=detail_fetcher,
             config=config,
             emit=reporter.line,
             sleep=sleep,
@@ -180,6 +269,10 @@ def cmd_scan(
         )
         if result.note:
             reporter.line(f"Note: {result.note}")
+        if config.score_after_scan and score_after_scan(
+            store, config, reporter.line, make_embedder, sleep
+        ):
+            return EXIT_INTERRUPTED
         return {RUN_SUCCESS: EXIT_OK, RUN_PARTIAL: EXIT_PARTIAL, RUN_FAILED: EXIT_FAILED}[
             result.status
         ]
@@ -194,6 +287,8 @@ def main(
     *,
     out: TextIO | None = None,
     fetcher: PageFetcher | None = None,
+    detail_fetcher: DetailFetcher | None = None,
+    make_embedder: EmbedderFactory = gemini_from_env,
     sleep: Callable[[float], None] = time.sleep,
     rng: random.Random | None = None,
 ) -> int:
@@ -224,12 +319,22 @@ def main(
             return EXIT_OK
         try:
             with RunLock(db_path.parent / "scan.lock"):
+                if args.command == "score":
+                    return cmd_score(
+                        store,
+                        db_path,
+                        out=stream,
+                        make_embedder=make_embedder,
+                        sleep=sleep,
+                    )
                 return cmd_scan(
                     store,
                     db_path,
                     force=args.force,
                     out=stream,
                     fetcher=fetcher,
+                    detail_fetcher=detail_fetcher,
+                    make_embedder=make_embedder,
                     sleep=sleep,
                     rng=rng,
                 )

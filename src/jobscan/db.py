@@ -293,6 +293,90 @@ def _migration_5(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_6(conn: sqlite3.Connection) -> None:
+    """Add the job description, LinkedIn's criteria list and the description fetch bookkeeping."""
+    _execute_script(
+        conn,
+        """
+        ALTER TABLE roles ADD COLUMN description TEXT;
+        ALTER TABLE roles ADD COLUMN seniority TEXT;
+        ALTER TABLE roles ADD COLUMN employment_type TEXT;
+        ALTER TABLE roles ADD COLUMN industries TEXT;
+        ALTER TABLE roles ADD COLUMN job_function TEXT;
+        ALTER TABLE roles ADD COLUMN detail_fetched_on TEXT;
+        ALTER TABLE roles ADD COLUMN detail_attempts INTEGER NOT NULL DEFAULT 0;
+        """,
+    )
+
+
+def _migration_7(conn: sqlite3.Connection) -> None:
+    """CV, its chunks, cached embeddings, per-role scores and the scoring run log."""
+    _execute_script(
+        conn,
+        """
+        CREATE TABLE cv (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            filename TEXT NOT NULL,
+            text TEXT NOT NULL,
+            sha TEXT NOT NULL,
+            uploaded_on TEXT NOT NULL
+        );
+
+        CREATE TABLE cv_chunks (
+            position INTEGER PRIMARY KEY,
+            text TEXT NOT NULL,
+            text_hash TEXT NOT NULL
+        );
+
+        CREATE TABLE embeddings (
+            text_hash TEXT NOT NULL,
+            space TEXT NOT NULL,
+            vector BLOB NOT NULL,
+            PRIMARY KEY (text_hash, space)
+        );
+
+        CREATE TABLE scoring_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_on TEXT NOT NULL,
+            finished_on TEXT,
+            trigger TEXT NOT NULL CHECK (trigger IN ('scan', 'manual', 'role')),
+            status TEXT NOT NULL
+                CHECK (status IN ('running', 'success', 'partial', 'failed')),
+            considered INTEGER NOT NULL DEFAULT 0,
+            excluded INTEGER NOT NULL DEFAULT 0,
+            excluded_by_reason TEXT NOT NULL DEFAULT '{}',
+            no_description INTEGER NOT NULL DEFAULT 0,
+            selected INTEGER NOT NULL DEFAULT 0,
+            scored INTEGER NOT NULL DEFAULT 0,
+            strong INTEGER NOT NULL DEFAULT 0,
+            partial INTEGER NOT NULL DEFAULT 0,
+            weak INTEGER NOT NULL DEFAULT 0,
+            failed INTEGER NOT NULL DEFAULT 0,
+            texts_embedded INTEGER NOT NULL DEFAULT 0,
+            texts_cached INTEGER NOT NULL DEFAULT 0,
+            requests INTEGER NOT NULL DEFAULT 0,
+            tokens INTEGER NOT NULL DEFAULT 0,
+            tokens_reported INTEGER NOT NULL DEFAULT 0 CHECK (tokens_reported IN (0, 1)),
+            note TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX scoring_runs_started ON scoring_runs(started_on DESC);
+
+        CREATE TABLE role_scores (
+            portal TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            keyword_raw REAL NOT NULL,
+            semantic_raw REAL NOT NULL,
+            chunks INTEGER NOT NULL,
+            inputs TEXT NOT NULL,
+            scored_on TEXT NOT NULL,
+            run_id INTEGER REFERENCES scoring_runs(id) ON DELETE SET NULL,
+            PRIMARY KEY (portal, job_id),
+            FOREIGN KEY (portal, job_id) REFERENCES roles(portal, job_id) ON DELETE CASCADE
+        );
+        """,
+    )
+
+
 # Append new migrations to the end; never edit one that has shipped.
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_1,
@@ -300,6 +384,8 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_3,
     _migration_4,
     _migration_5,
+    _migration_6,
+    _migration_7,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 

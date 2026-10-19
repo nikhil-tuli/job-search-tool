@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from ..config import Config, ConfigError
 from ..models import DEFAULT_STATUS, STATUSES, Role
 from ..timeutil import IST, format_display, has_time_of_day, to_iso
+from .scores import ScoreView
 
 MAX_CONTACT = 200
 MAX_COMMENTS = 5000
@@ -148,14 +149,18 @@ CSV_HEADER = (
     "Comments",
     "Matched Phrase",
     "Possible Duplicate Of",
+    "Fit Score",
+    "Fit Band",
 )
 
 
-def roles_to_csv(roles: Iterable[Role]) -> str:
+def roles_to_csv(roles: Iterable[Role], scores: Mapping[str, ScoreView] | None = None) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\r\n")
     writer.writerow(CSV_HEADER)
+    scores = scores or {}
     for role in roles:
+        view = scores.get(role.key)
         posted = format_display(role.posted_on, with_time=has_time_of_day(role.posted_precision))
         writer.writerow(
             [
@@ -176,6 +181,8 @@ def roles_to_csv(roles: Iterable[Role]) -> str:
                     role.comments,
                     role.matched_phrase,
                     role.possible_duplicate_of or "",
+                    "" if view is None else view.final,
+                    "" if view is None else view.band,
                 )
             ]
         )

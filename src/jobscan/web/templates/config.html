@@ -22,7 +22,7 @@
   </table>
 
   {% for group, items in groups %}
-  <h2>{{ group }}</h2>
+  <h2>{{ group }}{% if group in group_info %} <span class="info" tabindex="0" role="note" aria-label="{{ group_info[group] }}">i<span class="tip">{{ group_info[group] }}</span></span>{% endif %}</h2>
   <div class="grid">
     {% for key, label, hint in items %}
     <label>{{ label }}
@@ -31,7 +31,11 @@
           {% for mode in match_modes %}<option value="{{ mode }}" {% if values.get(key) == mode %}selected{% endif %}>{{ mode }}</option>{% endfor %}
         </select>
       {% else %}
+        {% if key in list_settings %}
+        <input type="text" name="{{ key }}" value="{{ values.get(key, '') }}" class="wide">
+      {% else %}
         <input type="text" name="{{ key }}" value="{{ values.get(key, '') }}" inputmode="decimal">
+      {% endif %}
       {% endif %}
       {% if hint %}<small>{{ hint }}</small>{% endif %}
       {% if errors.get(key) %}<span class="error">{{ errors[key] }}</span>{% endif %}

@@ -11,14 +11,16 @@ from jobscan.config import Config
 from jobscan.models import (
     DEFAULT_PHRASES,
     STATUSES,
+    JobDetail,
     KeywordRecord,
     NewRole,
     PageStat,
     RoleFilter,
 )
 from jobscan.store import RUN_SUCCESS, Store
-from jobscan.timeutil import now_ist
+from jobscan.timeutil import now_ist, to_iso
 from jobscan.web import create_app
+from jobscan.web.app import GROUP_INFO
 
 
 @pytest.fixture
@@ -805,3 +807,254 @@ def test_csv_export_honours_fetch_date(client: FlaskClient, store: Store) -> Non
     body = text(client.get("/export.csv?fetched=2026-10-15"))
     assert "/jobs/view/1" in body
     assert "/jobs/view/2" not in body
+
+
+# ---- job descriptions ----------------------------------------------------------------------
+
+
+def _describe(store: Store, job_id: str, text: str, **criteria: str) -> None:
+    store.save_detail(
+        "LinkedIn", job_id, JobDetail(text, **criteria), when="2026-10-16T09:00:00+05:30"
+    )
+
+
+def test_role_page_without_a_description_says_so(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1")
+    body = text(client.get("/roles/LinkedIn/1"))
+    assert "No description saved yet" in body
+
+
+def test_role_page_and_panel_show_description_and_criteria(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1")
+    _describe(
+        store,
+        "1",
+        "Own delivery.\n\n- Plan\n- Ship",
+        seniority="Director",
+        employment_type="Full-time",
+        industries="Software",
+    )
+    for url in ("/roles/LinkedIn/1", "/roles/LinkedIn/1?partial=1"):
+        body = text(client.get(url))
+        assert 'class="desc"' in body
+        assert "Own delivery." in body
+        assert "- Plan" in body
+        assert "Director" in body
+        assert "Full-time" in body
+        assert "Software" in body
+        assert "No description saved yet" not in body
+
+
+def test_description_markup_is_escaped(client: FlaskClient, store: Store, run_id: int) -> None:
+    add_role(store, run_id, "1")
+    _describe(store, "1", "<script>alert(1)</script> & <b>bold</b>")
+    body = text(client.get("/roles/LinkedIn/1"))
+    assert "<script>alert(1)</script>" not in body
+    assert "&lt;script&gt;alert(1)&lt;/script&gt; &amp; &lt;b&gt;bold&lt;/b&gt;" in body
+
+
+def test_saving_a_role_keeps_its_description(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1")
+    _describe(store, "1", "Keep me")
+    client.post(
+        "/roles/LinkedIn/1",
+        data={"status": "Applied", "applied_on": "", "contact_person": "", "comments": "x"},
+    )
+    role = store.get_role("LinkedIn", "1")
+    assert role is not None
+    assert role.description == "Keep me"
+
+
+def test_roles_search_finds_text_in_the_description(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1")
+    add_role(store, run_id, "2")
+    _describe(store, "2", "Must know Kubernetes")
+    body = text(client.get("/roles?q=kubernetes"))
+    assert "/jobs/view/2" in body
+    assert "/jobs/view/1" not in body
+    assert "description" in text(client.get("/roles"))
+
+
+def test_config_page_lists_the_description_settings(client: FlaskClient) -> None:
+    body = text(client.get("/config"))
+    assert 'name="detail_max_per_run" value="60"' in body
+    assert 'name="detail_max_age_days" value="3"' in body
+    assert "Job descriptions" in body
+
+
+# ---- fit filter ----------------------------------------------------------------------------
+
+
+def fresh() -> str:
+    return to_iso(now_ist())
+
+
+def test_fit_column_tags_roles(client: FlaskClient, store: Store, run_id: int) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh())
+    add_role(store, run_id, "2", fetched_on=fresh(), company="Amazon Development Centre")
+    add_role(store, run_id, "3")  # fetched days ago
+    body = text(client.get("/roles"))
+    assert "<th>Fit</th>" in body
+    assert body.count('muted">Eligible<') == 1
+    assert "Excluded: company" in body
+    assert "Excluded: recency" in body
+    assert "company matches Amazon" in body  # the full reason is on hover
+
+
+def test_fit_tag_counts_extra_reasons(client: FlaskClient, store: Store, run_id: int) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh(), company="Intuit", title="Junior Sales PM")
+    body = text(client.get("/roles"))
+    assert "Excluded: company" in body
+    assert ">+2<" in body
+
+
+def test_fit_filter_eligible_and_excluded(client: FlaskClient, store: Store, run_id: int) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh(), title="Technical Program Manager One")
+    add_role(store, run_id, "2", fetched_on=fresh(), company="Amazon", title="Program Two")
+    eligible = text(client.get("/roles?fit=eligible"))
+    assert "Technical Program Manager One" in eligible
+    assert "Program Two" not in eligible
+    excluded = text(client.get("/roles?fit=excluded"))
+    assert "Program Two" in excluded
+    assert "Technical Program Manager One" not in excluded
+    assert 'value="excluded" selected' in excluded
+    assert 'Roles <span class="muted">1</span>' in excluded
+
+
+def test_fit_filter_ignores_unknown_values(client: FlaskClient, store: Store, run_id: int) -> None:
+    add_role(store, run_id, "1")
+    body = text(client.get("/roles?fit=banana"))
+    assert "Technical Program Manager 1" in body
+
+
+def test_fit_filter_combines_with_other_filters(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh(), title="Alpha Program Manager")
+    add_role(store, run_id, "2", fetched_on=fresh(), title="Beta Program Manager")
+    body = text(client.get("/roles?fit=eligible&q=Alpha"))
+    assert "Alpha Program Manager" in body
+    assert "Beta Program Manager" not in body
+
+
+def test_fit_filter_paginates_after_filtering(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    for n in range(1, 106):
+        add_role(store, run_id, str(n), fetched_on=fresh(), company="Amazon")
+    add_role(store, run_id, "900", fetched_on=fresh(), title="Lone Eligible Role")
+    page_one = text(client.get("/roles?fit=excluded"))
+    page_two = text(client.get("/roles?fit=excluded&page=2"))
+    assert "Page 1 of 2" in page_one
+    assert page_two.count('class="row"') == 5
+    assert "Lone Eligible Role" not in page_one + page_two
+    assert "fit=excluded" in page_one  # the pager keeps the filter
+
+
+def test_fit_uses_the_saved_settings(client: FlaskClient, store: Store, run_id: int) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh(), company="Initech")
+    assert 'muted">Eligible<' in text(client.get("/roles"))
+    store.set_config_raw({"fit_excluded_companies": "Initech"})
+    assert "Excluded: company" in text(client.get("/roles"))
+
+
+def test_fit_falls_back_to_defaults_when_settings_are_invalid(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh())
+    store.set_config_raw({"fit_min_years": "banana"})
+    assert client.get("/roles").status_code == 200
+
+
+def test_fit_years_rule_uses_the_description(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh())
+    store.save_detail("LinkedIn", "1", JobDetail(description="Experience: 1-2 years"), when=fresh())
+    body = text(client.get("/roles"))
+    assert "Excluded: years" in body
+    assert "asks for 1 year, below 3" in body
+
+
+def test_panel_shows_why_a_role_is_excluded(client: FlaskClient, store: Store, run_id: int) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh(), company="Intuit")
+    store.update_status(["LinkedIn|1"], "Skipped")
+    body = text(client.get("/roles/LinkedIn/1?partial=1"))
+    assert "Fit filter" in body
+    assert "Excluded: status" in body
+    assert "<li>status is Skipped</li>" in body
+    assert "<li>company matches Intuit</li>" in body
+
+
+def test_panel_says_eligible(client: FlaskClient, store: Store, run_id: int) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh())
+    body = text(client.get("/roles/LinkedIn/1?partial=1"))
+    assert "Fit filter" in body
+    assert "Eligible" in body
+
+
+def test_role_page_shows_the_fit_result_too(client: FlaskClient, store: Store, run_id: int) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh(), company="Amazon")
+    assert "company matches Amazon" in text(client.get("/roles/LinkedIn/1"))
+
+
+def test_invalid_save_still_shows_the_fit_result(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh(), company="Amazon")
+    response = client.post("/roles/LinkedIn/1", data={"status": "Banana", "next": "/roles"})
+    assert response.status_code == 400
+    assert "company matches Amazon" in text(response)
+
+
+def test_export_follows_the_fit_filter(client: FlaskClient, store: Store, run_id: int) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh(), title="Keep Program Manager")
+    add_role(store, run_id, "2", fetched_on=fresh(), company="Amazon", title="Drop Program Manager")
+    body = text(client.get("/export.csv?fit=eligible"))
+    assert "Keep Program Manager" in body
+    assert "Drop Program Manager" not in body
+
+
+def test_config_page_has_the_fit_group(client: FlaskClient) -> None:
+    body = text(client.get("/config"))
+    assert "<h2>Fit filters" in body
+    assert 'name="fit_recency_days" value="1"' in body
+    assert 'name="fit_min_years" value="3"' in body
+    assert 'name="fit_excluded_companies" value="Amazon, Intuit"' in body
+    assert 'name="fit_deny_keywords" value="sales, warehouse, SAP functional"' in body
+    assert 'name="fit_skip_statuses" value="Applied, Closed, Skipped, Not relevant"' in body
+
+
+def test_config_save_stores_fit_settings_tidily(client: FlaskClient, store: Store) -> None:
+    form = config_post(
+        fit_excluded_companies=" Foo ,Bar,, foo ",
+        fit_skip_statuses="applied, closed",
+        fit_min_years="5",
+    )
+    response = client.post("/config", data=form, follow_redirects=True)
+    assert "Configuration saved" in text(response)
+    config = Config.from_raw(store.get_config_raw())
+    assert config.fit_excluded_companies == "Foo, Bar"
+    assert config.fit_skip_statuses == "Applied, Closed"
+    assert config.fit_min_years == 5
+
+
+def test_config_save_rejects_an_unknown_status(client: FlaskClient, store: Store) -> None:
+    response = client.post("/config", data=config_post(fit_skip_statuses="Applied, Banana"))
+    assert response.status_code == 400
+    assert "not a status: Banana" in text(response)
+    assert store.get_config_raw() == {}
+
+
+def test_config_fit_group_has_info_icon(client: FlaskClient) -> None:
+    html = client.get("/config").get_data(as_text=True)
+    assert html.count('class="info"') == len(GROUP_INFO)
+    assert "apply immediately" in html
