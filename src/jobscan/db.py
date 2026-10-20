@@ -377,6 +377,13 @@ def _migration_7(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_8(conn: sqlite3.Connection) -> None:
+    """The user's own Fit rating of a role (good or bad), which overrides its status as a label."""
+    conn.execute(
+        "ALTER TABLE roles ADD COLUMN fit_rating TEXT CHECK (fit_rating IN ('good', 'bad'))"
+    )
+
+
 # Append new migrations to the end; never edit one that has shipped.
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_1,
@@ -386,6 +393,7 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_5,
     _migration_6,
     _migration_7,
+    _migration_8,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 

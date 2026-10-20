@@ -8,7 +8,9 @@ src/jobscan/client.py
 src/jobscan/config.py
 src/jobscan/cv.py
 src/jobscan/db.py
+src/jobscan/details.py
 src/jobscan/embeddings.py
+src/jobscan/evaluation.py
 src/jobscan/fit_filters.py
 src/jobscan/keywords.py
 src/jobscan/lock.py
@@ -40,6 +42,7 @@ src/jobscan/web/templates/base.html
 src/jobscan/web/templates/config.html
 src/jobscan/web/templates/cv.html
 src/jobscan/web/templates/error.html
+src/jobscan/web/templates/eval.html
 src/jobscan/web/templates/role.html
 src/jobscan/web/templates/roles.html
 src/jobscan/web/templates/runs.html
@@ -50,7 +53,9 @@ tests/test_cli_scoring.py
 tests/test_client.py
 tests/test_config.py
 tests/test_cv.py
+tests/test_details.py
 tests/test_embeddings.py
+tests/test_evaluation.py
 tests/test_fit_filters.py
 tests/test_keywords.py
 tests/test_matching.py
@@ -61,5 +66,6 @@ tests/test_scoring.py
 tests/test_store.py
 tests/test_timeutil.py
 tests/test_web.py
+tests/test_web_eval.py
 tests/test_web_forms.py
 tests/test_web_scoring.py

@@ -11,8 +11,18 @@ from jobscan.embeddings import EmbedAuthError
 from jobscan.models import JobDetail, NewRole, ScoringRun
 from jobscan.report import scoring_summary
 from jobscan.timeutil import now_ist, to_iso
-from tests.fakes import TPM, BagEmbedder, ScriptedFetcher, card, end, ok
-from tests.test_scoring import CV_TEXT, PAYMENTS_JD, upload_cv
+from tests.fakes import (
+    TPM,
+    BagEmbedder,
+    ScriptedDetails,
+    ScriptedFetcher,
+    card,
+    detail_none,
+    detail_throttled,
+    end,
+    ok,
+)
+from tests.test_scoring import CV_TEXT, PAYMENTS_JD, WAREHOUSE_JD, upload_cv
 
 SCRIPT = {(TPM, 0): [ok(card("1"))], (TPM, 1): [end()]}
 
@@ -248,3 +258,201 @@ def test_summary_reports_tokens_basis_and_note_and_omits_idle_spend() -> None:
     assert not any("Embeddings" in line for line in lines)
     assert lines[-1] == "  Note: Daily limit reached"
     assert lines[1] == "  Skipped: 4 excluded by rule, 1 without a description"
+
+
+# ---- jobscan eval ------------------------------------------------------------------------------
+
+
+def add_labelled(
+    db_path: Path, job_id: str, status: str, title: str, *, description: str | None
+) -> None:
+    store = cli.open_store(db_path)
+    run = store.start_run(window_seconds=86400, keywords_total=1)
+    store.insert_role(
+        NewRole(
+            portal="LinkedIn",
+            job_id=job_id,
+            title=title,
+            company="Acme",
+            location="Pune",
+            link=f"https://www.linkedin.com/jobs/view/{job_id}",
+            posted_on=None,
+            posted_precision="day",
+            fetched_on=to_iso(now_ist()),
+            actively_hiring=False,
+            matched_phrase=TPM,
+            possible_duplicate_of=None,
+            dup_key=None,
+            raw_datetime=None,
+            raw_relative=None,
+            run_id=run,
+        )
+    )
+    if description is not None:
+        store.save_detail("LinkedIn", job_id, JobDetail(description), when=to_iso(now_ist()))
+    store.update_status([f"LinkedIn|{job_id}"], status)
+    store.close()
+
+
+def test_eval_without_cv_is_a_usage_error(db_path: Path) -> None:
+    code, text, bag = run_cli(db_path, "eval")
+    assert code == EXIT_USAGE
+    assert "needs a CV" in text
+    assert bag.calls == []
+
+
+def test_eval_with_invalid_config(db_path: Path) -> None:
+    store = cli.open_store(db_path)
+    store.set_config_raw({"score_sem_floor": "0.9", "score_sem_ceiling": "0.5"})
+    store.close()
+    code, text, _ = run_cli(db_path, "eval")
+    assert code == EXIT_USAGE
+    assert "nothing was evaluated" in text
+
+
+def test_eval_scores_labelled_roles_then_reports(db_path: Path) -> None:
+    seed(db_path, described=False)
+    add_labelled(db_path, "1", "Applied", "Technical Program Manager", description=PAYMENTS_JD)
+    add_labelled(db_path, "2", "Not relevant", "Warehouse Supervisor", description=WAREHOUSE_JD)
+    add_labelled(db_path, "3", "Applied", "Program Manager", description=None)
+    code, text, bag = run_cli(db_path, "eval")
+    assert code == EXIT_OK
+    assert "Eval: scoring 2 labelled role(s)" in text
+    assert "Eval: 3 labelled roles (2 good, 1 bad), 2 with a current score" in text
+    assert "1 without a description (run jobscan details)" in text
+    assert "Directional only" in text
+    assert "Keywords only" in text
+    assert "Meaning only" in text
+    assert "Current mix (40% keywords)" in text
+    assert "Search phrases (good / bad roles):" in text
+    assert bag.calls
+    assert scores(db_path) == 2
+
+
+def test_eval_does_not_rescore_current_scores(db_path: Path) -> None:
+    seed(db_path, described=False)
+    add_labelled(db_path, "1", "Applied", "Technical Program Manager", description=PAYMENTS_JD)
+    run_cli(db_path, "eval")
+    code, text, bag = run_cli(db_path, "eval")
+    assert code == EXIT_OK
+    assert "scoring" not in text.lower().split("eval: 1 labelled")[0]
+    assert bag.calls == []
+
+
+def test_eval_with_nothing_labelled(db_path: Path) -> None:
+    seed(db_path)
+    code, text, _ = run_cli(db_path, "eval")
+    assert code == EXIT_OK
+    assert "Eval: 0 labelled roles" in text
+    assert "Need at least one good and one bad" in text
+
+
+def test_eval_interrupt_exits_130(db_path: Path) -> None:
+    seed(db_path, described=False)
+    add_labelled(db_path, "1", "Applied", "Technical Program Manager", description=PAYMENTS_JD)
+    code, _text, _ = run_cli(db_path, "eval", embedder=BagEmbedder(failures=[KeyboardInterrupt()]))
+    assert code == EXIT_INTERRUPTED
+
+
+def test_eval_reports_scoring_trouble_and_still_prints(db_path: Path) -> None:
+    seed(db_path, described=False)
+    add_labelled(db_path, "1", "Applied", "Technical Program Manager", description=PAYMENTS_JD)
+    bag = BagEmbedder(failures=[EmbedAuthError("API key rejected")])
+    code, text, _ = run_cli(db_path, "eval", embedder=bag)
+    assert code == EXIT_OK
+    assert "key" in text.lower()
+    assert "1 not yet scored (run jobscan eval)" in text
+
+
+# ---- jobscan details ---------------------------------------------------------------------------
+
+
+def run_details(db_path: Path, details: ScriptedDetails) -> tuple[int, str]:
+    out = io.StringIO()
+    code = main(
+        ["--db", str(db_path), "details"],
+        out=out,
+        detail_fetcher=details,
+        sleep=lambda _s: None,
+    )
+    return code, out.getvalue()
+
+
+def test_details_with_nothing_waiting(db_path: Path) -> None:
+    seed(db_path, described=False)  # a role without a description, but no label
+    details = ScriptedDetails()
+    code, text = run_details(db_path, details)
+    assert code == EXIT_OK
+    assert "No labelled roles are waiting" in text
+    assert details.calls == []
+
+
+def test_details_fetches_labelled_roles_of_any_age(db_path: Path) -> None:
+    add_labelled(db_path, "1", "Applied", "Technical Program Manager", description=None)
+    add_labelled(db_path, "2", "Not relevant", "Warehouse Supervisor", description=None)
+    store = cli.open_store(db_path)
+    store.conn.execute("UPDATE roles SET fetched_on = '2025-01-01T00:00:00+05:30'")
+    store.close()
+    details = ScriptedDetails({"2": [detail_none("HTTP 404")]})
+    code, text = run_details(db_path, details)
+    assert code == EXIT_OK
+    assert sorted(details.calls) == ["1", "2"]
+    assert "1 saved, 1 without one (posting gone), 0 left for later" in text
+    store = cli.open_store(db_path)
+    role = store.get_role("LinkedIn", "1")
+    store.close()
+    assert role is not None
+    assert role.description == "Description of 1"
+
+
+def test_details_stops_on_repeated_throttling(db_path: Path) -> None:
+    for n in ("1", "2", "3"):
+        add_labelled(db_path, n, "Applied", "Technical Program Manager", description=None)
+    details = ScriptedDetails({n: [detail_throttled()] for n in ("1", "2", "3")})
+    code, text = run_details(db_path, details)
+    assert code == EXIT_PARTIAL
+    assert "Stopped after repeated throttling" in text
+    assert len(details.calls) == 2
+
+
+def test_details_with_invalid_config(db_path: Path) -> None:
+    store = cli.open_store(db_path)
+    store.set_config_raw({"max_pages_per_keyword": "0"})
+    store.close()
+    code, text = run_details(db_path, ScriptedDetails())
+    assert code == EXIT_USAGE
+    assert "nothing was fetched" in text
+
+
+def test_details_interrupt_exits_130(db_path: Path) -> None:
+    add_labelled(db_path, "1", "Applied", "Technical Program Manager", description=None)
+
+    class Interrupting:
+        def fetch_detail(self, job_id: str):  # type: ignore[no-untyped-def]
+            raise KeyboardInterrupt
+
+    out = io.StringIO()
+    code = main(
+        ["--db", str(db_path), "details"],
+        out=out,
+        detail_fetcher=Interrupting(),
+        sleep=lambda _s: None,
+    )
+    assert code == EXIT_INTERRUPTED
+    assert "Interrupted" in out.getvalue()
+
+
+def test_the_scan_still_fetches_descriptions_through_the_shared_code(db_path: Path) -> None:
+    out = io.StringIO()
+    details = ScriptedDetails()
+    code = main(
+        ["--db", str(db_path), "scan"],
+        out=out,
+        fetcher=ScriptedFetcher(SCRIPT),
+        detail_fetcher=details,
+        make_embedder=lambda _config: BagEmbedder(),
+        sleep=lambda _s: None,
+    )
+    assert code == EXIT_OK
+    assert details.calls == ["1"]
+    assert "Descriptions: 1 saved, 0 without one, 0 left for later" in out.getvalue()

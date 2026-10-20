@@ -18,6 +18,20 @@ STATUSES: tuple[str, ...] = (
     "Interview cleared",
 )
 DEFAULT_STATUS = STATUSES[0]
+
+# Labels for the eval. A role you chose to apply to is a good fit; one you marked Not relevant is
+# a bad fit. Skipped and Closed say nothing about fit. A Fit rating overrides the status.
+LABEL_GOOD = "good"
+LABEL_BAD = "bad"
+GOOD_STATUSES: tuple[str, ...] = (
+    "Applied",
+    "Initial screening rejected",
+    "Interview phase rejected",
+    "Interview Ongoing",
+    "Interview cleared",
+)
+BAD_STATUSES: tuple[str, ...] = ("Not relevant",)
+LABEL_STATUSES: tuple[str, ...] = GOOD_STATUSES + BAD_STATUSES
 # Order shown in dropdowns and filters (A to Z). STATUSES keeps the workflow order.
 SORTED_STATUSES: tuple[str, ...] = tuple(sorted(STATUSES, key=str.casefold))
 
@@ -165,10 +179,20 @@ class Role:
     employment_type: str | None = None
     industries: str | None = None
     job_function: str | None = None
+    fit_rating: str | None = None  # the user's own verdict: "good", "bad" or None
 
     @property
     def key(self) -> str:
         return f"{self.portal}|{self.job_id}"
+
+    @property
+    def label(self) -> str | None:
+        """ "good", "bad" or None: the user's rating if there is one, otherwise from the status."""
+        if self.fit_rating is not None:
+            return self.fit_rating
+        if self.status in GOOD_STATUSES:
+            return LABEL_GOOD
+        return LABEL_BAD if self.status in BAD_STATUSES else None
 
 
 @dataclass(frozen=True)

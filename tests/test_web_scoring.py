@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import io
-from collections.abc import Iterator
 
 import pytest
 from flask.testing import FlaskClient
 
-from jobscan import db
 from jobscan.config import Config
 from jobscan.cv import sha_of
 from jobscan.embeddings import API_KEY_ENV, EmbedAuthError
@@ -14,42 +12,9 @@ from jobscan.models import Cv, JobDetail, NewRole
 from jobscan.scoring import cv_chunks
 from jobscan.store import Store
 from jobscan.timeutil import now_ist, to_iso
-from jobscan.web import create_app
-from tests.fakes import BagEmbedder
+from tests.conftest import Harness
 from tests.test_cv import docx_bytes, pdf_bytes
 from tests.test_scoring import CV_TEXT, PAYMENTS_JD, WAREHOUSE_JD
-
-
-class Harness:
-    def __init__(self, store: Store, embedder: BagEmbedder) -> None:
-        self.store = store
-        self.embedder = embedder
-        self.client = create_app(
-            store, secret_key="test", make_embedder=lambda _config: embedder
-        ).test_client()
-
-
-@pytest.fixture
-def store() -> Iterator[Store]:
-    conn = db.connect(":memory:")
-    db.migrate(conn)
-    yield Store(conn)
-    conn.close()
-
-
-@pytest.fixture
-def embedder() -> BagEmbedder:
-    return BagEmbedder()
-
-
-@pytest.fixture
-def web(store: Store, embedder: BagEmbedder) -> Harness:
-    return Harness(store, embedder)
-
-
-@pytest.fixture
-def client(web: Harness) -> FlaskClient:
-    return web.client
 
 
 def body(response) -> str:  # type: ignore[no-untyped-def]

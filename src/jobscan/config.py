@@ -52,6 +52,7 @@ class Config:
     fit_excluded_companies: str = "Amazon, Intuit"
     fit_skip_statuses: str = "Applied, Closed, Skipped, Not relevant"
     fit_deny_keywords: str = "sales, warehouse, SAP functional"
+    fit_excluded_industries: str = ""
     score_after_scan: int = 1
     score_weight_keyword: int = 40
     score_weight_requirement: float = 2.0
@@ -168,6 +169,7 @@ LIST_SETTINGS = (
     "fit_excluded_companies",
     "fit_skip_statuses",
     "fit_deny_keywords",
+    "fit_excluded_industries",
 )
 MAX_LIST_ITEMS = 100
 MAX_LIST_ITEM_CHARS = 80

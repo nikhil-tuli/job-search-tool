@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import secrets
 from collections.abc import Callable, Collection, Mapping
 from typing import Any
@@ -22,12 +23,20 @@ from flask import (
 )
 from werkzeug.wrappers import Response as WerkzeugResponse
 
-from ..config import LIST_SETTINGS, Config, ConfigError
+from ..config import LIST_SETTINGS, Config, ConfigError, split_list
 from ..cv import MAX_UPLOAD_BYTES, CvError, extract_text, sha_of
 from ..embeddings import API_KEY_ENV, Embedder
+from ..evaluation import build_report, load_labelled
 from ..fit_filters import FitResult, FitRules, evaluate
 from ..matching import MATCH_MODES
-from ..models import SORTED_STATUSES, STATUSES, Cv, Role, RoleFilter
+from ..models import (
+    LABEL_GOOD,
+    SORTED_STATUSES,
+    STATUSES,
+    Cv,
+    Role,
+    RoleFilter,
+)
 from ..scoring import (
     DAILY_WINDOW,
     TRIGGER_ROLE,
@@ -57,6 +66,16 @@ from .forms import (
 from .scores import ScoreView, score_views
 
 PAGE_SIZE = 100
+RATING_CHOICES = ("good", "bad", "clear")
+# What the Eval page can add to the Fit filters: (setting, allowed value, how to say it).
+EXCLUDE_KINDS = {
+    "title": ("fit_deny_keywords", re.compile(r"[a-z][a-z0-9]{2,}"), "a title deny word"),
+    "industry": (
+        "fit_excluded_industries",
+        re.compile(r"[A-Za-z0-9][A-Za-z0-9 &'/().-]{1,78}[A-Za-z0-9).]"),
+        "an excluded industry",
+    ),
+}
 FIT_CHOICES = ("eligible", "excluded")
 SCORE_CHOICES = ("strong", "partial", "weak", "unscored")
 SORT_CHOICES = ("score",)
@@ -175,6 +194,12 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "Deny keywords in the title",
                 "Comma separated. Whole words or phrases, title only",
             ),
+            (
+                "fit_excluded_industries",
+                "Excluded industries",
+                "Comma separated, as LinkedIn names them (for example Staffing and Recruiting). "
+                "Needs the role's description to have been fetched",
+            ),
         ),
     ),
     (
@@ -290,6 +315,16 @@ def _host_name(host: str) -> str:
     if host.startswith("["):
         return host.split("]")[0] + "]"
     return host.split(":")[0]
+
+
+def label_note(role: Role) -> str:
+    """Says whether the eval counts this role as good or bad, and why."""
+    verdict = "a good fit" if role.label == LABEL_GOOD else "a poor fit"
+    if role.fit_rating is not None:
+        return f"Counted in the eval as {verdict}, from your rating."
+    if role.label is not None:
+        return f"Counted in the eval as {verdict}, from its status ({role.status})."
+    return "Not counted in the eval. Rate it, or set a status such as Applied or Not relevant."
 
 
 def create_app(
@@ -484,6 +519,7 @@ def create_app(
             page=page,
             pages=pages,
             filters=active,
+            advanced_open=any(k in active for k in ("fit", "score", "sort")),
             here=here,
             last_success=store.last_successful_run(),
         )
@@ -524,6 +560,7 @@ def create_app(
             "fit": evaluate(role, FitRules.from_config(config), now_ist()),
             "score": score_views(store, config, cv, [role]).get(role.key),
             "has_cv": cv is not None,
+            "label_note": label_note(role),
         }
 
     def score_one(role: Role) -> tuple[str, ScoreView | None]:
@@ -593,7 +630,11 @@ def create_app(
         if panel:
             saved = store.get_role(portal, job_id)
             assert saved is not None
-            return jsonify(status=saved.status, applied_on=_role_values(saved)["applied_on"])
+            return jsonify(
+                status=saved.status,
+                applied_on=_role_values(saved)["applied_on"],
+                note=label_note(saved),
+            )
         flash("Saved.", "ok")
         return redirect(target)
 
@@ -617,6 +658,54 @@ def create_app(
             )
         flash(message, "ok" if view else "error")
         return redirect(safe_next(request.form.get("next"), url_for("roles")))
+
+    @app.post("/roles/<portal>/<job_id>/rating")
+    def role_rating(portal: str, job_id: str) -> WerkzeugResponse | Response:
+        role = store.get_role(portal, job_id)
+        if role is None:
+            abort(404, "Role not found")
+        choice = request.form.get("rating", "")
+        if choice not in RATING_CHOICES:
+            abort(400, "Unknown rating")
+        store.set_fit_rating(portal, job_id, None if choice == "clear" else choice)
+        saved = store.get_role(portal, job_id)
+        assert saved is not None
+        if request.headers.get("X-Panel") == "1":
+            return jsonify(rating=saved.fit_rating or "", note=label_note(saved))
+        flash(label_note(saved), "ok")
+        return redirect(safe_next(request.form.get("next"), url_for("roles")))
+
+    # ---- eval -----------------------------------------------------------------------------
+
+    @app.get("/eval")
+    def eval_page() -> str:
+        config, cv = current_config(), store.get_cv()
+        phrases = [p.phrase for p in store.list_phrases() if p.use_for_match]
+        report = build_report(load_labelled(store, config, cv), config, phrases)
+        return render_template("eval.html", report=report, has_cv=cv is not None)
+
+    @app.post("/eval/exclude")
+    def eval_exclude() -> WerkzeugResponse:
+        """Add a suggested title word or industry to the matching Fit filter list."""
+        kind = request.form.get("kind", "")
+        if kind not in EXCLUDE_KINDS:
+            abort(400, "Unknown kind")
+        setting, pattern, noun = EXCLUDE_KINDS[kind]
+        value = " ".join(request.form.get("value", "").split())
+        if not pattern.fullmatch(value):
+            abort(400, "Not a usable value")
+        config = current_config()
+        items = list(split_list(getattr(config, setting)))
+        if value.casefold() not in {item.casefold() for item in items}:
+            raw = config.to_raw()
+            raw[setting] = ", ".join([*items, value])
+            try:
+                store.set_config_raw(Config.from_raw(raw).to_raw())
+            except ConfigError as exc:
+                flash(next(iter(exc.errors.values())), "error")
+                return redirect(url_for("eval_page"))
+        flash(f'"{value}" is now {noun}. Fit filters apply at once.', "ok")
+        return redirect(url_for("eval_page"))
 
     @app.get("/export.csv")
     def export_csv() -> Response:

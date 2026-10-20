@@ -15,19 +15,6 @@
     <option value="">Any status</option>
     {% for s in statuses %}<option value="{{ s }}" {% if filters.get('status') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
   </select>
-  <select name="fit" aria-label="Fit filter">
-    <option value="">Any fit</option>
-    <option value="eligible" {% if filters.get('fit') == 'eligible' %}selected{% endif %}>Eligible</option>
-    <option value="excluded" {% if filters.get('fit') == 'excluded' %}selected{% endif %}>Excluded</option>
-  </select>
-  <select name="score" aria-label="Score filter">
-    <option value="">Any score</option>
-    {% for value, label in (('strong', 'Strong fit'), ('partial', 'Partial fit'), ('weak', 'Weak fit'), ('unscored', 'Unscored')) %}<option value="{{ value }}" {% if filters.get('score') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
-  </select>
-  <select name="sort" aria-label="Sort order">
-    <option value="">Newest first</option>
-    <option value="score" {% if filters.get('sort') == 'score' %}selected{% endif %}>Best fit first</option>
-  </select>
   {% if filters.get('fetched') %}
   <input type="hidden" name="fetched" value="{{ filters['fetched'] }}">
   <span class="tag chip">Fetched {{ filters['fetched'] }} <a href="{{ url_for('roles', **without(filters, 'fetched')) }}" aria-label="Remove date filter">&times;</a></span>
@@ -36,6 +23,24 @@
   <button type="submit">Filter</button>
   <a href="{{ url_for('roles') }}">Clear</a>
   <a class="right" href="{{ url_for('export_csv', **filters) }}">Export CSV</a>
+  <details class="advanced"{% if advanced_open %} open{% endif %}>
+    <summary>Advanced filters{% if advanced_open %} <span class="tag chip">on</span>{% endif %}</summary>
+    <div class="advanced-body">
+      <select name="fit" aria-label="Fit filter">
+        <option value="">Any fit</option>
+        <option value="eligible" {% if filters.get('fit') == 'eligible' %}selected{% endif %}>Eligible</option>
+        <option value="excluded" {% if filters.get('fit') == 'excluded' %}selected{% endif %}>Excluded</option>
+      </select>
+      <select name="score" aria-label="Score filter">
+        <option value="">Any score</option>
+        {% for value, label in (('strong', 'Strong fit'), ('partial', 'Partial fit'), ('weak', 'Weak fit'), ('unscored', 'Unscored')) %}<option value="{{ value }}" {% if filters.get('score') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <select name="sort" aria-label="Sort order">
+        <option value="">Newest first</option>
+        <option value="score" {% if filters.get('sort') == 'score' %}selected{% endif %}>Best fit first</option>
+      </select>
+    </div>
+  </details>
 </form>
 
 <form id="bulk" class="bulk" method="post" action="{{ url_for('set_status') }}">
@@ -62,6 +67,7 @@
       <td><input type="checkbox" name="ids" value="{{ r.key }}" form="bulk" aria-label="Select {{ r.title }}"></td>
       <td>
         <a class="row-link" href="{{ url_for('role_page', portal=r.portal, job_id=r.job_id, next=here) }}">{{ r.title }}</a>
+        <span class="rating-mark" title="Your rating">{% if r.fit_rating == 'good' %}&#128077;{% elif r.fit_rating == 'bad' %}&#128078;{% endif %}</span>
         {% if r.actively_hiring %}<span class="tag">Actively hiring</span>{% endif %}
         {% if r.possible_duplicate_of %}<span class="tag warn" title="Same company, title and city as {{ r.possible_duplicate_of }}">Possible duplicate</span>{% endif %}
       </td>

@@ -2,7 +2,7 @@
 
 Last updated 19 Oct 2026. Kept in the repo and updated with each change.
 
-**Build status:** Phases 1 to 3 are built: the rule filter, CV upload, chunking, keyword and embedding scores, the scoring run log, and the Score column, filter and sort. Phase 4 (Fit rating and eval) is not. Not yet checked against the live Gemini service (the build sandbox cannot reach Google), so the first real run is the test of the request format and the quota counting.
+**Build status:** All four phases are built: the rule filter, CV upload, chunking, keyword and embedding scores, the scoring run log, the Score column, filter and sort, and Phase 4 (Fit rating, `jobscan eval` and the Eval page). Calibrating the weights and bands from your own ratings is the step that remains, and it needs your data. Not yet checked against the live Gemini service (the build sandbox cannot reach Google), so the first real run is the test of the request format and the quota counting.
 
 ## Purpose and scope
 
@@ -42,6 +42,7 @@ A personal, local-first LinkedIn job scanner and tracker for a Technical Program
 | Excluded companies | Case-insensitive whole words, so "Amazon" also catches "Amazon Development Centre" but not "Amazonian Foods" | Amazon, Intuit |
 | Already actioned | Skip roles with these statuses | Applied, Closed, Skipped, Not relevant |
 | Deny keywords | Matched on the title only, as whole words or phrases, never the description | sales, warehouse, SAP functional |
+| Excluded industries | LinkedIn's own Industries line for the role, matched by whole name, any case (for example Staffing and Recruiting, Construction). Only roles whose description has been fetched have one | None (you choose) |
 
 **What a filtered role looks like:** it stays in the list, unscored, with a grey tag such as "Excluded: company". Hover shows the full reason. A "+2" means two more reasons. The side panel lists them all. The Roles page has an Any fit, Eligible and Excluded filter, and the CSV export follows it.
 
@@ -86,28 +87,40 @@ Every scoring run (automatic, button or re-score) is recorded and shown in the a
 - Token counts are marked estimated (characters divided by 3) unless the API reported them.
 - Scores are saved wave by wave, so an interrupted run keeps what it finished.
 
-## Labels and evals (Phase 4)
+## Labels and evals (Phase 4, built)
 
 **Labels**
 
 - Good: status Applied or any interview status. Bad: status Not relevant. Skipped and Closed are ignored.
-- A thumbs up/down Fit rating in the side panel on every role. It overrides the status-based label.
+- A Good fit / Poor fit rating in the side panel on every role (with Clear). It overrides the status-based label, and the panel says which label a role has and why. A rated role shows a thumb next to its title. The rating is stored on the role (schema version 8).
 - Labels lean toward roles you chose to apply to, so results are directional.
 
-**Eval**
+**Eval (`jobscan eval` and the Eval page)**
 
-- A command and a page that score every labelled role and report:
-    - average score of good vs bad roles, and how often a good role outranks a bad one
-    - of the top 10 by score, how many are good
-    - a list of misses: good roles scored low, bad roles scored high
-- Compares keyword only, embeddings only and the hybrid, and different weights, so settings come from your data.
-- Needs about 20 to 30 labelled roles to mean anything.
+- `jobscan eval` scores the labelled roles that have a description but no current score (labelled roles count whatever the Fit filter says), then prints the report. The Eval page shows the same report from stored scores and never scores anything itself, so a long run is never tied to a browser request.
+- `jobscan details` fetches missing descriptions for labelled roles of any age (a scan only fetches recent ones), paced like a scan, so older Applied roles can be scored. A posting that has gone stays without one.
+- The report:
+    - AUC (the chance a good role outscores a bad one; ties count half), the average score of good and bad roles, and how many good roles are in the top 10 (ties are counted against us), for keywords only, meaning only and the current mix
+    - AUC at every 10% keyword share, with the best share on this data (the one nearest the current setting wins a tie)
+    - the cut-off score that keeps the most good roles while letting through the fewest bad ones
+    - misses: the five good roles scored lowest and the five bad roles scored highest
+    - a warning "Directional only" until at least 5 good, 5 bad and 20 scored roles exist
+- Settings are never changed by the eval. It shows what to change and where.
+
+**Cutting irrelevant roles**
+
+- **Search phrase yield:** per search phrase, how many labelled roles were good and bad, so an over-broad phrase shows up.
+- **Deny word ideas:** title words in at least 2 bad roles and no good one, not already denied, and not part of a search phrase. One click adds the word to the title deny words.
+- **Industry ideas:** LinkedIn industries on at least 2 bad roles and no good one. One click adds the industry to Excluded industries.
+- Both only tag roles Excluded. Nothing is hidden or deleted, and each can be removed on the Config page.
 
 ## Display, config, privacy, errors
 
 - **Roles list (built):** a Fit column (Eligible or the exclusion tag) and a Score column with a band pill. Filters: Any score, Strong, Partial, Weak, Unscored. Sort: Best fit first (unscored last). The CSV export follows both and adds Fit Score and Fit Band.
-- **Side panel (built):** the Fit filter result with reasons, the score with its parts, and a Score / Re-score button. The thumbs up/down Fit rating comes with Phase 4.
-- **Config (built):** the Fit filters group, a Scoring group (weights, floors, ceilings, bands, chunking) and an Embeddings (Gemini) group (model, dimensions, batch size, rate and daily limits). Invalid pairs such as floor above ceiling are rejected.
+- **Advanced filters (built):** the Roles page keeps search, status and possible duplicates in the main bar. Fit, Score and the sort (Newest first or Best fit first) sit in a collapsible Advanced filters section. It opens by itself, with an "on" badge, whenever one of them is active.
+- **Side panel (built):** the Fit filter result with reasons, the score with its parts, a Score / Re-score button, and the Good fit / Poor fit rating.
+- **Eval page (built):** a nav tab with the report above.
+- **Config (built):** the Fit filters group, an Excluded industries setting in the Fit filters group, a Scoring group (weights, floors, ceilings, bands, chunking) and an Embeddings (Gemini) group (model, dimensions, batch size, rate and daily limits). Invalid pairs such as floor above ceiling are rejected.
 - **API key:** an environment variable or an untracked local file. Never in the database or git.
 - **Privacy:** the CV and descriptions go to Google's free tier. Accepted for now. Google's pricing page says free-tier content is used to improve its products for most models, and this is not confirmed for embeddings.
 - **Rate limits and failures:** small batches, back off when throttled, retry on the next scan. A scoring failure never fails a scan.
@@ -127,14 +140,14 @@ Every scoring run (automatic, button or re-score) is recorded and shown in the a
 
 - LLM review: not in the first release. Revisit after the eval.
 - Whether a batched embedding request counts as one request or one per text against the Gemini quota (100 per minute, 30K tokens per minute, 1K per day) is not verified. The build assumes the worse case, one per text, so it can only under-use the quota. Check the AI Studio usage meter after the first real run. The batch request body and response shape were written from the API reference and are also unverified.
-- Score weights and bands: calibrate on about 20 rated roles.
+- Score weights and bands: calibrate on about 20 rated roles, using the Eval page.
 
 **Build order**
 
 1. Rule filter, Config group and exclusion tags. **Built.**
 2. CV upload, chunking and keyword score. **Built.**
 3. Gemini embeddings, cosine, merge and the scoring run log. **Built.**
-4. Fit rating, eval command, then calibrate weights and bands.
+4. Fit rating, `jobscan eval`, `jobscan details`, the Eval page and the relevance tools. **Built.** Calibrating the weights and bands needs about 20 or more rated roles.
 5. LLM review: not planned.
 
 ## Q&A

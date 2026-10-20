@@ -32,6 +32,7 @@ REASON_COMPANY = "company"
 REASON_SENIORITY = "seniority"
 REASON_TITLE = "title keyword"
 REASON_YEARS = "years"
+REASON_INDUSTRY = "industry"
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class FitRules:
     excluded_companies: tuple[str, ...]
     skip_statuses: tuple[str, ...]
     deny_keywords: tuple[str, ...]
+    excluded_industries: tuple[str, ...]
 
     @classmethod
     def from_config(cls, config: Config) -> FitRules:
@@ -54,6 +56,7 @@ class FitRules:
             excluded_companies=split_list(config.fit_excluded_companies),
             skip_statuses=split_list(config.fit_skip_statuses),
             deny_keywords=split_list(config.fit_deny_keywords),
+            excluded_industries=split_list(config.fit_excluded_industries),
         )
 
 
@@ -116,6 +119,9 @@ def evaluate(role: Role, rules: FitRules, now: datetime) -> FitResult:
     deny = _first_hit(rules.deny_keywords, role.title)
     if deny:
         reasons.append(Reason(REASON_TITLE, f'title contains "{deny}"'))
+    industry = _industry_hit(rules.excluded_industries, role.industries)
+    if industry:
+        reasons.append(Reason(REASON_INDUSTRY, f"LinkedIn industry includes {industry}"))
     if rules.min_years > 0:
         years = required_years(role.description)
         if years is not None and years < rules.min_years:
@@ -143,6 +149,20 @@ def _first_hit(phrases: tuple[str, ...], text: str) -> str | None:
     for phrase in phrases:
         if _pattern(phrase).search(text):
             return phrase
+    return None
+
+
+def industry_list(industries: str | None) -> tuple[str, ...]:
+    """The industries LinkedIn lists for a role, from its comma separated Industries line."""
+    return split_list(industries or "")
+
+
+def _industry_hit(excluded: tuple[str, ...], industries: str | None) -> str | None:
+    """The first excluded industry the role lists. Whole names only, any letter case."""
+    listed = {name.casefold() for name in industry_list(industries)}
+    for name in excluded:
+        if name.casefold() in listed:
+            return name
     return None
 
 

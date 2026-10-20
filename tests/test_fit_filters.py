@@ -299,3 +299,59 @@ def test_bad_fit_settings_are_rejected(key: str, value: str) -> None:
 def test_config_round_trips_through_raw() -> None:
     config = Config.from_raw({"fit_excluded_companies": "Foo, Bar", "fit_min_years": "5"})
     assert Config.from_raw(config.to_raw()) == config
+
+
+# ---- excluded industries -------------------------------------------------------------------
+
+INDUSTRY_RULES = FitRules.from_config(
+    Config(fit_excluded_industries="Staffing and Recruiting, Construction")
+)
+
+
+def test_no_industry_is_excluded_by_default() -> None:
+    assert RULES.excluded_industries == ()
+    assert kinds(make_role(industries="Staffing and Recruiting")) == []
+
+
+def test_an_excluded_industry_tags_the_role() -> None:
+    role = make_role(industries="Software Development, Staffing and Recruiting")
+    result = evaluate(role, INDUSTRY_RULES, NOW)
+    assert [r.kind for r in result.reasons] == ["industry"]
+    assert result.reasons[0].detail == "LinkedIn industry includes Staffing and Recruiting"
+    assert result.label == "Excluded: industry"
+
+
+def test_industry_matching_ignores_case_and_spacing() -> None:
+    role = make_role(industries="  construction ,Software Development")
+    assert kinds(role, INDUSTRY_RULES) == ["industry"]
+
+
+def test_industry_names_match_whole_names_only() -> None:
+    assert kinds(make_role(industries="Construction Software"), INDUSTRY_RULES) == []
+    assert kinds(make_role(industries="Staffing"), INDUSTRY_RULES) == []
+
+
+def test_a_role_without_industries_is_not_excluded() -> None:
+    assert kinds(make_role(industries=None), INDUSTRY_RULES) == []
+    assert kinds(make_role(industries=""), INDUSTRY_RULES) == []
+
+
+def test_industry_reason_sits_after_the_title_rules_and_before_years() -> None:
+    config = Config(fit_excluded_industries="Construction", fit_deny_keywords="sales")
+    role = make_role(
+        title="Sales Manager", industries="Construction", description="1 year of experience"
+    )
+    assert kinds(role, FitRules.from_config(config)) == ["title keyword", "industry", "years"]
+
+
+def test_industry_list_is_tidy() -> None:
+    from jobscan.fit_filters import industry_list
+
+    assert industry_list("A, b ,,A") == ("A", "b")
+    assert industry_list(None) == ()
+
+
+def test_excluded_industries_are_a_tidy_list_setting() -> None:
+    config = Config.from_raw({"fit_excluded_industries": " Construction ,,construction, Mining "})
+    assert config.fit_excluded_industries == "Construction, Mining"
+    assert Config.from_raw(config.to_raw()) == config

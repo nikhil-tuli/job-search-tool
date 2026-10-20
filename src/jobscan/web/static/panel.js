@@ -23,6 +23,8 @@
     if (f) { f.addEventListener('submit', submit); }
     var sf = body.querySelector('form.score-form');
     if (sf) { sf.addEventListener('submit', scoreSubmit); }
+    var rf = body.querySelector('form.rating-form');
+    if (rf) { rf.addEventListener('submit', ratingSubmit); }
     var first = body.querySelector('select, input[type=text], textarea');
     if (first) { first.focus(); }
   }
@@ -112,6 +114,43 @@
     });
   }
 
+  var MARKS = { good: '\uD83D\uDC4D', bad: '\uD83D\uDC4E', '': '' };
+
+  function ratingSubmit(event) {
+    event.preventDefault();
+    var f = event.target;
+    var token = loadToken;
+    var choice = event.submitter ? event.submitter.value : '';
+    var note = f.querySelector('.note');
+    var data = new URLSearchParams(new FormData(f));
+    data.set('rating', choice);
+    note.textContent = 'Saving…';
+    fetch(f.action, { method: 'POST', body: data, headers: { 'X-Panel': '1' } })
+      .then(function (r) {
+        if (!r.ok) { throw new Error(r.status); }
+        return r.json();
+      })
+      .then(function (res) {
+        if (token !== loadToken) { return; }
+        note.textContent = '';
+        showRating(res);
+      })
+      .catch(function () {
+        if (token !== loadToken) { return; }
+        note.textContent = 'Could not save. Try again.';
+      });
+  }
+
+  function showRating(res) {
+    body.querySelectorAll('form.rating-form button[name=rating]').forEach(function (b) {
+      if (b.value !== 'clear') { b.setAttribute('aria-pressed', String(b.value === res.rating)); }
+    });
+    var label = body.querySelector('[data-label-note]');
+    if (label) { label.textContent = res.note; }
+    var mark = rows[current].querySelector('.rating-mark');
+    if (mark) { mark.textContent = MARKS[res.rating] || ''; }
+  }
+
   function showScore(score, button) {
     var label = score.band.charAt(0).toUpperCase() + score.band.slice(1);
     var fact = body.querySelector('#score-fact');
@@ -142,6 +181,8 @@
     var select = row.querySelector('select[name=status]');
     if (select) { select.value = data.status; }
     row.querySelector('td.applied').textContent = data.applied_on;
+    var labelNote = body.querySelector('[data-label-note]');
+    if (labelNote && data.note) { labelNote.textContent = data.note; }
     saved = snapshot();
     var f = form();
     var b = f && f.querySelector('button[type=submit]');

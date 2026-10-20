@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 
 from .models import (
     DEFAULT_STATUS,
+    LABEL_STATUSES,
     STATUSES,
     Cv,
     DepthStat,
@@ -138,6 +139,7 @@ def _role(row: sqlite3.Row) -> Role:
         employment_type=row["employment_type"],
         industries=row["industries"],
         job_function=row["job_function"],
+        fit_rating=row["fit_rating"],
     )
 
 
@@ -362,6 +364,19 @@ class Store:
         ).fetchall()
         return [(r["portal"], r["job_id"]) for r in rows]
 
+    def pending_labelled_details(self, limit: int) -> list[tuple[str, str]]:
+        """(portal, job_id) of labelled roles still without a description, whatever their age."""
+        if limit <= 0:
+            return []
+        marks = ",".join("?" * len(LABEL_STATUSES))
+        rows = self._conn.execute(
+            "SELECT portal, job_id FROM roles WHERE description IS NULL AND detail_attempts < ? "
+            f"AND (fit_rating IS NOT NULL OR status IN ({marks})) "
+            "ORDER BY fetched_on DESC, job_id DESC LIMIT ?",
+            (MAX_DETAIL_ATTEMPTS, *LABEL_STATUSES, limit),
+        ).fetchall()
+        return [(r["portal"], r["job_id"]) for r in rows]
+
     def save_detail(self, portal: str, job_id: str, detail: JobDetail, *, when: str) -> None:
         self._conn.execute(
             "UPDATE roles SET description = ?, seniority = ?, employment_type = ?, "
@@ -411,6 +426,27 @@ class Store:
             days.append(FetchDay(day, sum(by_status.values()), by_status))
             current -= timedelta(days=1)
         return days
+
+    def set_fit_rating(self, portal: str, job_id: str, rating: str | None) -> None:
+        """Record the user's verdict on a role: "good", "bad", or None to clear it."""
+        if rating not in (None, "good", "bad"):
+            raise StoreError(f"unknown rating: {rating!r}")
+        if not self.role_exists(portal, job_id):
+            raise StoreError(f"unknown role: {portal}|{job_id}")
+        self._conn.execute(
+            "UPDATE roles SET fit_rating = ? WHERE portal = ? AND job_id = ?",
+            (rating, portal, job_id),
+        )
+
+    def list_labelled_roles(self) -> list[Role]:
+        """Roles that carry a label: a rating, or a status that says good or bad."""
+        marks = ",".join("?" * len(LABEL_STATUSES))
+        rows = self._conn.execute(
+            f"SELECT * FROM roles WHERE fit_rating IS NOT NULL OR status IN ({marks}) "
+            "ORDER BY fetched_on DESC, job_id DESC",
+            LABEL_STATUSES,
+        ).fetchall()
+        return [_role(r) for r in rows]
 
     def update_status(
         self, keys: Iterable[str], status: str, *, today: datetime | None = None

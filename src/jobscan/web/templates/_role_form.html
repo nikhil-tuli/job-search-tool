@@ -22,6 +22,17 @@
       <span class="note" aria-live="polite"></span>
     </form>
   </dd>
+  <dt>Your rating</dt>
+  <dd id="rating-fact">
+    <form method="post" class="rating-form" action="{{ url_for('role_rating', portal=role.portal, job_id=role.job_id) }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <button type="submit" name="rating" value="good" aria-pressed="{{ 'true' if role.fit_rating == 'good' else 'false' }}">&#128077; Good fit</button>
+      <button type="submit" name="rating" value="bad" aria-pressed="{{ 'true' if role.fit_rating == 'bad' else 'false' }}">&#128078; Poor fit</button>
+      <button type="submit" name="rating" value="clear">Clear</button>
+      <span class="note" aria-live="polite"></span>
+    </form>
+    <small class="muted" data-label-note>{{ label_note }}</small>
+  </dd>
   {% if role.possible_duplicate_of %}<dt>Possible duplicate of</dt><dd>{{ role.possible_duplicate_of }}</dd>{% endif %}
   {% if role.seniority %}<dt>Seniority</dt><dd>{{ role.seniority }}</dd>{% endif %}
   {% if role.employment_type %}<dt>Employment type</dt><dd>{{ role.employment_type }}</dd>{% endif %}
@@ -33,7 +44,7 @@
 {% if role.description %}
 <div class="desc" tabindex="0">{{ role.description }}</div>
 {% else %}
-<p class="muted">No description saved yet. It is fetched during a scan, for recent roles only.</p>
+<p class="muted">No description saved yet. It is fetched during a scan, for recent roles only. For roles you rated or actioned, run jobscan details.</p>
 {% endif %}
 
 <form method="post" class="edit" action="{{ url_for('role_save', portal=role.portal, job_id=role.job_id) }}">

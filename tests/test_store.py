@@ -933,3 +933,26 @@ def test_upgrade_from_version_6_adds_scoring_and_keeps_roles(
     assert conn.execute("PRAGMA user_version").fetchone()[0] == latest
     assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'role_scores'").fetchone()
     conn.close()
+
+
+def test_upgrade_from_version_7_adds_the_rating_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    migrations = db.MIGRATIONS
+    conn = db.connect(tmp_path / "v7.db")
+    with monkeypatch.context() as old:
+        old.setattr(db, "SCHEMA_VERSION", 7)
+        old.setattr(db, "MIGRATIONS", migrations[:7])
+        db.migrate(conn)
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(roles)")}
+    assert "fit_rating" not in columns
+    db.migrate(conn)
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(roles)")}
+    assert "fit_rating" in columns
+    conn.close()
+
+
+def test_rating_column_rejects_other_values(store: Store, run_id: int) -> None:
+    store.insert_role(make_role("1", run_id=run_id))
+    with pytest.raises(sqlite3.IntegrityError):
+        store.conn.execute("UPDATE roles SET fit_rating = 'great'")

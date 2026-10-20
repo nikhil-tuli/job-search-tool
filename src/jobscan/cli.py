@@ -1,4 +1,4 @@
-"""Command line interface: scan, serve, status."""
+"""Command line interface: scan, score, eval, details, serve, status."""
 
 from __future__ import annotations
 
@@ -15,10 +15,12 @@ from . import __version__
 from .client import DetailFetcher, LinkedInClient, PageFetcher
 from .config import Config, ConfigError
 from .db import SchemaTooNewError, connect, migrate
+from .details import fetch_descriptions
 from .embeddings import Embedder
+from .evaluation import build_report, load_labelled, roles_to_score
 from .lock import AlreadyRunningError, RunLock
-from .models import STATUSES, RoleFilter
-from .report import Reporter, log_name, scoring_summary
+from .models import STATUSES, Role, RoleFilter
+from .report import Reporter, eval_summary, log_name, phrase_lines, scoring_summary
 from .scanner import Scanner, ScanSetupError
 from .scoring import (
     DAILY_WINDOW,
@@ -32,6 +34,7 @@ from .store import RUN_FAILED, RUN_PARTIAL, RUN_SUCCESS, Store
 from .timeutil import format_display, from_iso, now_ist, to_iso
 
 EmbedderFactory = Callable[[Config], Embedder]
+DETAILS_BATCH = 60  # most descriptions one details run fetches
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -64,6 +67,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="show last run and role counts")
     sub.add_parser("score", help="score roles against your CV (also runs after each scan)")
+    sub.add_parser("eval", help="measure how well the score separates good and bad roles")
+    sub.add_parser("details", help="fetch missing descriptions for roles you rated or actioned")
     return parser
 
 
@@ -111,12 +116,16 @@ def run_scoring(
     emit: Callable[[str], None],
     make_embedder: EmbedderFactory,
     sleep: Callable[[float], None],
+    only: Sequence[Role] | None = None,
 ) -> bool:
-    """Score pending roles and print the summary. False when there was no CV to score against."""
+    """Score pending roles (or just `only`) and print the summary.
+
+    False when there was no CV to score against.
+    """
     store.fail_stale_scoring_runs(when=to_iso(now_ist()))
     scorer = Scorer(store=store, config=config, make_embedder=make_embedder, emit=emit, sleep=sleep)
     try:
-        run = scorer.run(trigger)
+        run = scorer.run(trigger, only=only)
     except ScoringUnavailable:
         emit("Scoring skipped: no CV uploaded. Upload one on the CV page of the app.")
         return False
@@ -154,12 +163,8 @@ def cmd_score(
     make_embedder: EmbedderFactory,
     sleep: Callable[[float], None],
 ) -> int:
-    try:
-        config = Config.from_raw(store.get_config_raw())
-    except ConfigError as exc:
-        print("Configuration is invalid; nothing was scored:", file=out)
-        for key, message in exc.errors.items():
-            print(f"  {key}: {message}", file=out)
+    config = load_config(store, out, "nothing was scored")
+    if config is None:
         return EXIT_USAGE
     reporter = Reporter(out, db_path.parent / "runs" / log_name(to_iso(now_ist())))
     try:
@@ -174,6 +179,115 @@ def cmd_score(
         latest = store.list_scoring_runs(1)[0]
         return {"success": EXIT_OK, "partial": EXIT_PARTIAL}.get(latest.status, EXIT_FAILED)
     finally:
+        reporter.close()
+
+
+def load_config(store: Store, out: TextIO, what: str) -> Config | None:
+    """The stored configuration, or None after printing why it cannot be used."""
+    try:
+        return Config.from_raw(store.get_config_raw())
+    except ConfigError as exc:
+        print(f"Configuration is invalid; {what}:", file=out)
+        for key, message in exc.errors.items():
+            print(f"  {key}: {message}", file=out)
+        return None
+
+
+def cmd_eval(
+    store: Store,
+    db_path: Path,
+    *,
+    out: TextIO,
+    make_embedder: EmbedderFactory,
+    sleep: Callable[[float], None],
+) -> int:
+    """Score the labelled roles that need it, then report how well the score separates them."""
+    config = load_config(store, out, "nothing was evaluated")
+    if config is None:
+        return EXIT_USAGE
+    reporter = Reporter(out, db_path.parent / "runs" / log_name(to_iso(now_ist())))
+    try:
+        cv = store.get_cv()
+        if cv is None:
+            reporter.line("Eval needs a CV. Upload one on the CV page of the app.")
+            return EXIT_USAGE
+        labelled = load_labelled(store, config, cv)
+        todo = roles_to_score(labelled)
+        if todo:
+            reporter.line(f"Eval: scoring {len(todo)} labelled role(s) that have no current score")
+            try:
+                run_scoring(
+                    store, config, TRIGGER_MANUAL, reporter.line, make_embedder, sleep, only=todo
+                )
+            except KeyboardInterrupt:
+                return EXIT_INTERRUPTED
+            labelled = load_labelled(store, config, cv)
+        phrases = [p.phrase for p in store.list_phrases() if p.use_for_match]
+        report = build_report(labelled, config, phrases)
+        for line in (*eval_summary(report), *phrase_lines(report)):
+            reporter.line(line)
+        return EXIT_OK
+    finally:
+        reporter.close()
+
+
+def cmd_details(
+    store: Store,
+    db_path: Path,
+    *,
+    out: TextIO,
+    detail_fetcher: DetailFetcher | None,
+    sleep: Callable[[float], None],
+    rng: random.Random | None,
+) -> int:
+    """Fetch missing descriptions for labelled roles of any age, so the eval can score them."""
+    config = load_config(store, out, "nothing was fetched")
+    if config is None:
+        return EXIT_USAGE
+    reporter = Reporter(out, db_path.parent / "runs" / log_name(to_iso(now_ist())))
+    own_client: LinkedInClient | None = None
+    try:
+        pending = store.pending_labelled_details(DETAILS_BATCH)
+        if not pending:
+            reporter.line("No labelled roles are waiting for a description.")
+            return EXIT_OK
+        if detail_fetcher is None:
+            own_client = LinkedInClient(config)
+            detail_fetcher = own_client
+        chance = rng or random.Random()
+
+        def wait(low: float, high: float, why: str | None) -> None:
+            seconds = chance.uniform(low, high)
+            if why:
+                reporter.line(f"Pausing {seconds:.0f}s before {why}")
+            sleep(seconds)
+
+        reporter.line(f"Descriptions: fetching {len(pending)} labelled role(s)")
+        try:
+            outcome = fetch_descriptions(
+                store=store,
+                fetcher=detail_fetcher,
+                pending=pending,
+                config=config,
+                emit=reporter.line,
+                wait=wait,
+                clock=now_ist,
+            )
+        except KeyboardInterrupt:
+            reporter.line("Interrupted. Descriptions already saved are kept.")
+            return EXIT_INTERRUPTED
+        left = len(store.pending_labelled_details(1_000_000)) - outcome.failed
+        reporter.line(
+            f"Descriptions: {outcome.saved} saved, {outcome.failed} without one "
+            f"(posting gone), {max(left, 0)} left for later"
+        )
+        if outcome.stopped:
+            reporter.line("Stopped after repeated throttling. Try again later.")
+            return EXIT_PARTIAL
+        return EXIT_OK
+    finally:
+        if own_client is not None:
+            own_client.close()
         reporter.close()
 
 
@@ -319,6 +433,19 @@ def main(
             return EXIT_OK
         try:
             with RunLock(db_path.parent / "scan.lock"):
+                if args.command == "eval":
+                    return cmd_eval(
+                        store, db_path, out=stream, make_embedder=make_embedder, sleep=sleep
+                    )
+                if args.command == "details":
+                    return cmd_details(
+                        store,
+                        db_path,
+                        out=stream,
+                        detail_fetcher=detail_fetcher,
+                        sleep=sleep,
+                        rng=rng,
+                    )
                 if args.command == "score":
                     return cmd_score(
                         store,

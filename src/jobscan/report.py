@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import IO, TextIO
 
+from .evaluation import MIN_EACH, MIN_TOTAL, EvalReport
 from .models import ScoringRun
 from .timeutil import format_display, now_ist, to_iso
 
@@ -59,4 +60,77 @@ def scoring_summary(run: ScoringRun, *, daily_used: int, daily_limit: int) -> li
         )
     if run.note:
         lines.append(f"  Note: {run.note}")
+    return lines
+
+
+def _pct(value: float) -> str:
+    return f"{round(value * 100)}%"
+
+
+def _auc(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.2f}"
+
+
+def eval_summary(report: EvalReport) -> list[str]:
+    """Terminal lines for the eval: how well the score tells good roles from bad ones."""
+    lines = [
+        f"Eval: {report.labelled} labelled roles ({report.good} good, {report.bad} bad), "
+        f"{report.scored} with a current score"
+    ]
+    if report.no_description or report.unscored:
+        lines.append(
+            f"  Not scored: {report.no_description} without a description (run jobscan details), "
+            f"{report.unscored} not yet scored (run jobscan eval)"
+        )
+    if not report.measurable:
+        lines.append("  Need at least one good and one bad role with a score to measure anything.")
+        return lines
+    if not report.reliable:
+        lines.append(
+            f"  Directional only: want {MIN_EACH}+ good, {MIN_EACH}+ bad and {MIN_TOTAL}+ scored "
+            "roles before trusting these numbers."
+        )
+    lines.append(
+        f"  {'Method':<28}{'AUC':>6}{'Avg good':>10}{'Avg bad':>9}  Good in top {report.top_n}"
+    )
+    for v in report.variants:
+        lines.append(
+            f"  {v.name:<28}{_auc(v.auc):>6}{v.mean_good:>10.0f}{v.mean_bad:>9.0f}  "
+            f"{v.top_hits} (random: {report.random_hits:.1f})"
+        )
+    lines.append(
+        "  AUC: chance a good role outscores a bad one (0.5 is a coin toss, 1.0 is perfect)."
+    )
+    if report.best_weight is not None:
+        sweep = ", ".join(f"{w}%: {_auc(a)}" for w, a in report.sweep)
+        lines.append(f"  Keyword share vs AUC: {sweep}")
+        lines.append(f"  Best keyword share on this data: {report.best_weight}%")
+    if report.cutoff is not None:
+        c = report.cutoff
+        lines.append(
+            f"  Best cut-off: score {c.score} keeps {_pct(c.caught_good)} of good roles "
+            f"and lets through {_pct(c.let_through_bad)} of bad ones"
+        )
+    for title, misses in (
+        ("Good roles scored lowest", report.missed_good),
+        ("Bad roles scored highest", report.false_good),
+    ):
+        if misses:
+            lines.append(f"  {title}:")
+            lines.extend(f"    {m.final:>3}  {m.role.title} ({m.role.company})" for m in misses)
+    return lines
+
+
+def phrase_lines(report: EvalReport) -> list[str]:
+    """Terminal lines on which search phrases bring good and bad roles, and deny-word ideas."""
+    lines = []
+    if report.phrases:
+        lines.append("  Search phrases (good / bad roles):")
+        lines.extend(f"    {p.phrase}: {p.good} / {p.bad}" for p in report.phrases)
+    if report.suggestions:
+        words = ", ".join(f"{s.word} ({s.bad_roles})" for s in report.suggestions)
+        lines.append(f"  Deny word ideas (in bad titles, never in good ones): {words}")
+    if report.industry_suggestions:
+        names = ", ".join(f"{s.word} ({s.bad_roles})" for s in report.industry_suggestions)
+        lines.append(f"  Industry ideas (on bad roles, never on good ones): {names}")
     return lines

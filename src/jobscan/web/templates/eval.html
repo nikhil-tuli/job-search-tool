@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Eval{% endblock %}
+{% block content %}
+<h1>Eval</h1>
+<p class="muted">Does the fit score tell the roles you liked from the ones you did not? A role counts as good if you rated it a good fit, or its status is Applied or an interview status. It counts as bad if you rated it a poor fit, or its status is Not relevant. A rating overrides the status. Skipped and Closed are ignored. These roles are the ones you chose to look at, so treat the results as a guide, not proof.</p>
+
+<dl class="facts">
+  <dt>Labelled roles</dt><dd>{{ report.labelled }} ({{ report.good }} good, {{ report.bad }} bad)</dd>
+  <dt>With a current score</dt><dd>{{ report.scored }} ({{ report.scored_good }} good, {{ report.scored_bad }} bad)</dd>
+  {% if report.no_description %}<dt>No description</dt><dd>{{ report.no_description }} <span class="muted">Run <code>jobscan details</code> to fetch them, then <code>jobscan eval</code>.</span></dd>{% endif %}
+  {% if report.unscored %}<dt>Not scored yet</dt><dd>{{ report.unscored }} <span class="muted">Run <code>jobscan eval</code> in a terminal to score them.</span></dd>{% endif %}
+</dl>
+
+{% if not has_cv %}
+<p class="empty">Upload your CV on the CV page first. Scores need it.</p>
+{% elif not report.measurable %}
+<p class="empty">Nothing to measure yet. It needs at least one good and one bad role with a score. Rate roles in the side panel on the Roles page, then run <code>jobscan details</code> and <code>jobscan eval</code> in a terminal.</p>
+{% else %}
+{% if not report.reliable %}
+<p class="stale-note">Directional only. It takes about 5 or more good and 5 or more bad scored roles, and 20 or more in all, before these numbers are worth acting on.</p>
+{% endif %}
+
+<h2>Which score works best</h2>
+<table class="pivot eval">
+  <thead><tr><th>Method</th><th class="num" title="Chance that a good role scores higher than a bad one. 0.5 is a coin toss, 1 is perfect.">AUC</th><th class="num">Average of good</th><th class="num">Average of bad</th><th class="num">Good roles in the top {{ report.top_n }}</th></tr></thead>
+  <tbody>
+  {% for v in report.variants %}
+    <tr><td>{{ v.name }}</td><td class="num">{{ '%.2f' % v.auc if v.auc is not none else 'n/a' }}</td><td class="num">{{ '%.0f' % v.mean_good }}</td><td class="num">{{ '%.0f' % v.mean_bad }}</td><td class="num">{{ v.top_hits }} <span class="muted">(random: {{ '%.1f' % report.random_hits }})</span></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="muted">AUC is the chance that a good role scores higher than a bad one: 0.5 is a coin toss and 1 is perfect.</p>
+
+<h2>Keyword share</h2>
+<table class="pivot eval">
+  <thead><tr>{% for w, a in report.sweep %}<th class="num">{{ w }}%</th>{% endfor %}</tr></thead>
+  <tbody><tr>{% for w, a in report.sweep %}<td class="num {% if w == report.best_weight %}best{% endif %}">{{ '%.2f' % a if a is not none else 'n/a' }}</td>{% endfor %}</tr></tbody>
+</table>
+{% if report.best_weight is not none %}
+<p>Best on this data: <strong>{{ report.best_weight }}%</strong> keywords. Change it with Keyword share of the score in Config, under Scoring. It applies at once.</p>
+{% endif %}
+
+{% if report.cutoff %}
+<h2>Cut-off</h2>
+<p>A score of <strong>{{ report.cutoff.score }}</strong> or more keeps {{ '%.0f' % (report.cutoff.caught_good * 100) }}% of your good roles and lets through {{ '%.0f' % (report.cutoff.let_through_bad * 100) }}% of the bad ones. Compare it with Strong fit from and Partial fit from in Config, under Scoring.</p>
+{% endif %}
+
+<div class="eval-grid">
+  <div>
+    <h2>Good roles scored lowest</h2>
+    {% if report.missed_good %}
+    <table class="pivot eval"><tbody>{% for m in report.missed_good %}<tr><td class="num">{{ m.final }}</td><td>{{ m.role.title }} <span class="muted">{{ m.role.company }}</span></td></tr>{% endfor %}</tbody></table>
+    {% else %}<p class="muted">None.</p>{% endif %}
+  </div>
+  <div>
+    <h2>Bad roles scored highest</h2>
+    {% if report.false_good %}
+    <table class="pivot eval"><tbody>{% for m in report.false_good %}<tr><td class="num">{{ m.final }}</td><td>{{ m.role.title }} <span class="muted">{{ m.role.company }}</span></td></tr>{% endfor %}</tbody></table>
+    {% else %}<p class="muted">None.</p>{% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if report.phrases %}
+<h2>Search phrases</h2>
+<p class="muted">How many of your labelled roles each search phrase brought in. A phrase with many bad roles and few good ones is too broad: narrow it on the Config page.</p>
+<table class="pivot eval">
+  <thead><tr><th>Phrase</th><th class="num">Good</th><th class="num">Bad</th></tr></thead>
+  <tbody>{% for p in report.phrases %}<tr><td>{{ p.phrase }}</td><td class="num">{{ p.good }}</td><td class="num">{{ p.bad }}</td></tr>{% endfor %}</tbody>
+</table>
+{% endif %}
+
+{% if report.suggestions %}
+<h2>Deny word ideas</h2>
+<p class="muted">Words that appear in the titles of at least 2 bad roles and in no good one. Adding one to the title deny words tags matching roles Excluded. Nothing is hidden, and you can remove it in Config.</p>
+<ul>
+  {% for s in report.suggestions %}
+  <li><strong>{{ s.word }}</strong> <span class="muted">in {{ s.bad_roles }} bad roles</span>
+    <form class="inline-add" method="post" action="{{ url_for('eval_exclude') }}"><input type="hidden" name="kind" value="title"><input type="hidden" name="value" value="{{ s.word }}"><button type="submit">Add to deny words</button></form></li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if report.industry_suggestions %}
+<h2>Industry ideas</h2>
+<p class="muted">LinkedIn industries listed on at least 2 bad roles and on no good one. Adding one tags roles in that industry Excluded. It only works for roles whose description has been fetched.</p>
+<ul>
+  {% for s in report.industry_suggestions %}
+  <li><strong>{{ s.word }}</strong> <span class="muted">on {{ s.bad_roles }} bad roles</span>
+    <form class="inline-add" method="post" action="{{ url_for('eval_exclude') }}"><input type="hidden" name="kind" value="industry"><input type="hidden" name="value" value="{{ s.word }}"><button type="submit">Exclude this industry</button></form></li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

@@ -8,8 +8,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from .client import PAGE_SIZE, DetailFetcher, DetailOutcome, FetchResult, Outcome, PageFetcher
+from .client import PAGE_SIZE, DetailFetcher, FetchResult, Outcome, PageFetcher
 from .config import Config
+from .details import fetch_descriptions
 from .matching import TitleMatcher, dup_key
 from .models import PORTAL_LINKEDIN, KeywordRecord, NewRole, PageStat
 from .store import RUN_FAILED, RUN_PARTIAL, RUN_SUCCESS, Store
@@ -23,7 +24,6 @@ STOP_LAYOUT = "layout_changed"
 STOP_INTERRUPTED = "interrupted"
 
 _COMPLETED_STOPS = frozenset({STOP_END, STOP_EMPTY_PAGES, STOP_PAGE_CAP})
-_DETAIL_THROTTLES_BEFORE_STOP = 2
 
 
 class ScanSetupError(ValueError):
@@ -306,33 +306,22 @@ class Scanner:
         if not pending:
             return
         self._emit(f"Descriptions: fetching {len(pending)} role(s)")
-        saved = failed = throttled_in_row = 0
-        failed_ids: set[str] = set()
-        stopped = False
-        for portal, job_id in pending:
-            self._wait(cfg.delay_seconds_min, cfg.delay_seconds_max, None)
-            result = self._details.fetch_detail(job_id)
-            if result.outcome is DetailOutcome.THROTTLED:
-                throttled_in_row += 1
-                self._emit(f"  description {job_id}: throttled ({result.note})")
-                if throttled_in_row >= _DETAIL_THROTTLES_BEFORE_STOP:
-                    stopped = True
-                    break
-                self._wait(cfg.retry_wait_min, cfg.retry_wait_max, "next description")
-                continue
-            throttled_in_row = 0
-            if result.outcome is DetailOutcome.OK and result.detail is not None:
-                self._store.save_detail(portal, job_id, result.detail, when=to_iso(self._clock()))
-                saved += 1
-            else:
-                self._store.record_detail_failure(portal, job_id)
-                failed += 1
-                failed_ids.add(job_id)
-                self._emit(f"  description {job_id}: none ({result.note})")
+        outcome = fetch_descriptions(
+            store=self._store,
+            fetcher=self._details,
+            pending=pending,
+            config=cfg,
+            emit=self._emit,
+            wait=self._wait,
+            clock=self._clock,
+        )
         waiting = self._store.pending_details(since, 1_000_000)
-        left = sum(1 for _, job_id in waiting if job_id not in failed_ids)
-        self._emit(f"Descriptions: {saved} saved, {failed} without one, {left} left for later")
-        if stopped:
+        left = sum(1 for _, job_id in waiting if job_id not in outcome.failed_ids)
+        self._emit(
+            f"Descriptions: {outcome.saved} saved, {outcome.failed} without one, "
+            f"{left} left for later"
+        )
+        if outcome.stopped:
             self._warnings.append(
                 f"Descriptions stopped after repeated throttling ({left} left for the next scan)"
             )
