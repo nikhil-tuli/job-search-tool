@@ -2,19 +2,19 @@
 {% block title %}Eval{% endblock %}
 {% block content %}
 <h1>Eval</h1>
-<p class="muted">Does the fit score tell the roles you liked from the ones you did not? A role counts as good if you rated it a good fit, or its status is Applied or an interview status. It counts as bad if you rated it a poor fit, or its status is Not relevant. A rating overrides the status. Skipped and Closed are ignored. These roles are the ones you chose to look at, so treat the results as a guide, not proof.</p>
+<p class="muted">Does the fit score rank the roles you rated Good above the ones you rated Poor? Only roles you rate yourself in the side panel count. Treat the result as a guide, not proof.</p>
 
 <dl class="facts">
-  <dt>Labelled roles</dt><dd>{{ report.labelled }} ({{ report.good }} good, {{ report.bad }} bad)</dd>
-  <dt>With a current score</dt><dd>{{ report.scored }} ({{ report.scored_good }} good, {{ report.scored_bad }} bad)</dd>
-  {% if report.no_description %}<dt>No description</dt><dd>{{ report.no_description }} <span class="muted">Run <code>jobscan details</code> to fetch them, then <code>jobscan eval</code>.</span></dd>{% endif %}
+  <dt>Roles with a current score</dt><dd>{{ bands.total }} ({{ bands.strong }} Strong, {{ bands.partial }} Partial, {{ bands.weak }} Weak)</dd>
+  <dt>Roles with a current score and rating</dt><dd>{{ report.scored }} ({{ report.scored_good }} good, {{ report.scored_bad }} bad)</dd>
+  {% if report.no_description %}<dt>No description</dt><dd>{{ report.no_description }} <span class="muted">These cannot be scored.</span></dd>{% endif %}
   {% if report.unscored %}<dt>Not scored yet</dt><dd>{{ report.unscored }} <span class="muted">Run <code>jobscan eval</code> in a terminal to score them.</span></dd>{% endif %}
 </dl>
 
 {% if not has_cv %}
 <p class="empty">Upload your CV on the CV page first. Scores need it.</p>
 {% elif not report.measurable %}
-<p class="empty">Nothing to measure yet. It needs at least one good and one bad role with a score. Rate roles in the side panel on the Roles page, then run <code>jobscan details</code> and <code>jobscan eval</code> in a terminal.</p>
+<p class="empty">Nothing to measure yet. It needs at least one good and one bad role with a score. Rate scored roles in the side panel on the Roles page, then run <code>jobscan eval</code> in a terminal.</p>
 {% else %}
 {% if not report.reliable %}
 <p class="stale-note">Directional only. It takes about 5 or more good and 5 or more bad scored roles, and 20 or more in all, before these numbers are worth acting on.</p>
@@ -22,7 +22,7 @@
 
 <h2>Which score works best</h2>
 <table class="pivot eval">
-  <thead><tr><th>Method</th><th class="num" title="Chance that a good role scores higher than a bad one. 0.5 is a coin toss, 1 is perfect.">AUC</th><th class="num">Average of good</th><th class="num">Average of bad</th><th class="num">Good roles in the top {{ report.top_n }}</th></tr></thead>
+  <thead><tr><th>Method</th><th class="num" title="Chance that a good role scores higher than a bad one. 0.5 is a coin toss, 1 is perfect.">AUC</th><th class="num">Average score of good roles</th><th class="num">Average score of bad roles</th><th class="num">Good roles in the top {{ report.top_n }}</th></tr></thead>
   <tbody>
   {% for v in report.variants %}
     <tr><td>{{ v.name }}</td><td class="num">{{ '%.2f' % v.auc if v.auc is not none else 'n/a' }}</td><td class="num">{{ '%.0f' % v.mean_good }}</td><td class="num">{{ '%.0f' % v.mean_bad }}</td><td class="num">{{ v.top_hits }} <span class="muted">(random: {{ '%.1f' % report.random_hits }})</span></td></tr>
@@ -63,7 +63,7 @@
 
 {% if report.phrases %}
 <h2>Search phrases</h2>
-<p class="muted">How many of your labelled roles each search phrase brought in. A phrase with many bad roles and few good ones is too broad: narrow it on the Config page.</p>
+<p class="muted">How many of your rated roles each search phrase brought in. A phrase with many bad roles and few good ones is too broad: narrow it on the Config page.</p>
 <table class="pivot eval">
   <thead><tr><th>Phrase</th><th class="num">Good</th><th class="num">Bad</th></tr></thead>
   <tbody>{% for p in report.phrases %}<tr><td>{{ p.phrase }}</td><td class="num">{{ p.good }}</td><td class="num">{{ p.bad }}</td></tr>{% endfor %}</tbody>

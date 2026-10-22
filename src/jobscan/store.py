@@ -10,7 +10,6 @@ from datetime import date, datetime, timedelta
 
 from .models import (
     DEFAULT_STATUS,
-    LABEL_STATUSES,
     STATUSES,
     Cv,
     DepthStat,
@@ -364,19 +363,6 @@ class Store:
         ).fetchall()
         return [(r["portal"], r["job_id"]) for r in rows]
 
-    def pending_labelled_details(self, limit: int) -> list[tuple[str, str]]:
-        """(portal, job_id) of labelled roles still without a description, whatever their age."""
-        if limit <= 0:
-            return []
-        marks = ",".join("?" * len(LABEL_STATUSES))
-        rows = self._conn.execute(
-            "SELECT portal, job_id FROM roles WHERE description IS NULL AND detail_attempts < ? "
-            f"AND (fit_rating IS NOT NULL OR status IN ({marks})) "
-            "ORDER BY fetched_on DESC, job_id DESC LIMIT ?",
-            (MAX_DETAIL_ATTEMPTS, *LABEL_STATUSES, limit),
-        ).fetchall()
-        return [(r["portal"], r["job_id"]) for r in rows]
-
     def save_detail(self, portal: str, job_id: str, detail: JobDetail, *, when: str) -> None:
         self._conn.execute(
             "UPDATE roles SET description = ?, seniority = ?, employment_type = ?, "
@@ -439,12 +425,9 @@ class Store:
         )
 
     def list_labelled_roles(self) -> list[Role]:
-        """Roles that carry a label: a rating, or a status that says good or bad."""
-        marks = ",".join("?" * len(LABEL_STATUSES))
+        """Roles the user has rated good or bad."""
         rows = self._conn.execute(
-            f"SELECT * FROM roles WHERE fit_rating IS NOT NULL OR status IN ({marks}) "
-            "ORDER BY fetched_on DESC, job_id DESC",
-            LABEL_STATUSES,
+            "SELECT * FROM roles WHERE fit_rating IS NOT NULL ORDER BY fetched_on DESC, job_id DESC"
         ).fetchall()
         return [_role(r) for r in rows]
 

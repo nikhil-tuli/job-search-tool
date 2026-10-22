@@ -42,10 +42,9 @@ def _report(good: int = 6, bad: int = 6):  # type: ignore[no-untyped-def]
     from jobscan.evaluation import build_report
     from tests.test_evaluation import BAD_LOW, GOOD_HIGH, item, make_role
 
-    found = [item(make_role(f"g{i}", status="Applied"), *GOOD_HIGH) for i in range(good)]
+    found = [item(make_role(f"g{i}", rating="good"), *GOOD_HIGH) for i in range(good)]
     found += [
-        item(make_role(f"b{i}", status="Not relevant", title="Staffing Lead"), *BAD_LOW)
-        for i in range(bad)
+        item(make_role(f"b{i}", rating="bad", title="Staffing Lead"), *BAD_LOW) for i in range(bad)
     ]
     return build_report(found, Config(), ["Technical Program Manager"])
 
@@ -55,7 +54,7 @@ def test_eval_summary_lists_methods_cutoff_and_misses() -> None:
 
     lines = eval_summary(_report())
     text = "\n".join(lines)
-    assert lines[0] == "Eval: 12 labelled roles (6 good, 6 bad), 12 with a current score"
+    assert lines[0] == "Eval: 12 rated roles (6 good, 6 bad), 12 with a current score"
     assert "Directional only" in text
     assert "Keywords only" in text
     assert "Meaning only" in text
@@ -89,13 +88,11 @@ def test_eval_summary_points_at_the_commands_for_missing_scores() -> None:
     from tests.test_evaluation import item, make_role
 
     found = [
-        item(make_role("1", status="Applied", description=None), scored=False),
-        item(make_role("2", status="Not relevant"), scored=False),
+        item(make_role("1", rating="good", description=None), scored=False),
+        item(make_role("2", rating="bad"), scored=False),
     ]
     text = "\n".join(eval_summary(build_report(found, Config(), [])))
-    assert (
-        "1 without a description (run jobscan details), 1 not yet scored (run jobscan eval)" in text
-    )
+    assert "1 without a description, 1 not yet scored (run jobscan eval)" in text
 
 
 def test_phrase_lines_show_yield_and_deny_ideas() -> None:
@@ -116,8 +113,7 @@ def test_phrase_lines_include_industry_ideas() -> None:
     from tests.test_evaluation import item, make_role
 
     found = [
-        item(replace(make_role(str(i), status="Not relevant"), industries="Construction"))
-        for i in range(2)
+        item(replace(make_role(str(i), rating="bad"), industries="Construction")) for i in range(2)
     ]
     lines = phrase_lines(build_report(found, Config(), []))
     assert "  Industry ideas (on bad roles, never on good ones): Construction (2)" in lines

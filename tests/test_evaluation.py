@@ -19,11 +19,8 @@ from jobscan.evaluation import (
     suggest_excluded_industries,
 )
 from jobscan.models import (
-    BAD_STATUSES,
-    GOOD_STATUSES,
     LABEL_BAD,
     LABEL_GOOD,
-    LABEL_STATUSES,
     STATUSES,
     Cv,
     JobDetail,
@@ -89,29 +86,16 @@ def item(
 # ---- labels --------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("status", GOOD_STATUSES)
-def test_actioned_statuses_are_good(status: str) -> None:
-    assert make_role("1", status=status).label == LABEL_GOOD
-
-
-def test_not_relevant_is_bad() -> None:
-    assert make_role("1", status="Not relevant").label == LABEL_BAD
-
-
-@pytest.mark.parametrize("status", ["Not Applied", "Closed", "Skipped"])
-def test_other_statuses_say_nothing(status: str) -> None:
+@pytest.mark.parametrize("status", STATUSES)
+def test_a_status_alone_never_labels_a_role(status: str) -> None:
     assert make_role("1", status=status).label is None
 
 
-def test_rating_overrides_status() -> None:
+def test_only_a_rating_labels_a_role() -> None:
+    assert make_role("1", rating="good").label == LABEL_GOOD
+    assert make_role("1", rating="bad").label == LABEL_BAD
     assert make_role("1", status="Applied", rating="bad").label == LABEL_BAD
     assert make_role("1", status="Not relevant", rating="good").label == LABEL_GOOD
-    assert make_role("1", status="Closed", rating="good").label == LABEL_GOOD
-
-
-def test_every_label_status_is_a_real_status() -> None:
-    assert set(LABEL_STATUSES) <= set(STATUSES)
-    assert not set(GOOD_STATUSES) & set(BAD_STATUSES)
 
 
 # ---- AUC -----------------------------------------------------------------------------------
@@ -136,8 +120,8 @@ BAD_LOW = (0.09, 0.52)  # scores near 0 on both parts
 
 
 def separable(good: int = 6, bad: int = 6) -> list[Labelled]:
-    found = [item(make_role(f"g{i}", status="Applied"), *GOOD_HIGH) for i in range(good)]
-    found += [item(make_role(f"b{i}", status="Not relevant"), *BAD_LOW) for i in range(bad)]
+    found = [item(make_role(f"g{i}", rating="good"), *GOOD_HIGH) for i in range(good)]
+    found += [item(make_role(f"b{i}", rating="bad"), *BAD_LOW) for i in range(bad)]
     return found
 
 
@@ -156,8 +140,8 @@ def test_perfectly_separated_roles_score_perfectly() -> None:
 
 def test_variants_separate_the_two_signals() -> None:
     # Keywords point the right way and meaning the wrong way.
-    found = [item(make_role(f"g{i}", status="Applied"), 0.19, 0.52) for i in range(3)]
-    found += [item(make_role(f"b{i}", status="Not relevant"), 0.09, 0.84) for i in range(3)]
+    found = [item(make_role(f"g{i}", rating="good"), 0.19, 0.52) for i in range(3)]
+    found += [item(make_role(f"b{i}", rating="bad"), 0.09, 0.84) for i in range(3)]
     report = build_report(found, Config(), [])
     keywords, meaning, mix = report.variants
     assert keywords.auc == 1.0
@@ -174,8 +158,8 @@ def test_best_weight_prefers_the_current_one_on_a_tie() -> None:
 
 
 def test_ties_do_not_flatter_the_top_n() -> None:
-    flat = [item(make_role(f"g{i}", status="Applied"), 0.14, 0.675) for i in range(5)]
-    flat += [item(make_role(f"b{i}", status="Not relevant"), 0.14, 0.675) for i in range(5)]
+    flat = [item(make_role(f"g{i}", rating="good"), 0.14, 0.675) for i in range(5)]
+    flat += [item(make_role(f"b{i}", rating="bad"), 0.14, 0.675) for i in range(5)]
     report = build_report(flat, Config(), [])
     assert report.variants[2].top_hits == 5  # all tied: no better than random
     assert report.variants[2].auc == 0.5
@@ -188,8 +172,8 @@ def test_top_n_is_capped_by_the_number_scored() -> None:
 
 def test_misses_are_the_worst_of_each_kind() -> None:
     found = separable(6, 6)
-    found.append(item(make_role("lowgood", status="Applied", title="Odd Role"), *BAD_LOW))
-    found.append(item(make_role("highbad", status="Not relevant", title="Fake Hit"), *GOOD_HIGH))
+    found.append(item(make_role("lowgood", rating="good", title="Odd Role"), *BAD_LOW))
+    found.append(item(make_role("highbad", rating="bad", title="Fake Hit"), *GOOD_HIGH))
     report = build_report(found, Config(), [])
     assert report.missed_good[0].role.job_id == "lowgood"
     assert report.false_good[0].role.job_id == "highbad"
@@ -200,8 +184,8 @@ def test_misses_are_the_worst_of_each_kind() -> None:
 
 def test_unscored_roles_are_counted_but_not_measured() -> None:
     found = separable(5, 5)
-    found.append(item(make_role("nodesc", status="Applied", description=None), scored=False))
-    found.append(item(make_role("todo", status="Not relevant"), scored=False))
+    found.append(item(make_role("nodesc", rating="good", description=None), scored=False))
+    found.append(item(make_role("todo", rating="bad"), scored=False))
     report = build_report(found, Config(), [])
     assert (report.good, report.bad) == (6, 6)
     assert (report.scored_good, report.scored_bad) == (5, 5)
@@ -229,10 +213,10 @@ def test_reliability_needs_enough_roles_of_each_kind() -> None:
 
 def test_phrase_yield_lists_the_noisiest_phrase_first() -> None:
     found = [
-        item(make_role("1", status="Applied", phrase="TPM")),
-        item(make_role("2", status="Not relevant", phrase="Delivery Manager")),
-        item(make_role("3", status="Not relevant", phrase="Delivery Manager")),
-        item(make_role("4", status="Applied", phrase="Delivery Manager")),
+        item(make_role("1", rating="good", phrase="TPM")),
+        item(make_role("2", rating="bad", phrase="Delivery Manager")),
+        item(make_role("3", rating="bad", phrase="Delivery Manager")),
+        item(make_role("4", rating="good", phrase="Delivery Manager")),
     ]
     rows = phrase_yield(found)
     assert [(r.phrase, r.good, r.bad) for r in rows] == [
@@ -242,12 +226,12 @@ def test_phrase_yield_lists_the_noisiest_phrase_first() -> None:
 
 
 def bad_titles(*titles: str) -> list[Labelled]:
-    return [item(make_role(f"b{i}", title=t, status="Not relevant")) for i, t in enumerate(titles)]
+    return [item(make_role(f"b{i}", title=t, rating="bad")) for i, t in enumerate(titles)]
 
 
 def test_suggests_words_in_two_bad_titles_and_no_good_one() -> None:
     found = bad_titles("Construction Project Manager", "Senior Construction Lead", "Vehicle Lead")
-    found.append(item(make_role("g", title="Technical Program Manager", status="Applied")))
+    found.append(item(make_role("g", title="Technical Program Manager", rating="good")))
     words = {s.word: s.bad_roles for s in suggest_deny_words(found, Config(), [])}
     assert words == {"construction": 2, "lead": 2}
 
@@ -255,7 +239,7 @@ def test_suggests_words_in_two_bad_titles_and_no_good_one() -> None:
 def test_a_word_in_a_good_title_is_never_suggested() -> None:
     found = bad_titles("Construction Manager", "Construction Lead")
     found.append(
-        item(make_role("g", title="Construction Technology Program Manager", status="Applied"))
+        item(make_role("g", title="Construction Technology Program Manager", rating="good"))
     )
     assert suggest_deny_words(found, Config(), []) == ()
 
@@ -291,7 +275,7 @@ def store() -> Iterator[Store]:
 
 
 def add(
-    store: Store, job_id: str, *, status: str = "Not Applied", description: str | None = "x"
+    store: Store, job_id: str, *, rating: str | None = None, description: str | None = "x"
 ) -> None:
     run = store.conn.execute("SELECT id FROM runs LIMIT 1").fetchone()
     run_id = run[0] if run else store.start_run(window_seconds=86400, keywords_total=1)
@@ -317,8 +301,8 @@ def add(
     )
     if description is not None:
         store.save_detail("LinkedIn", job_id, JobDetail(description), when=to_iso(now_ist()))
-    if status != "Not Applied":
-        store.update_status([f"LinkedIn|{job_id}"], status)
+    if rating is not None:
+        store.set_fit_rating("LinkedIn", job_id, rating)
 
 
 def test_rating_round_trip_and_validation(store: Store) -> None:
@@ -338,9 +322,9 @@ def test_rating_round_trip_and_validation(store: Store) -> None:
 
 
 def test_only_labelled_roles_are_listed(store: Store) -> None:
-    add(store, "1", status="Applied")
-    add(store, "2", status="Not relevant")
-    add(store, "3", status="Closed")
+    add(store, "1", rating="good")
+    add(store, "2", rating="bad")
+    add(store, "3")
     add(store, "4")
     add(store, "5")
     store.set_fit_rating("LinkedIn", "5", "bad")
@@ -349,8 +333,8 @@ def test_only_labelled_roles_are_listed(store: Store) -> None:
 
 def test_load_labelled_drops_stale_scores(store: Store) -> None:
     config = Config()
-    add(store, "1", status="Applied")
-    add(store, "2", status="Not relevant")
+    add(store, "1", rating="good")
+    add(store, "2", rating="bad")
     store.save_cv(Cv("cv.txt", CV_TEXT, sha_of(CV_TEXT), to_iso(now_ist())), cv_chunks(CV_TEXT))
     cv = store.get_cv()
     assert cv is not None
@@ -368,42 +352,27 @@ def test_load_labelled_drops_stale_scores(store: Store) -> None:
     assert all(i.score is None for i in load_labelled(store, config, None))
 
 
-def test_pending_labelled_details_ignores_age_and_unlabelled(store: Store) -> None:
-    add(store, "1", status="Applied", description=None)
-    add(store, "2", status="Not relevant", description=None)
-    add(store, "3", description=None)  # not labelled
-    add(store, "4", status="Applied")  # already has one
-    store.set_fit_rating("LinkedIn", "3", "good")
-    store.conn.execute("UPDATE roles SET fetched_on = '2025-01-01T00:00:00+05:30'")
-    assert sorted(j for _, j in store.pending_labelled_details(10)) == ["1", "2", "3"]
-    assert len(store.pending_labelled_details(2)) == 2
-    assert store.pending_labelled_details(0) == []
-    for _ in range(3):
-        store.record_detail_failure("LinkedIn", "1")
-    assert "1" not in {j for _, j in store.pending_labelled_details(10)}
-
-
 # ---- industry ideas ------------------------------------------------------------------------
 
 
-def with_industries(job_id: str, status: str, industries: str | None) -> Labelled:
-    return item(replace(make_role(job_id, status=status), industries=industries))
+def with_industries(job_id: str, rating: str, industries: str | None) -> Labelled:
+    return item(replace(make_role(job_id, rating=rating), industries=industries))
 
 
 def test_industries_on_several_bad_roles_and_no_good_one_are_suggested() -> None:
     found = [
-        with_industries("1", "Not relevant", "Construction, Staffing and Recruiting"),
-        with_industries("2", "Not relevant", "construction"),
-        with_industries("3", "Not relevant", "Mining"),
-        with_industries("4", "Applied", "Staffing and Recruiting, Software Development"),
-        with_industries("5", "Applied", None),
+        with_industries("1", "bad", "Construction, Staffing and Recruiting"),
+        with_industries("2", "bad", "construction"),
+        with_industries("3", "bad", "Mining"),
+        with_industries("4", "good", "Staffing and Recruiting, Software Development"),
+        with_industries("5", "good", None),
     ]
     found_names = {s.word: s.bad_roles for s in suggest_excluded_industries(found, Config())}
     assert found_names == {"Construction": 2}
 
 
 def test_an_industry_already_excluded_is_not_suggested_again() -> None:
-    found = [with_industries(str(i), "Not relevant", "Construction") for i in range(3)]
+    found = [with_industries(str(i), "bad", "Construction") for i in range(3)]
     config = Config(fit_excluded_industries="construction")
     assert suggest_excluded_industries(found, config) == ()
 

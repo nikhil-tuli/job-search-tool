@@ -1,8 +1,7 @@
 """Eval: how well the fit score separates roles you liked from roles you did not.
 
-Labels come from the Fit rating you give a role, or failing that from its status: applied or
-interviewing is good, Not relevant is bad. Every measure here is computed from the raw scores, so
-it follows the current Config settings and needs no scoring beyond the labelled roles themselves.
+Labels come only from the Fit rating you give a role. Every measure here is computed from the raw
+scores, so it follows the current Config settings and needs no scoring beyond the rated roles.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from dataclasses import dataclass, replace
 from .config import Config, split_list
 from .fit_filters import industry_list
 from .models import LABEL_BAD, LABEL_GOOD, Cv, Role, RoleScore
-from .scoring import ScoreModel, inputs_fingerprint
+from .scoring import BAND_PARTIAL, BAND_STRONG, ScoreModel, inputs_fingerprint
 from .store import Store
 
 MIN_EACH = 5  # fewer good or bad roles than this and the numbers are too noisy to act on
@@ -130,6 +129,31 @@ def load_labelled(store: Store, config: Config, cv: Cv | None) -> list[Labelled]
             score = None
         found.append(Labelled(role, label, score))
     return found
+
+
+@dataclass(frozen=True)
+class Bands:
+    """Roles with a current score, by band."""
+
+    total: int
+    strong: int
+    partial: int
+    weak: int
+
+
+def score_bands(store: Store, config: Config, cv: Cv | None) -> Bands:
+    """Every role with a current score (not stale), counted by Strong, Partial and Weak."""
+    if cv is None:
+        return Bands(0, 0, 0, 0)
+    model = ScoreModel.from_config(config)
+    saved = store.get_scores()
+    counts = {BAND_STRONG: 0, BAND_PARTIAL: 0, "weak": 0}
+    for role in store.list_roles():
+        score = saved.get(role.key)
+        if score is None or score.inputs != inputs_fingerprint(config, cv, role):
+            continue
+        counts[model.band(model.final(score))] += 1
+    return Bands(sum(counts.values()), counts[BAND_STRONG], counts[BAND_PARTIAL], counts["weak"])
 
 
 def roles_to_score(labelled: Sequence[Labelled]) -> list[Role]:

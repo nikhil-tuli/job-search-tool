@@ -747,7 +747,7 @@ def test_summary_lists_every_status_in_workflow_order(client: FlaskClient, store
     _add_on(store, run, "1", "2026-10-15")
     body = text(client.get("/summary"))
     headers = re.findall(r'<th class="num">([^<]+)</th>', body)
-    assert headers == ["Fetched", *STATUSES]
+    assert headers == ["Fetched", "Took", *STATUSES]
     assert 'href="/summary"' in body
 
 

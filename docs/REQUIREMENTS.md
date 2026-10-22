@@ -91,25 +91,30 @@ Every scoring run (automatic, button or re-score) is recorded and shown in the a
 
 **Labels**
 
-- Good: status Applied or any interview status. Bad: status Not relevant. Skipped and Closed are ignored.
-- A Good fit / Poor fit rating in the side panel on every role (with Clear). It overrides the status-based label, and the panel says which label a role has and why. A rated role shows a thumb next to its title. The rating is stored on the role (schema version 8).
-- Labels lean toward roles you chose to apply to, so results are directional.
+- A role is Good or Bad only when you rate it yourself: 👍 Good or 👎 Poor in the side panel. Clear removes the rating.
+- A status never makes a role Good or Bad.
+- A rated role shows a thumb next to its title. The panel says "Counts in the eval" or "Not in the eval".
+- The rating is stored on the role (schema version 8).
 
 **Eval (`jobscan eval` and the Eval page)**
 
-- `jobscan eval` scores the labelled roles that have a description but no current score (labelled roles count whatever the Fit filter says), then prints the report. The Eval page shows the same report from stored scores and never scores anything itself, so a long run is never tied to a browser request.
-- `jobscan details` fetches missing descriptions for labelled roles of any age (a scan only fetches recent ones), paced like a scan, so older Applied roles can be scored. A posting that has gone stays without one.
-- The report:
-    - AUC (the chance a good role outscores a bad one; ties count half), the average score of good and bad roles, and how many good roles are in the top 10 (ties are counted against us), for keywords only, meaning only and the current mix
-    - AUC at every 10% keyword share, with the best share on this data (the one nearest the current setting wins a tie)
-    - the cut-off score that keeps the most good roles while letting through the fewest bad ones
-    - misses: the five good roles scored lowest and the five bad roles scored highest
-    - a warning "Directional only" until at least 5 good, 5 bad and 20 scored roles exist
-- Settings are never changed by the eval. It shows what to change and where.
+- It checks whether the fit score ranks your Good roles above your Poor roles. Only rated roles count, and only those with a score can be tested.
+- `jobscan eval` scores the rated roles that have a description but no current score, then prints the report.
+- The Eval page shows the same report. It never scores anything itself.
+- `jobscan details` fetches missing descriptions for recent roles, the same ones a scan covers (the last 3 days by default), for example after a throttle. Older roles are not fetched.
+- The order is: descriptions, then scores, then ratings.
+- The report shows:
+    - a funnel: roles with a current score (Strong, Partial, Weak), then those that are also rated (good, bad)
+    - for keywords only, meaning only and the current mix: AUC, the average score of good roles, the average score of bad roles, and how many good roles are in the top 10
+    - AUC at every 10% keyword share, and the best share
+    - the cut-off score that keeps the most good roles and lets through the fewest bad ones
+    - the good roles scored lowest and the bad roles scored highest
+    - "Directional only" until there are at least 5 good, 5 bad and 20 scored roles
+- The eval never changes settings. It only shows what to change and where.
 
 **Cutting irrelevant roles**
 
-- **Search phrase yield:** per search phrase, how many labelled roles were good and bad, so an over-broad phrase shows up.
+- **Search phrase yield:** per search phrase, how many rated roles were good and bad, so an over-broad phrase shows up.
 - **Deny word ideas:** title words in at least 2 bad roles and no good one, not already denied, and not part of a search phrase. One click adds the word to the title deny words.
 - **Industry ideas:** LinkedIn industries on at least 2 bad roles and no good one. One click adds the industry to Excluded industries.
 - Both only tag roles Excluded. Nothing is hidden or deleted, and each can be removed on the Config page.
@@ -149,6 +154,62 @@ Every scoring run (automatic, button or re-score) is recorded and shown in the a
 3. Gemini embeddings, cosine, merge and the scoring run log. **Built.**
 4. Fit rating, `jobscan eval`, `jobscan details`, the Eval page and the relevance tools. **Built.** Calibrating the weights and bands needs about 20 or more rated roles.
 5. LLM review: not planned.
+
+## Round 5: scheduled scan and panel changes (built)
+
+Agreed on 22 Oct 2026 and built the same day. Not yet checked on a real Mac: the launchd, Keychain and notification steps were tested against stand-ins, because the build sandbox is Linux. The README is not changed, and from now on it is only changed after the user has reviewed the proposed text.
+
+### A. Scheduled daily scan (opt-in, built)
+
+This reverses the earlier "no schedule" goal, so it stays off until switched on.
+
+- **Where it runs:** on the user's Mac, not in the cloud. The database, CV and browser session are local, and a cloud IP is more likely to be blocked. A macOS `launchd` job runs `jobscan scan` once a day, at a time the user sets (for example 8am). The scan already scores new roles at the end.
+- **Commands:** `jobscan schedule on` and `jobscan schedule off` write and remove the job. `jobscan status` shows the schedule state.
+- **Missed runs:** `launchd` runs a job missed during sleep when the Mac wakes. It does not run a job missed while the Mac was off, so the job also runs at login, and skips the run if a scan already completed that day.
+- **Search window (configurable):** the scheduled scan does not default to the last 24 hours. It uses a Config value for how far back to look (the existing `time_window_seconds`, sent to LinkedIn as `f_TPR=r<seconds>`), so a skipped day can be covered by widening it. Two cautions: only 86400 seconds has been confirmed against LinkedIn, and the scan prints a warning at the start for any other value, so a wider value must be tested on the first run. The scan already warns when the last successful run is older than the window, which is how a gap is flagged. `fit_recency_days` (default 1) also drops roles older than that from scoring, so it must be raised to match, or older roles found by a wider scan are excluded. The wider the window, the more roles and texts each run uses, against the 1,000 daily limit.
+- **Gemini key:** the job reads it from the macOS Keychain at run time. It is never written to a file, a log, the job definition or a URL.
+- **Absolute paths:** the job uses absolute paths to Python and the project, because it has no shell setup.
+- **Time limit:** a wrapper stops the scan after a set time (default 180 minutes, since scans have taken up to about 2.5 hours), so a hang cannot block the next day, and sends a notification.
+- **Overlap:** the existing `scan.lock` file refuses a second scan while one runs, so a scheduled run and a manual run cannot overlap.
+- **Throttling:** unchanged. Listing pages retry `retry_count` times (3) and abort after `abort_after_consecutive_throttles` (5) consecutive throttles. Description fetching stops after 2 throttles and the roles are retried on the next run. No claim is made that a schedule is throttled less than manual use.
+- **Notifications:** a macOS notification on failure or timeout. An optional setting, off by default, adds one when a scan ends, for example "6 new roles, 2 Strong".
+- **Logs:** each run writes a log file with no secrets in it.
+- **Status of a running job:** a run is recorded as `running` from its start, so `jobscan status` shows "Latest run: #N running". Live progress, such as keywords done and roles found so far, is not stored yet. The plan is to update the run record as the scan advances and show it in `jobscan status` and on the Summary page, with start time, elapsed time and the last result.
+- **Not included:** Naukri. Its terms prohibit scraping and it uses bot detection. If wanted later, the first option to check is parsing Naukri's job alert emails.
+
+**How it works as built**
+
+- **Commands:** `jobscan schedule on`, `schedule off` and `schedule status`. `jobscan scheduled-run` is what the job calls. `jobscan status` and the Summary page show the schedule state.
+- **Config group "Scheduled scan":** run time (HH:MM, IST), stop-after minutes (default 180) and notify-when-a-scan-ends (0 or 1). Changing the time needs `jobscan schedule on` again, because launchd holds the time.
+- **Keychain:** store the key once with `security add-generic-password -a "$USER" -s jobscan-gemini -w`, which asks for the key so it is not typed on the command line. `schedule on` prints this if the key is missing.
+- **Skip rule:** the run is skipped when a scan that ended well (success or partial) started today. A failed scan does not block the next attempt.
+- **Time limit:** at the limit the scan gets Ctrl-C, so it can close its run record. If it is still running 60 seconds later it is killed.
+- **Notifications:** failure, timeout, a partial run, a missing key and an invalid config always notify. Success notifies only if the setting is 1, and says how many new roles and how many are Strong. A scan that declines to start (another running, or the minimum gap) is silent.
+- **Running status:** no new storage. A run is saved as running at its start and each keyword's result is saved as it finishes, so `jobscan status` and the Summary page show keywords done, new roles so far and elapsed time. The Summary page needs a refresh to update.
+- **Window note:** `schedule on` prints a note when Fit recency is shorter than the scan window.
+- **Panel changes (B):** the Link row reads "Open on LinkedIn" (the address is in the tooltip). Status and Applied On share a row. The eval note under Your rating is one short line. The comments box grows as the user types, up to a limit.
+
+### B. Side panel: less scrolling (built)
+
+- Posted date: remove the "(LinkedIn said ...)" text from the column. It stays in the tooltip.
+- Fit filter: show all exclusion reasons on one line as short tags, wrapping only when there is no room.
+- Score this role: move it onto the same row as the Fit score.
+- Your rating: fit in one or two lines (Good and Bad buttons and a short label).
+- Role description: a smaller default height, since it has its own scroll.
+- Comments: a shorter box that grows as the user types.
+- Aim: remove or reduce the panel scroll without removing needed content. The full description stays reachable.
+
+### C. Config page (built in the last build)
+
+- "Texts per request" is no longer a setting. It is fixed at 20.
+- The Title phrases table has no Remove column. Clearing the text deletes a phrase. The Phrase boxes are wider.
+- The hints for "Texts per minute" and "Texts per 24 hours" say Google counts each text as one request. A dashboard check showed about 400 requests for 364 texts, so the app counts texts.
+
+### D. Settled answers
+
+- Chunk size stays at 40 words. 100 words would halve the texts but blur each chunk's meaning, mismatch the short CV chunks, compress scores, and force a re-embed. 60 is the safer step if quota ever matters.
+- Raising texts per request does not reduce usage, because Google counts each text separately.
+- A text is one chunk of a description or CV (about 290 characters, 39 words), not a word. A role averages about 11 to 13 chunks, and the cap is 40.
 
 ## Q&A
 

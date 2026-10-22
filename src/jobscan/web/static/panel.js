@@ -25,6 +25,12 @@
     if (sf) { sf.addEventListener('submit', scoreSubmit); }
     var rf = body.querySelector('form.rating-form');
     if (rf) { rf.addEventListener('submit', ratingSubmit); }
+    var ta = body.querySelector('textarea');
+    if (ta) {
+      var grow = function () { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, 220) + 'px'; };
+      ta.addEventListener('input', grow);
+      grow();
+    }
     var first = body.querySelector('select, input[type=text], textarea');
     if (first) { first.focus(); }
   }
@@ -158,7 +164,9 @@
     if (!band) {
       var none = fact.querySelector('[data-score-label]');
       if (none) { none.parentNode.removeChild(none); }
-      fact.insertAdjacentHTML('afterbegin', '<span class="band" data-score-band></span> <span data-score-label></span><br><small data-score-detail></small>');
+      var row = fact.querySelector('.score-row');
+      row.insertAdjacentHTML('afterbegin', '<span class="band" data-score-band></span> <span data-score-label></span> ');
+      row.insertAdjacentHTML('afterend', '<small data-score-detail></small>');
       band = fact.querySelector('[data-score-band]');
     }
     band.className = 'band ' + score.band;

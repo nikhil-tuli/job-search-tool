@@ -23,14 +23,14 @@ from flask import (
 )
 from werkzeug.wrappers import Response as WerkzeugResponse
 
+from .. import schedule as schedule_module
 from ..config import LIST_SETTINGS, Config, ConfigError, split_list
 from ..cv import MAX_UPLOAD_BYTES, CvError, extract_text, sha_of
 from ..embeddings import API_KEY_ENV, Embedder
-from ..evaluation import build_report, load_labelled
+from ..evaluation import build_report, load_labelled, score_bands
 from ..fit_filters import FitResult, FitRules, evaluate
 from ..matching import MATCH_MODES
 from ..models import (
-    LABEL_GOOD,
     SORTED_STATUSES,
     STATUSES,
     Cv,
@@ -77,7 +77,7 @@ EXCLUDE_KINDS = {
     ),
 }
 FIT_CHOICES = ("eligible", "excluded")
-SCORE_CHOICES = ("strong", "partial", "weak", "unscored")
+SCORE_CHOICES = ("scored", "strong", "partial", "weak", "unscored")
 SORT_CHOICES = ("score",)
 SCORE_WAIT_SECONDS = 15.0  # the app handles one request at a time, so a button must not wait long
 TRIGGER_LABELS = {"scan": "After a scan", "manual": "jobscan score", "role": "Score this role"}
@@ -113,7 +113,8 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
             (
                 "time_window_seconds",
                 "Posted within (seconds)",
-                "86400 is the only value verified to work",
+                "86400 (24 hours) is the only value verified to work. Scheduled scans use it too. "
+                "If widened, raise Fit recency days to match",
             ),
             ("max_pages_per_keyword", "Page cap per keyword", "10 results per page"),
             (
@@ -306,6 +307,26 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
             ("skipped_titles_retention_days", "Keep skipped titles (days)", ""),
         ),
     ),
+    (
+        "Scheduled scan",
+        (
+            (
+                "schedule_time",
+                "Run daily at (HH:MM)",
+                "24-hour, IST. Run jobscan schedule on again after changing it",
+            ),
+            (
+                "schedule_timeout_minutes",
+                "Stop a scan after (min)",
+                "A scheduled scan still running after this is stopped",
+            ),
+            (
+                "schedule_notify_finish",
+                "Notify when a scan ends",
+                "1 also notifies on success. Failures always notify. 0 or 1",
+            ),
+        ),
+    ),
 )
 
 
@@ -316,14 +337,32 @@ def _host_name(host: str) -> str:
     return host.split(":")[0]
 
 
+def format_seconds(seconds: int) -> str:
+    minutes, secs = divmod(seconds, 60)
+    return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+
+
+def scans_by_day(runs: list[Any]) -> dict[str, dict[str, str]]:
+    """For each day (IST) the scans started: the latest one's status, and the time they took."""
+    days: dict[str, dict[str, str]] = {}
+    seconds: dict[str, int] = {}
+    for run in sorted(runs, key=lambda r: r.started_on):
+        day = run.started_on[:10]
+        entry = days.setdefault(day, {"status": "", "took": ""})
+        entry["status"] = run.status
+        if run.finished_on:
+            seconds[day] = seconds.get(day, 0) + round(
+                (from_iso(run.finished_on) - from_iso(run.started_on)).total_seconds()
+            )
+        entry["took"] = (
+            "running" if run.status == "running" else format_seconds(seconds.get(day, 0))
+        )
+    return days
+
+
 def label_note(role: Role) -> str:
-    """Says whether the eval counts this role as good or bad, and why."""
-    verdict = "a good fit" if role.label == LABEL_GOOD else "a poor fit"
-    if role.fit_rating is not None:
-        return f"Counted in the eval as {verdict}, from your rating."
-    if role.label is not None:
-        return f"Counted in the eval as {verdict}, from its status ({role.status})."
-    return "Not counted in the eval. Rate it, or set a status such as Applied or Not relevant."
+    """Says whether the eval counts this role."""
+    return "Counts in the eval." if role.fit_rating is not None else "Not in the eval."
 
 
 def create_app(
@@ -387,8 +426,7 @@ def create_app(
         if not run.finished_on:
             return "running"
         seconds = round((from_iso(run.finished_on) - from_iso(run.started_on)).total_seconds())
-        minutes, secs = divmod(seconds, 60)
-        return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+        return format_seconds(seconds)
 
     @app.template_filter("trigger")
     def trigger(value: str) -> str:
@@ -471,6 +509,8 @@ def create_app(
         """Rows with the chosen score band (or none), best fit first when asked."""
         if choice == "unscored":
             rows = [r for r in rows if r.key not in views]
+        elif choice == "scored":
+            rows = [r for r in rows if r.key in views]
         elif choice:
             rows = [r for r in rows if r.key in views and views[r.key].band == choice]
         if sort == "score":
@@ -681,7 +721,12 @@ def create_app(
         config, cv = current_config(), store.get_cv()
         phrases = [p.phrase for p in store.list_phrases() if p.use_for_match]
         report = build_report(load_labelled(store, config, cv), config, phrases)
-        return render_template("eval.html", report=report, has_cv=cv is not None)
+        return render_template(
+            "eval.html",
+            report=report,
+            bands=score_bands(store, config, cv),
+            has_cv=cv is not None,
+        )
 
     @app.post("/eval/exclude")
     def eval_exclude() -> WerkzeugResponse:
@@ -797,6 +842,10 @@ def create_app(
             totals=totals,
             grand_total=sum(d.total for d in days),
             last_success=store.last_successful_run(),
+            scans=scans_by_day(store.list_runs(200)),
+            latest_run=store.latest_run(),
+            elapsed=schedule_module.elapsed_text,
+            schedule_line=schedule_module.describe_state(schedule_module.schedule_state()),
             **scoring_context(),
         )
 

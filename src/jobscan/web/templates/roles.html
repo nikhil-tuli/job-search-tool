@@ -33,7 +33,7 @@
       </select>
       <select name="score" aria-label="Score filter">
         <option value="">Any score</option>
-        {% for value, label in (('strong', 'Strong fit'), ('partial', 'Partial fit'), ('weak', 'Weak fit'), ('unscored', 'Unscored')) %}<option value="{{ value }}" {% if filters.get('score') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        {% for value, label in (('scored', 'Scored only'), ('strong', 'Strong fit'), ('partial', 'Partial fit'), ('weak', 'Weak fit'), ('unscored', 'Unscored')) %}<option value="{{ value }}" {% if filters.get('score') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
       <select name="sort" aria-label="Sort order">
         <option value="">Newest first</option>
@@ -73,10 +73,10 @@
       </td>
       <td>{{ r.company }}</td>
       <td>{{ r.location }}</td>
-      <td class="nw">{{ r | posted }}</td>
-      <td class="nw">{{ r.fetched_on | ist }}</td>
+      <td class="date">{{ r | posted }}</td>
+      <td class="date">{{ r.fetched_on | ist }}</td>
       {% set fit = fits[r.key] %}
-      <td class="nw fit">
+      <td class="fit">
         {% if fit.eligible %}<span class="muted">Eligible</span>{% else %}<span class="tag out" title="{{ fit.summary }}">{{ fit.label }}</span>{% if fit.more %}<span class="muted" title="{{ fit.summary }}">+{{ fit.more }}</span>{% endif %}{% endif %}
       </td>
       {% set sc = scores.get(r.key) %}

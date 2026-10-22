@@ -2,32 +2,36 @@
 <p class="muted">{{ role.company }} &middot; {{ role.location }} &middot; {{ role.portal }} {{ role.job_id }}</p>
 {% set link = role.link | safe_link %}
 <dl class="facts">
-  <dt>Link</dt><dd>{% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer">{{ link }}</a>{% endif %}</dd>
-  <dt>Posted (IST)</dt><dd>{{ role | posted }}{% if role.raw_relative %} <span class="muted">(LinkedIn said "{{ role.raw_relative }}")</span>{% endif %}</dd>
+  <dt>Link</dt><dd>{% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer" title="{{ link }}">Open on LinkedIn &#8599;</a>{% endif %}</dd>
+  <dt>Posted (IST)</dt><dd>{% if role.raw_relative %}<span data-tip="LinkedIn said &quot;{{ role.raw_relative }}&quot;" tabindex="0">{{ role | posted }}</span>{% else %}{{ role | posted }}{% endif %}</dd>
   <dt>Fetched (IST)</dt><dd>{{ role.fetched_on | ist }}</dd>
   <dt>Matched phrase</dt><dd>{{ role.matched_phrase }}</dd>
   {% if fit %}<dt>Fit filter</dt><dd>{% if fit.eligible %}Eligible{% else %}<span class="tag out">{{ fit.label }}</span><ul class="reasons">{% for reason in fit.reasons %}<li>{{ reason.detail }}</li>{% endfor %}</ul>{% endif %}</dd>{% endif %}
   <dt>Fit score</dt>
   <dd id="score-fact">
+    <div class="score-row">
+      {% if score %}
+      <span class="band {{ score.band }}" data-score-band>{{ score.final }}</span> <span data-score-label>{{ score.band | capitalize }} fit</span>
+      {% else %}
+      <span class="muted" data-score-label>Not scored</span>
+      {% endif %}
+      <form method="post" class="score-form" action="{{ url_for('role_score', portal=role.portal, job_id=role.job_id) }}">
+        <input type="hidden" name="next" value="{{ next }}">
+        <button type="submit" {% if not has_cv %}disabled title="Upload your CV on the CV page first"{% endif %}>{% if score %}Re-score this role{% else %}Score this role{% endif %}</button>
+        <span class="note" aria-live="polite"></span>
+      </form>
+    </div>
     {% if score %}
-    <span class="band {{ score.band }}" data-score-band>{{ score.final }}</span> <span data-score-label>{{ score.band | capitalize }} fit</span>
-    <br><small data-score-detail>Keywords {{ score.keyword }}, meaning {{ score.semantic }}, {{ score.chunks }} chunks, scored {{ score.scored_on | ist }}</small>
-    {% if score.stale %}<br><small class="stale-note">Out of date: made with an earlier CV or settings. Run jobscan score.</small>{% endif %}
-    {% else %}
-    <span class="muted" data-score-label>Not scored</span>
+    <small data-score-detail>Keywords {{ score.keyword }}, meaning {{ score.semantic }}, {{ score.chunks }} chunks, scored {{ score.scored_on | ist }}</small>
+    {% if score.stale %}<small class="stale-note">Out of date: made with an earlier CV or settings. Run jobscan score.</small>{% endif %}
     {% endif %}
-    <form method="post" class="score-form" action="{{ url_for('role_score', portal=role.portal, job_id=role.job_id) }}">
-      <input type="hidden" name="next" value="{{ next }}">
-      <button type="submit" {% if not has_cv %}disabled title="Upload your CV on the CV page first"{% endif %}>{% if score %}Re-score this role{% else %}Score this role{% endif %}</button>
-      <span class="note" aria-live="polite"></span>
-    </form>
   </dd>
   <dt>Your rating</dt>
   <dd id="rating-fact">
     <form method="post" class="rating-form" action="{{ url_for('role_rating', portal=role.portal, job_id=role.job_id) }}">
       <input type="hidden" name="next" value="{{ next }}">
-      <button type="submit" name="rating" value="good" aria-pressed="{{ 'true' if role.fit_rating == 'good' else 'false' }}">&#128077; Good fit</button>
-      <button type="submit" name="rating" value="bad" aria-pressed="{{ 'true' if role.fit_rating == 'bad' else 'false' }}">&#128078; Poor fit</button>
+      <button type="submit" name="rating" value="good" aria-pressed="{{ 'true' if role.fit_rating == 'good' else 'false' }}">&#128077; Good</button>
+      <button type="submit" name="rating" value="bad" aria-pressed="{{ 'true' if role.fit_rating == 'bad' else 'false' }}">&#128078; Poor</button>
       <button type="submit" name="rating" value="clear">Clear</button>
       <span class="note" aria-live="polite"></span>
     </form>
@@ -44,21 +48,22 @@
 {% if role.description %}
 <div class="desc" tabindex="0">{{ role.description }}</div>
 {% else %}
-<p class="muted">No description saved yet. It is fetched during a scan, for recent roles only. For roles you rated or actioned, run jobscan details.</p>
+<p class="muted">No description saved yet. It is fetched during a scan, for recent roles only. For roles you rated, run jobscan details.</p>
 {% endif %}
 
 <form method="post" class="edit" action="{{ url_for('role_save', portal=role.portal, job_id=role.job_id) }}">
   <input type="hidden" name="next" value="{{ next }}">
+  <div class="pair">
   <label>Status
     <select name="status">
       {% for s in statuses %}<option value="{{ s }}" {% if form.get('status') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
     </select>
   </label>
-  {% if errors.get('status') %}<p class="error">{{ errors['status'] }}</p>{% endif %}
-
   <label>Applied On (YYYY-MM-DD)
-    <input type="text" name="applied_on" value="{{ form.get('applied_on', '') }}" placeholder="set automatically when Applied">
+    <input type="text" name="applied_on" value="{{ form.get('applied_on', '') }}" placeholder="set when Applied">
   </label>
+  </div>
+  {% if errors.get('status') %}<p class="error">{{ errors['status'] }}</p>{% endif %}
   {% if errors.get('applied_on') %}<p class="error">{{ errors['applied_on'] }}</p>{% endif %}
 
   <label>Contact person
@@ -67,7 +72,7 @@
   {% if errors.get('contact_person') %}<p class="error">{{ errors['contact_person'] }}</p>{% endif %}
 
   <label>Comments
-    <textarea name="comments" rows="6">{{ form.get('comments', '') }}</textarea>
+    <textarea name="comments" rows="2">{{ form.get('comments', '') }}</textarea>
   </label>
   {% if errors.get('comments') %}<p class="error">{{ errors['comments'] }}</p>{% endif %}
 

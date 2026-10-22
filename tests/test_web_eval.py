@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 from flask.testing import FlaskClient
 
@@ -25,7 +27,7 @@ def test_rating_saves_and_explains_itself(web: Harness) -> None:
     assert response.status_code == 200
     assert response.get_json() == {
         "rating": "good",
-        "note": "Counted in the eval as a good fit, from your rating.",
+        "note": "Counts in the eval.",
     }
     role = web.store.get_role("LinkedIn", "1")
     assert role is not None
@@ -38,22 +40,22 @@ def test_rating_can_be_changed_and_cleared(web: Harness) -> None:
     assert rate(web.client, "1", "bad").get_json()["rating"] == "bad"
     data = rate(web.client, "1", "clear").get_json()
     assert data["rating"] == ""
-    assert "Not counted in the eval" in data["note"]
+    assert "Not in the eval" in data["note"]
 
 
-def test_a_cleared_rating_falls_back_to_the_status(web: Harness) -> None:
+def test_a_cleared_rating_leaves_the_role_out_of_the_eval(web: Harness) -> None:
     add_role(web.store, "1")
     web.store.update_status(["LinkedIn|1"], "Applied")
-    rate(web.client, "1", "bad")
+    assert rate(web.client, "1", "good").get_json()["note"] == "Counts in the eval."
     data = rate(web.client, "1", "clear").get_json()
-    assert data["note"] == "Counted in the eval as a good fit, from its status (Applied)."
+    assert data["note"] == "Not in the eval."
 
 
 def test_rating_form_post_redirects_with_a_message(web: Harness) -> None:
     add_role(web.store, "1")
     response = rate(web.client, "1", "bad", panel=False)
     assert response.status_code == 302
-    assert "poor fit" in body(web.client.get("/roles"))
+    assert "Counts in the eval." in body(web.client.get("/roles"))
 
 
 @pytest.mark.parametrize("choice", ["", "great", "GOOD"])
@@ -76,7 +78,7 @@ def test_panel_has_rating_buttons_and_a_label_note(web: Harness) -> None:
     assert 'name="rating" value="good" aria-pressed="true"' in page
     assert 'name="rating" value="bad" aria-pressed="false"' in page
     assert 'value="clear"' in page
-    assert "from your rating" in page
+    assert "Counts in the eval." in page
 
 
 def test_list_marks_rated_roles(web: Harness) -> None:
@@ -89,14 +91,14 @@ def test_list_marks_rated_roles(web: Harness) -> None:
     assert "&#128078;" in page
 
 
-def test_saving_the_status_refreshes_the_label_note(web: Harness) -> None:
+def test_saving_a_status_never_puts_a_role_in_the_eval(web: Harness) -> None:
     add_role(web.store, "1")
     response = web.client.post(
         "/roles/LinkedIn/1",
-        data={"status": "Not relevant", "applied_on": "", "contact_person": "", "comments": ""},
+        data={"status": "Applied", "applied_on": "", "contact_person": "", "comments": ""},
         headers={"X-Panel": "1"},
     )
-    assert response.get_json()["note"].endswith("from its status (Not relevant).")
+    assert response.get_json()["note"] == "Not in the eval."
 
 
 @pytest.mark.parametrize("status", STATUSES)
@@ -123,10 +125,10 @@ def label_and_score(web: Harness, good: int, bad: int) -> None:
     upload_cv(web.store)
     for i in range(good):
         add_role(web.store, f"g{i}", f"Responsibilities\n\n- Lead payment gateway migration {i}\n")
-        web.store.update_status([f"LinkedIn|g{i}"], "Applied")
+        web.store.set_fit_rating("LinkedIn", f"g{i}", "good")
     for i in range(bad):
         add_role(web.store, f"b{i}", f"Responsibilities\n\n- Forklift pallet racking {i}\n")
-        web.store.update_status([f"LinkedIn|b{i}"], "Not relevant")
+        web.store.set_fit_rating("LinkedIn", f"b{i}", "bad")
         web.store.conn.execute(
             "UPDATE roles SET title = 'Warehouse Staffing Lead' WHERE job_id = ?", (f"b{i}",)
         )
@@ -134,10 +136,26 @@ def label_and_score(web: Harness, good: int, bad: int) -> None:
         assert web.client.post(f"/roles/LinkedIn/{role.job_id}/score").status_code == 302
 
 
+def test_eval_page_funnel_counts_scored_roles_and_then_rated_ones(web: Harness) -> None:
+    label_and_score(web, 3, 2)
+    add_role(web.store, "u1", "Responsibilities\n\n- Lead payment gateway migration\n")
+    assert web.client.post("/roles/LinkedIn/u1/score").status_code == 302  # scored, not rated
+    add_role(web.store, "u2", "Responsibilities\n\n- Lead payment gateway migration\n")  # neither
+    page = body(web.client.get("/eval"))
+    scored = page.split("Roles with a current score</dt><dd>")[1].split("</dd>")[0]
+    assert scored.startswith("6 (")
+    total, strong, partial, weak = (int(n) for n in re.findall(r"\d+", scored))
+    assert strong + partial + weak == total
+    assert "Strong" in scored
+    assert "Partial" in scored
+    assert "Weak" in scored
+    assert "Roles with a current score and rating</dt><dd>5 (3 good, 2 bad)" in page
+
+
 def test_eval_page_reports_measures(web: Harness) -> None:
     label_and_score(web, 3, 3)
     page = body(web.client.get("/eval"))
-    assert "6 (3 good, 3 bad)" in page
+    assert "6 (3 good, 3 bad)" in page  # scored and rated
     assert "Which score works best" in page
     for name in ("Keywords only", "Meaning only", "Current mix (40% keywords)"):
         assert name in page
@@ -151,10 +169,10 @@ def test_eval_page_reports_measures(web: Harness) -> None:
 def test_eval_page_lists_unscored_labelled_roles(web: Harness) -> None:
     upload_cv(web.store)
     add_role(web.store, "1", None)
-    web.store.update_status(["LinkedIn|1"], "Applied")
+    web.store.set_fit_rating("LinkedIn", "1", "good")
     page = body(web.client.get("/eval"))
     assert "No description" in page
-    assert "jobscan details" in page
+    assert "cannot be scored" in page
 
 
 def test_eval_page_suggests_deny_words_and_adds_them(web: Harness) -> None:
@@ -240,17 +258,18 @@ def test_advanced_choices_survive_the_round_trip(web: Harness) -> None:
 # ---- excluding industries ------------------------------------------------------------------
 
 
-def with_industries(web: Harness, job_id: str, status: str, industries: str) -> None:
+def with_industries(web: Harness, job_id: str, rating: str | None, industries: str) -> None:
     add_role(web.store, job_id)
-    web.store.update_status([f"LinkedIn|{job_id}"], status)
+    if rating is not None:
+        web.store.set_fit_rating("LinkedIn", job_id, rating)
     web.store.conn.execute("UPDATE roles SET industries = ? WHERE job_id = ?", (industries, job_id))
 
 
 def test_eval_page_suggests_industries_and_excludes_them(web: Harness) -> None:
     upload_cv(web.store)
     for i in range(2):
-        with_industries(web, f"b{i}", "Not relevant", "Staffing and Recruiting")
-    with_industries(web, "g", "Applied", "Software Development")
+        with_industries(web, f"b{i}", "bad", "Staffing and Recruiting")
+    with_industries(web, "g", "good", "Software Development")
     page = body(web.client.get("/eval"))
     assert "Industry ideas" in page
     assert "<strong>Staffing and Recruiting</strong>" in page
@@ -266,7 +285,7 @@ def test_eval_page_suggests_industries_and_excludes_them(web: Harness) -> None:
 
 
 def test_an_excluded_industry_tags_roles_at_once(web: Harness) -> None:
-    with_industries(web, "1", "Not Applied", "Construction")
+    with_industries(web, "1", None, "Construction")
     assert "Excluded: industry" not in body(web.client.get("/roles"))
     web.client.post("/eval/exclude", data={"kind": "industry", "value": "Construction"})
     assert "Excluded: industry" in body(web.client.get("/roles"))

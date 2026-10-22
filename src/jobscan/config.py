@@ -73,6 +73,9 @@ class Config:
     embed_texts_per_minute: int = 90
     embed_tokens_per_minute: int = 25_000
     embed_daily_limit: int = 1_000
+    schedule_time: str = "08:00"
+    schedule_timeout_minutes: int = 180
+    schedule_notify_finish: int = 0
 
     @property
     def embed_space(self) -> str:
@@ -161,6 +164,8 @@ _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
     "embed_texts_per_minute": (int, 1, 10_000),
     "embed_tokens_per_minute": (int, 1_000, 10_000_000),
     "embed_daily_limit": (int, 1, 1_000_000),
+    "schedule_timeout_minutes": (int, 5, 240),
+    "schedule_notify_finish": (int, 0, 1),
 }
 # Settings holding a comma-separated list. They are stored tidy: "a, b, c".
 LIST_SETTINGS = (
@@ -179,6 +184,7 @@ _ORDERED_PAIRS = (
     ("score_sem_floor", "score_sem_ceiling"),
     ("score_partial_min", "score_strong_min"),
 )
+_CLOCK_TIME = re.compile(r"(?:[01]?\d|2[0-3]):[0-5]\d")
 _MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 _RANGE_PAIRS = (
     ("delay_seconds_min", "delay_seconds_max"),
@@ -229,6 +235,13 @@ def _parse_text_fields(
         values["embed_model"] = model
     else:
         errors["embed_model"] = "letters, digits, dots, dashes and underscores only"
+
+    when = raw.get("schedule_time", defaults.schedule_time).strip()
+    if _CLOCK_TIME.fullmatch(when):
+        hour, minute = when.split(":")
+        values["schedule_time"] = f"{int(hour):02d}:{minute}"
+    else:
+        errors["schedule_time"] = "use 24-hour HH:MM, for example 08:00"
 
     for key in LIST_SETTINGS:
         try:

@@ -74,12 +74,12 @@ def _auc(value: float | None) -> str:
 def eval_summary(report: EvalReport) -> list[str]:
     """Terminal lines for the eval: how well the score tells good roles from bad ones."""
     lines = [
-        f"Eval: {report.labelled} labelled roles ({report.good} good, {report.bad} bad), "
+        f"Eval: {report.labelled} rated roles ({report.good} good, {report.bad} bad), "
         f"{report.scored} with a current score"
     ]
     if report.no_description or report.unscored:
         lines.append(
-            f"  Not scored: {report.no_description} without a description (run jobscan details), "
+            f"  Not scored: {report.no_description} without a description, "
             f"{report.unscored} not yet scored (run jobscan eval)"
         )
     if not report.measurable:

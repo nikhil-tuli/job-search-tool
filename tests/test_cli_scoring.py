@@ -264,7 +264,7 @@ def test_summary_reports_tokens_basis_and_note_and_omits_idle_spend() -> None:
 
 
 def add_labelled(
-    db_path: Path, job_id: str, status: str, title: str, *, description: str | None
+    db_path: Path, job_id: str, rating: str, title: str, *, description: str | None
 ) -> None:
     store = cli.open_store(db_path)
     run = store.start_run(window_seconds=86400, keywords_total=1)
@@ -290,7 +290,7 @@ def add_labelled(
     )
     if description is not None:
         store.save_detail("LinkedIn", job_id, JobDetail(description), when=to_iso(now_ist()))
-    store.update_status([f"LinkedIn|{job_id}"], status)
+    store.set_fit_rating("LinkedIn", job_id, rating)
     store.close()
 
 
@@ -312,14 +312,14 @@ def test_eval_with_invalid_config(db_path: Path) -> None:
 
 def test_eval_scores_labelled_roles_then_reports(db_path: Path) -> None:
     seed(db_path, described=False)
-    add_labelled(db_path, "1", "Applied", "Technical Program Manager", description=PAYMENTS_JD)
-    add_labelled(db_path, "2", "Not relevant", "Warehouse Supervisor", description=WAREHOUSE_JD)
-    add_labelled(db_path, "3", "Applied", "Program Manager", description=None)
+    add_labelled(db_path, "1", "good", "Technical Program Manager", description=PAYMENTS_JD)
+    add_labelled(db_path, "2", "bad", "Warehouse Supervisor", description=WAREHOUSE_JD)
+    add_labelled(db_path, "3", "good", "Program Manager", description=None)
     code, text, bag = run_cli(db_path, "eval")
     assert code == EXIT_OK
-    assert "Eval: scoring 2 labelled role(s)" in text
-    assert "Eval: 3 labelled roles (2 good, 1 bad), 2 with a current score" in text
-    assert "1 without a description (run jobscan details)" in text
+    assert "Eval: scoring 2 rated role(s)" in text
+    assert "Eval: 3 rated roles (2 good, 1 bad), 2 with a current score" in text
+    assert "1 without a description" in text
     assert "Directional only" in text
     assert "Keywords only" in text
     assert "Meaning only" in text
@@ -331,11 +331,11 @@ def test_eval_scores_labelled_roles_then_reports(db_path: Path) -> None:
 
 def test_eval_does_not_rescore_current_scores(db_path: Path) -> None:
     seed(db_path, described=False)
-    add_labelled(db_path, "1", "Applied", "Technical Program Manager", description=PAYMENTS_JD)
+    add_labelled(db_path, "1", "good", "Technical Program Manager", description=PAYMENTS_JD)
     run_cli(db_path, "eval")
     code, text, bag = run_cli(db_path, "eval")
     assert code == EXIT_OK
-    assert "scoring" not in text.lower().split("eval: 1 labelled")[0]
+    assert "scoring" not in text.lower().split("eval: 1 rated")[0]
     assert bag.calls == []
 
 
@@ -343,20 +343,20 @@ def test_eval_with_nothing_labelled(db_path: Path) -> None:
     seed(db_path)
     code, text, _ = run_cli(db_path, "eval")
     assert code == EXIT_OK
-    assert "Eval: 0 labelled roles" in text
+    assert "Eval: 0 rated roles" in text
     assert "Need at least one good and one bad" in text
 
 
 def test_eval_interrupt_exits_130(db_path: Path) -> None:
     seed(db_path, described=False)
-    add_labelled(db_path, "1", "Applied", "Technical Program Manager", description=PAYMENTS_JD)
+    add_labelled(db_path, "1", "good", "Technical Program Manager", description=PAYMENTS_JD)
     code, _text, _ = run_cli(db_path, "eval", embedder=BagEmbedder(failures=[KeyboardInterrupt()]))
     assert code == EXIT_INTERRUPTED
 
 
 def test_eval_reports_scoring_trouble_and_still_prints(db_path: Path) -> None:
     seed(db_path, described=False)
-    add_labelled(db_path, "1", "Applied", "Technical Program Manager", description=PAYMENTS_JD)
+    add_labelled(db_path, "1", "good", "Technical Program Manager", description=PAYMENTS_JD)
     bag = BagEmbedder(failures=[EmbedAuthError("API key rejected")])
     code, text, _ = run_cli(db_path, "eval", embedder=bag)
     assert code == EXIT_OK
@@ -379,24 +379,30 @@ def run_details(db_path: Path, details: ScriptedDetails) -> tuple[int, str]:
 
 
 def test_details_with_nothing_waiting(db_path: Path) -> None:
-    seed(db_path, described=False)  # a role without a description, but no label
+    seed(db_path, described=False)
+    store = cli.open_store(db_path)
+    store.conn.execute("UPDATE roles SET fetched_on = '2025-01-01T00:00:00+05:30'")
+    store.close()  # too old to be covered
     details = ScriptedDetails()
     code, text = run_details(db_path, details)
     assert code == EXIT_OK
-    assert "No labelled roles are waiting" in text
+    assert "No recent roles are waiting" in text
     assert details.calls == []
 
 
-def test_details_fetches_labelled_roles_of_any_age(db_path: Path) -> None:
-    add_labelled(db_path, "1", "Applied", "Technical Program Manager", description=None)
-    add_labelled(db_path, "2", "Not relevant", "Warehouse Supervisor", description=None)
+def test_details_fetches_recent_roles_only(db_path: Path) -> None:
+    add_labelled(db_path, "1", "good", "Technical Program Manager", description=None)
+    add_labelled(db_path, "2", "bad", "Warehouse Supervisor", description=None)
+    add_labelled(db_path, "3", "bad", "Old Role", description=None)
     store = cli.open_store(db_path)
-    store.conn.execute("UPDATE roles SET fetched_on = '2025-01-01T00:00:00+05:30'")
+    store.conn.execute(
+        "UPDATE roles SET fetched_on = '2025-01-01T00:00:00+05:30' WHERE job_id = '3'"
+    )
     store.close()
     details = ScriptedDetails({"2": [detail_none("HTTP 404")]})
     code, text = run_details(db_path, details)
     assert code == EXIT_OK
-    assert sorted(details.calls) == ["1", "2"]
+    assert sorted(details.calls) == ["1", "2"]  # the old role is left alone
     assert "1 saved, 1 without one (posting gone), 0 left for later" in text
     store = cli.open_store(db_path)
     role = store.get_role("LinkedIn", "1")
@@ -407,7 +413,7 @@ def test_details_fetches_labelled_roles_of_any_age(db_path: Path) -> None:
 
 def test_details_stops_on_repeated_throttling(db_path: Path) -> None:
     for n in ("1", "2", "3"):
-        add_labelled(db_path, n, "Applied", "Technical Program Manager", description=None)
+        add_labelled(db_path, n, "good", "Technical Program Manager", description=None)
     details = ScriptedDetails({n: [detail_throttled()] for n in ("1", "2", "3")})
     code, text = run_details(db_path, details)
     assert code == EXIT_PARTIAL
@@ -425,7 +431,7 @@ def test_details_with_invalid_config(db_path: Path) -> None:
 
 
 def test_details_interrupt_exits_130(db_path: Path) -> None:
-    add_labelled(db_path, "1", "Applied", "Technical Program Manager", description=None)
+    add_labelled(db_path, "1", "good", "Technical Program Manager", description=None)
 
     class Interrupting:
         def fetch_detail(self, job_id: str):  # type: ignore[no-untyped-def]

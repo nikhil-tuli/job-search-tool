@@ -8,10 +8,12 @@ import random
 import sys
 import time
 from collections.abc import Callable, Sequence
+from datetime import timedelta
 from pathlib import Path
 from typing import TextIO
 
 from . import __version__
+from . import schedule as scheduling
 from .client import DetailFetcher, LinkedInClient, PageFetcher
 from .config import Config, ConfigError
 from .db import SchemaTooNewError, connect, migrate
@@ -30,7 +32,7 @@ from .scoring import (
     ScoringUnavailable,
     gemini_from_env,
 )
-from .store import RUN_FAILED, RUN_PARTIAL, RUN_SUCCESS, Store
+from .store import RUN_FAILED, RUN_PARTIAL, RUN_RUNNING, RUN_SUCCESS, Store
 from .timeutil import format_display, from_iso, now_ist, to_iso
 
 EmbedderFactory = Callable[[Config], Embedder]
@@ -68,7 +70,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="show last run and role counts")
     sub.add_parser("score", help="score roles against your CV (also runs after each scan)")
     sub.add_parser("eval", help="measure how well the score separates good and bad roles")
-    sub.add_parser("details", help="fetch missing descriptions for roles you rated or actioned")
+    sub.add_parser("details", help="fetch missing descriptions for recent roles")
+    schedule = sub.add_parser("schedule", help="run the scan daily on this Mac (macOS only)")
+    schedule.add_argument("action", choices=("on", "off", "status"))
+    sub.add_parser("scheduled-run", help="what the daily job calls: one guarded, timed scan")
     return parser
 
 
@@ -103,10 +108,32 @@ def cmd_status(store: Store, out: TextIO) -> int:
             f"Latest run: #{latest.id} {latest.status} at {format_display(latest.started_on)} IST",
             file=out,
         )
+        if latest.status == RUN_RUNNING:
+            print(
+                f"  in progress: {latest.keywords_done} of {latest.keywords_total} keywords done, "
+                f"{latest.new_roles} new roles so far, running for "
+                f"{scheduling.elapsed_text(latest.started_on)}",
+                file=out,
+            )
+    print(scheduling.describe_state(scheduling.schedule_state()), file=out)
     print(f"Roles: {store.count_roles()}", file=out)
     for status in STATUSES:
         print(f"  {status}: {store.count_roles(RoleFilter(status=status))}", file=out)
     return EXIT_OK
+
+
+def cmd_schedule(store: Store, db_path: Path, action: str, out: TextIO) -> int:
+    if action == "off":
+        return scheduling.uninstall(out)
+    if action == "status":
+        print(scheduling.describe_state(scheduling.schedule_state()), file=out)
+        return EXIT_OK
+    try:
+        config = Config.from_raw(store.get_config_raw())
+    except ConfigError as exc:
+        print(f"Configuration is invalid: {exc}", file=out)
+        return EXIT_USAGE
+    return scheduling.install(db_path, config, out)
 
 
 def run_scoring(
@@ -201,7 +228,7 @@ def cmd_eval(
     make_embedder: EmbedderFactory,
     sleep: Callable[[float], None],
 ) -> int:
-    """Score the labelled roles that need it, then report how well the score separates them."""
+    """Score the rated roles that need it, then report how well the score separates them."""
     config = load_config(store, out, "nothing was evaluated")
     if config is None:
         return EXIT_USAGE
@@ -214,7 +241,7 @@ def cmd_eval(
         labelled = load_labelled(store, config, cv)
         todo = roles_to_score(labelled)
         if todo:
-            reporter.line(f"Eval: scoring {len(todo)} labelled role(s) that have no current score")
+            reporter.line(f"Eval: scoring {len(todo)} rated role(s) that have no current score")
             try:
                 run_scoring(
                     store, config, TRIGGER_MANUAL, reporter.line, make_embedder, sleep, only=todo
@@ -240,16 +267,17 @@ def cmd_details(
     sleep: Callable[[float], None],
     rng: random.Random | None,
 ) -> int:
-    """Fetch missing descriptions for labelled roles of any age, so the eval can score them."""
+    """Fetch missing descriptions for recent roles, the same ones a scan covers."""
     config = load_config(store, out, "nothing was fetched")
     if config is None:
         return EXIT_USAGE
     reporter = Reporter(out, db_path.parent / "runs" / log_name(to_iso(now_ist())))
     own_client: LinkedInClient | None = None
     try:
-        pending = store.pending_labelled_details(DETAILS_BATCH)
+        since = to_iso(now_ist() - timedelta(days=config.detail_max_age_days))
+        pending = store.pending_details(since, DETAILS_BATCH)
         if not pending:
-            reporter.line("No labelled roles are waiting for a description.")
+            reporter.line("No recent roles are waiting for a description.")
             return EXIT_OK
         if detail_fetcher is None:
             own_client = LinkedInClient(config)
@@ -262,7 +290,7 @@ def cmd_details(
                 reporter.line(f"Pausing {seconds:.0f}s before {why}")
             sleep(seconds)
 
-        reporter.line(f"Descriptions: fetching {len(pending)} labelled role(s)")
+        reporter.line(f"Descriptions: fetching {len(pending)} role(s)")
         try:
             outcome = fetch_descriptions(
                 store=store,
@@ -276,7 +304,7 @@ def cmd_details(
         except KeyboardInterrupt:
             reporter.line("Interrupted. Descriptions already saved are kept.")
             return EXIT_INTERRUPTED
-        left = len(store.pending_labelled_details(1_000_000)) - outcome.failed
+        left = len(store.pending_details(since, 1_000_000)) - outcome.failed
         reporter.line(
             f"Descriptions: {outcome.saved} saved, {outcome.failed} without one "
             f"(posting gone), {max(left, 0)} left for later"
@@ -431,6 +459,10 @@ def main(
             app = create_app(store, allowed_hosts=LOOPBACK_HOSTS | {args.host})
             app.run(host=args.host, port=args.port, debug=False, threaded=False)
             return EXIT_OK
+        if args.command == "scheduled-run":
+            return scheduling.run_scheduled(store, db_path, stream)
+        if args.command == "schedule":
+            return cmd_schedule(store, db_path, args.action, stream)
         try:
             with RunLock(db_path.parent / "scan.lock"):
                 if args.command == "eval":
