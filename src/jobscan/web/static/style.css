@@ -99,3 +99,9 @@ table.eval td, table.eval th { font-size: 13px; }
 .best { font-weight: 600; }
 .inline-add { display: inline; margin: 0; }
 .inline-add button { padding: 0 6px; font-size: 12px; }
+
+[data-tip] { cursor: help; text-decoration: underline dotted; text-decoration-color: var(--muted); text-underline-offset: 3px; }
+.tooltip { position: fixed; z-index: 60; max-width: 320px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: inherit; font-size: 12px; font-weight: 400; line-height: 1.4; white-space: pre-line; box-shadow: 0 2px 8px rgba(0,0,0,.18); pointer-events: none; }
+.tooltip[hidden] { display: none; }
+
+input.phrase { width: 100%; min-width: 22em; box-sizing: border-box; }

@@ -4,18 +4,17 @@
 <h1>Config</h1>
 <form method="post" action="{{ url_for('config_save') }}" class="config">
   <h2>Title phrases</h2>
-  <p class="muted">A phrase is searched when "Search" is on, and keeps a role when "Match" is on. Clear the text or tick Remove to delete a phrase. Titles matching no phrase are dropped.</p>
+  <p class="muted">A phrase is searched when "Search" is on, and keeps a role when "Match" is on. Clear the text to delete a phrase. Titles matching no phrase are dropped.</p>
   {% if errors.get('phrases') %}<p class="error">{{ errors['phrases'] }}</p>{% endif %}
   <input type="hidden" name="phrase_count" value="{{ phrases | length }}">
   <table>
-    <thead><tr><th>Phrase</th><th>Search</th><th>Match</th><th>Remove</th></tr></thead>
+    <thead><tr><th>Phrase</th><th>Search</th><th>Match</th></tr></thead>
     <tbody>
     {% for text, keyword, match in phrases %}
       <tr>
-        <td><input type="text" name="phrase_{{ loop.index0 }}" value="{{ text }}" maxlength="100" aria-label="Phrase {{ loop.index }}" {% if not text %}placeholder="Add a phrase"{% endif %}></td>
+        <td><input type="text" class="phrase" name="phrase_{{ loop.index0 }}" value="{{ text }}" maxlength="100" aria-label="Phrase {{ loop.index }}" {% if not text %}placeholder="Add a phrase"{% endif %}></td>
         <td><input type="checkbox" name="keyword_{{ loop.index0 }}" value="1" {% if keyword %}checked{% endif %} aria-label="Search with phrase {{ loop.index }}"></td>
         <td><input type="checkbox" name="match_{{ loop.index0 }}" value="1" {% if match %}checked{% endif %} aria-label="Match phrase {{ loop.index }}"></td>
-        <td>{% if text %}<input type="checkbox" name="remove_{{ loop.index0 }}" value="1" aria-label="Remove phrase {{ loop.index }}">{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>

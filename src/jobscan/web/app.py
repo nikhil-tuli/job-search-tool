@@ -282,11 +282,10 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "Vector size",
                 "Numbers kept per vector (768 of 3072). Changing it re-embeds",
             ),
-            ("embed_batch_size", "Texts per request", "Up to 100"),
             (
                 "embed_texts_per_minute",
                 "Texts per minute",
-                "Free tier shows 100 requests per minute; kept below it",
+                "Google counts each text as one request. Free tier shows 100 a minute, kept below",
             ),
             (
                 "embed_tokens_per_minute",
@@ -296,7 +295,7 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
             (
                 "embed_daily_limit",
                 "Texts per 24 hours",
-                "Free tier shows 1,000 requests a day. Counted per text to be safe",
+                "Google counts each text as one request. Free tier shows 1,000 a day",
             ),
         ),
     ),

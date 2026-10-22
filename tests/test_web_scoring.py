@@ -301,6 +301,15 @@ def test_summary_shows_scoring_history(scored: Harness) -> None:
     assert "Run #" in page or "#1" in page
 
 
+def test_summary_renders_scoring_once_with_tooltips(scored: Harness) -> None:
+    page = body(scored.client.get("/summary"))
+    assert page.count("<h2>Scoring</h2>") == 1
+    title = page.split("<title>")[1].split("</title>")[0]
+    assert "<" not in title
+    assert 'data-tip="Skipped by the Fit rules' in page
+    assert "tip.js" in page
+
+
 def test_summary_without_cv(client: FlaskClient) -> None:
     assert client.get("/summary").status_code == 200
 
