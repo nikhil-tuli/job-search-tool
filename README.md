@@ -3,6 +3,8 @@
 A personal job-search tracker. It finds new roles on LinkedIn, filters them to the titles you
 care about, and helps you track every application in one place. Everything stays on your computer.
 
+<img width="1434" height="687" alt="image" src="https://github.com/user-attachments/assets/881740b1-ec58-46a1-a8b9-9e425a0c26ab" />
+
 ## Problem statement
 
 - Finding relevant roles means searching LinkedIn by hand, every day, with many keywords.
