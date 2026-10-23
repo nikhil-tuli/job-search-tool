@@ -142,14 +142,40 @@ def test_invalid_filter_values_are_ignored(client: FlaskClient, store: Store, ru
 def test_pagination(client: FlaskClient, store: Store, run_id: int) -> None:
     for i in range(1, 106):
         add_role(store, run_id, str(i), fetched_on=f"2026-10-15T09:00:{i % 60:02d}+05:30")
-    first = text(client.get("/roles"))
-    second = text(client.get("/roles?page=2"))
+    first = text(client.get("/roles?per=100"))
+    second = text(client.get("/roles?per=100&page=2"))
     assert first.count('form="bulk"') == 100  # one selection checkbox per row
     assert second.count('form="bulk"') == 5
-    assert "Page 1 of 2" in first
+    assert first.count("Page 1 of 2") == 2  # pager above and below the table
     assert "Page 2 of 2" in second
-    assert "Page 2 of 2" in text(client.get("/roles?page=999"))
-    assert "Page 1 of 2" in text(client.get("/roles?page=0"))
+    assert "Page 2 of 2" in text(client.get("/roles?per=100&page=999"))
+    assert "Page 1 of 2" in text(client.get("/roles?per=100&page=0"))
+
+
+def test_rows_per_page_defaults_to_20_and_is_remembered(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    for i in range(1, 106):
+        add_role(store, run_id, str(i), fetched_on=f"2026-10-15T09:00:{i % 60:02d}+05:30")
+    default = text(client.get("/roles"))
+    assert default.count('form="bulk"') == 20
+    assert "Page 1 of 6" in default
+    assert 'name="per"' in default
+    assert text(client.get("/roles?per=50")).count('form="bulk"') == 50
+    assert text(client.get("/roles")).count('form="bulk"') == 50  # remembered
+    assert text(client.get("/roles?per=7")).count('form="bulk"') == 50  # invalid: keeps choice
+    assert "per=50" in text(client.get("/roles?per=50"))  # pager links keep the size
+    assert text(client.get("/roles?per=20")).count('form="bulk"') == 20
+
+
+def test_changing_rows_per_page_does_not_keep_the_page(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    for i in range(1, 60):
+        add_role(store, run_id, str(i), fetched_on=f"2026-10-15T09:00:{i % 60:02d}+05:30")
+    assert "Page 1 of 3" in text(client.get("/roles"))
+    # The dropdown submits the form, which has no page field, so it lands on page 1.
+    assert "Page 1 of 2" in text(client.get("/roles?per=50"))
 
 
 def test_search_term_is_escaped_in_the_page(client: FlaskClient) -> None:
@@ -951,8 +977,8 @@ def test_fit_filter_paginates_after_filtering(
     for n in range(1, 106):
         add_role(store, run_id, str(n), fetched_on=fresh(), company="Amazon")
     add_role(store, run_id, "900", fetched_on=fresh(), title="Lone Eligible Role")
-    page_one = text(client.get("/roles?fit=excluded"))
-    page_two = text(client.get("/roles?fit=excluded&page=2"))
+    page_one = text(client.get("/roles?fit=excluded&per=100"))
+    page_two = text(client.get("/roles?fit=excluded&per=100&page=2"))
     assert "Page 1 of 2" in page_one
     assert page_two.count('class="row"') == 5
     assert "Lone Eligible Role" not in page_one + page_two

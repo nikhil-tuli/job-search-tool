@@ -4,6 +4,10 @@
   var panel = document.getElementById('panel');
   var scrim = document.getElementById('scrim');
   var body = document.getElementById('panel-body');
+  document.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t && t.hasAttribute && t.hasAttribute('data-autosubmit') && t.form) { t.form.submit(); }
+  });
   if (!panel) { return; }
   var rows = Array.prototype.slice.call(document.querySelectorAll('tr.row'));
   var current = -1;

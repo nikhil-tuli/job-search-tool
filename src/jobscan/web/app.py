@@ -16,6 +16,7 @@ from flask import (
     abort,
     flash,
     jsonify,
+    make_response,
     redirect,
     render_template,
     request,
@@ -65,7 +66,9 @@ from .forms import (
 )
 from .scores import ScoreView, score_views
 
-PAGE_SIZE = 100
+PAGE_SIZES = (20, 50, 100)
+DEFAULT_PAGE_SIZE = 20
+PAGE_SIZE_COOKIE = "jobscan_rows"
 RATING_CHOICES = ("good", "bad", "clear")
 # What the Eval page can add to the Fit filters: (setting, allowed value, how to say it).
 EXCLUDE_KINDS = {
@@ -519,8 +522,14 @@ def create_app(
         return rows
 
     @app.get("/roles")
-    def roles() -> str:
+    def roles() -> Response | str:
         flt, active = read_filter(request.args)
+        asked = request.args.get("per", "")
+        remembered = request.cookies.get(PAGE_SIZE_COOKIE, "")
+        per = next(
+            (int(v) for v in (asked, remembered) if v.isdigit() and int(v) in PAGE_SIZES),
+            DEFAULT_PAGE_SIZE,
+        )
         fit, score_choice, sort = (active.get(k, "") for k in ("fit", "score", "sort"))
         try:
             page = int(request.args.get("page", "1"))
@@ -533,35 +542,42 @@ def create_app(
             views = score_views(store, config, cv, filtered)
             matching = scored_filtered(filtered, views, score_choice, sort)
             total = len(matching)
-            pages = max(1, math.ceil(total / PAGE_SIZE))
+            pages = max(1, math.ceil(total / per))
             page = min(max(page, 1), pages)
-            rows = matching[(page - 1) * PAGE_SIZE : page * PAGE_SIZE]
+            rows = matching[(page - 1) * per : page * per]
         else:
             total = store.count_roles(flt)
-            pages = max(1, math.ceil(total / PAGE_SIZE))
+            pages = max(1, math.ceil(total / per))
             page = min(max(page, 1), pages)
             rows, fits = fit_filtered(
-                store.list_roles(flt, limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE), fit
+                store.list_roles(flt, limit=per, offset=(page - 1) * per), fit
             )
             views = score_views(store, config, cv, rows)
         here_args: dict[str, Any] = {**active}
         if page > 1:
             here_args["page"] = page
         here = url_for("roles", **here_args)
-        return render_template(
-            "roles.html",
-            roles=rows,
-            fits=fits,
-            scores=views,
-            has_cv=cv is not None,
-            total=total,
-            page=page,
-            pages=pages,
-            filters=active,
-            advanced_open=any(k in active for k in ("fit", "score", "sort")),
-            here=here,
-            last_success=store.last_successful_run(),
+        response = make_response(
+            render_template(
+                "roles.html",
+                per=per,
+                page_sizes=PAGE_SIZES,
+                roles=rows,
+                fits=fits,
+                scores=views,
+                has_cv=cv is not None,
+                total=total,
+                page=page,
+                pages=pages,
+                filters=active,
+                advanced_open=any(k in active for k in ("fit", "score", "sort")),
+                here=here,
+                last_success=store.last_successful_run(),
+            )
         )
+        if asked.isdigit() and int(asked) in PAGE_SIZES:
+            response.set_cookie(PAGE_SIZE_COOKIE, str(per), max_age=365 * 86400, samesite="Lax")
+        return response
 
     @app.post("/roles/status")
     def set_status() -> WerkzeugResponse | tuple[Response, int] | Response:

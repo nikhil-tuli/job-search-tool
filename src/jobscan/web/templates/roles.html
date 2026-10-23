@@ -1,15 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Roles{% endblock %}
 {% block content %}
-<div class="head">
+{% macro pager() %}
+{% if pages > 1 %}
+<nav class="pager">
+  {% if page > 1 %}<a href="{{ url_for('roles', page=page - 1, per=per, **filters) }}">Previous</a>{% endif %}
+  <span>Page {{ page }} of {{ pages }}</span>
+  {% if page < pages %}<a href="{{ url_for('roles', page=page + 1, per=per, **filters) }}">Next</a>{% endif %}
+</nav>
+{% endif %}
+{% endmacro %}
+<form id="filterform" class="filters" method="get" action="{{ url_for('roles') }}">
   <h1>Roles <span class="muted">{{ total }}</span></h1>
-  <p class="muted">
-    Last successful run:
-    {% if last_success %}{{ (last_success.finished_on or last_success.started_on) | ist }} IST{% else %}none yet{% endif %}
-  </p>
-</div>
-
-<form class="filters" method="get" action="{{ url_for('roles') }}">
   <input type="search" name="q" value="{{ filters.get('q', '') }}" placeholder="Search title, company, location, notes, description" aria-label="Search">
   <select name="status" aria-label="Status filter">
     <option value="">Any status</option>
@@ -22,7 +24,9 @@
   <label class="check"><input type="checkbox" name="dup" value="1" {% if filters.get('dup') %}checked{% endif %}> Possible duplicates only</label>
   <button type="submit">Filter</button>
   <a href="{{ url_for('roles') }}">Clear</a>
-  <a class="right" href="{{ url_for('export_csv', **filters) }}">Export CSV</a>
+  <a href="{{ url_for('export_csv', **filters) }}">Export CSV</a>
+  <span class="muted last-run">Last successful run:
+    {% if last_success %}{{ (last_success.finished_on or last_success.started_on) | ist }} IST{% else %}none yet{% endif %}</span>
   <details class="advanced"{% if advanced_open %} open{% endif %}>
     <summary>Advanced filters{% if advanced_open %} <span class="tag chip">on</span>{% endif %}</summary>
     <div class="advanced-body">
@@ -50,6 +54,14 @@
     {% for s in statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
   </select>
   <button type="submit">Apply to selected</button>
+  <span class="bulk-right">
+    <label class="check">Rows per page
+      <select name="per" form="filterform" aria-label="Rows per page" data-autosubmit>
+        {% for n in page_sizes %}<option value="{{ n }}" {% if n == per %}selected{% endif %}>{{ n }}</option>{% endfor %}
+      </select>
+    </label>
+    {{ pager() }}
+  </span>
 </form>
 
 {% if roles %}
@@ -99,13 +111,7 @@
   </tbody>
 </table>
 
-{% if pages > 1 %}
-<nav class="pager">
-  {% if page > 1 %}<a href="{{ url_for('roles', page=page - 1, **filters) }}">Previous</a>{% endif %}
-  <span>Page {{ page }} of {{ pages }}</span>
-  {% if page < pages %}<a href="{{ url_for('roles', page=page + 1, **filters) }}">Next</a>{% endif %}
-</nav>
-{% endif %}
+{{ pager() }}
 {% else %}
 <p class="empty">No roles match. Run <code>jobscan scan</code> in a terminal to fetch some.</p>
 {% endif %}

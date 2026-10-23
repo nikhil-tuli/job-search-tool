@@ -329,3 +329,9 @@ This reverses the earlier "no schedule" goal, so it stays off until switched on.
 - 23 of 123 roles in the first database copy had descriptions, from 174 to 1,424 words, median about 550.
 - Section headings vary a lot ("Key responsibilities", "Minimum qualifications", "What we look for"), so heading detection needs a wide list and a fallback.
 - Years appear in many shapes ("1-5 years", "5 to 10 years", "8+ years", "Minimum 5 years"). The highest minimum named is used, so a role is only excluded when every figure is low.
+
+## Roles list paging (built)
+- Shows 20 roles per page by default.
+- "Rows per page" offers 20, 50 or 100. Changing it returns to page 1.
+- The choice is remembered in the browser (cookie).
+- Previous and Next links appear above and below the table. Filters carry over.
