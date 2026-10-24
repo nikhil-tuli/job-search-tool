@@ -335,3 +335,21 @@ This reverses the earlier "no schedule" goal, so it stays off until switched on.
 - "Rows per page" offers 20, 50 or 100. Changing it returns to page 1.
 - The choice is remembered in the browser (cookie).
 - Previous and Next links appear above and below the table. Filters carry over.
+
+## Roles list sorting (built)
+- Click a column header to sort: Title, Company, Location, Posted, Fetched, Fit, Score, Status, Applied.
+- First click: A to Z for text, newest or highest first for dates and Score. A second click flips it. An arrow marks the active column.
+- Sorting covers the whole filtered list, not only the rows on the page. Paging and filters carry the sort.
+- Empty values always go last. Equal values keep newest-fetched first.
+- Default is Fetched, newest first. The "Best fit first" dropdown is gone; click Score instead.
+- Export CSV follows the same sort.
+
+## Minimum salary filter (built)
+- Config, Fit filters: "Minimum salary (INR per year)", default 10 lakh. 0 turns it off.
+- The salary is read from the stored job description. Nothing is added to the scan.
+- It reads amounts like "6-9 LPA", "8 to 12 lakh", "Rs 6,00,000 per year", "INR 50,000 per month".
+- A bare amount with no unit or period is ignored, as are other currencies and hourly pay.
+- The lower end of the range is compared with the minimum. Below it, the role shows "Excluded: salary".
+- If several salaries appear, the highest lower end is used, so a stray small figure cannot exclude a role.
+- A role with no salary found stays eligible.
+- `jobscan salary-check` shows how many stored descriptions list a salary, how many fall below the minimum, and some examples.

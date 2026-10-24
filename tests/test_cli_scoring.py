@@ -462,3 +462,16 @@ def test_the_scan_still_fetches_descriptions_through_the_shared_code(db_path: Pa
     assert code == EXIT_OK
     assert details.calls == ["1"]
     assert "Descriptions: 1 saved, 0 without one, 0 left for later" in out.getvalue()
+
+
+def test_salary_check_counts_descriptions_that_list_a_salary(db_path: Path) -> None:
+    seed(db_path, cv=False, described=False)
+    store = cli.open_store(db_path)
+    store.save_detail("LinkedIn", "900", JobDetail("CTC 6-9 LPA, Pune"), when=to_iso(now_ist()))
+    store.close()
+    code, text, _ = run_cli(db_path, "salary-check")
+    assert code == EXIT_OK
+    assert "Descriptions stored: 1" in text
+    assert "Listing a salary: 1" in text
+    assert "Below the minimum (\u20b910 lakh): 1" in text
+    assert "\u20b96 lakh  Technical Program Manager at Acme" in text

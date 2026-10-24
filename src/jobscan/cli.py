@@ -20,6 +20,7 @@ from .db import SchemaTooNewError, connect, migrate
 from .details import fetch_descriptions
 from .embeddings import Embedder
 from .evaluation import build_report, load_labelled, roles_to_score
+from .fit_filters import listed_salary, rupee_text
 from .lock import AlreadyRunningError, RunLock
 from .models import STATUSES, Role, RoleFilter
 from .report import Reporter, eval_summary, log_name, phrase_lines, scoring_summary
@@ -71,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("score", help="score roles against your CV (also runs after each scan)")
     sub.add_parser("eval", help="measure how well the score separates good and bad roles")
     sub.add_parser("details", help="fetch missing descriptions for recent roles")
+    sub.add_parser("salary-check", help="show how many stored descriptions list a salary")
     schedule = sub.add_parser("schedule", help="run the scan daily on this Mac (macOS only)")
     schedule.add_argument("action", choices=("on", "off", "status"))
     sub.add_parser("scheduled-run", help="what the daily job calls: one guarded, timed scan")
@@ -256,6 +258,27 @@ def cmd_eval(
         return EXIT_OK
     finally:
         reporter.close()
+
+
+def cmd_salary_check(store: Store, out: TextIO) -> int:
+    """How many stored descriptions list a salary, with examples to check the reading."""
+    config = load_config(store, out, "nothing was checked")
+    if config is None:
+        return EXIT_USAGE
+    described = [r for r in store.list_roles() if r.description]
+    found = [(r, listed_salary(r.description)) for r in described]
+    found = [(r, salary) for r, salary in found if salary is not None]
+    print(f"Descriptions stored: {len(described)}", file=out)
+    print(f"Listing a salary: {len(found)}", file=out)
+    minimum = config.fit_min_salary
+    below = sum(1 for _, salary in found if salary is not None and salary < minimum)
+    print(
+        f"Below the minimum ({rupee_text(minimum)}): {below}" if minimum else "Rule is off",
+        file=out,
+    )
+    for role, salary in found[:10]:
+        print(f"  {rupee_text(salary or 0)}  {role.title} at {role.company}", file=out)
+    return EXIT_OK
 
 
 def cmd_details(
@@ -447,6 +470,8 @@ def main(
     try:
         if args.command == "status":
             return cmd_status(store, stream)
+        if args.command == "salary-check":
+            return cmd_salary_check(store, stream)
         if args.command == "serve":
             from .web import create_app
             from .web.app import LOOPBACK_HOSTS

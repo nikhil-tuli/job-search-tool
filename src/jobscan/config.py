@@ -47,6 +47,7 @@ class Config:
     detail_max_age_days: int = 3
     fit_recency_days: int = 1
     fit_min_years: int = 3
+    fit_min_salary: int = 1_000_000
     fit_junior_words: str = "intern, internship, junior, jr, trainee, associate"
     fit_junior_levels: str = "Internship, Entry level"
     fit_excluded_companies: str = "Amazon, Intuit"
@@ -145,6 +146,7 @@ _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
     "detail_max_age_days": (int, 1, 30),
     "fit_recency_days": (int, 1, 365),
     "fit_min_years": (int, 0, 30),
+    "fit_min_salary": (int, 0, 1_000_000_000),
     "score_after_scan": (int, 0, 1),
     "score_weight_keyword": (int, 0, 100),
     "score_weight_requirement": (float, 0, 10),

@@ -140,3 +140,6 @@ table.roles th { white-space: normal; }
 table.roles td.fit { max-width: 7.5em; }
 table.roles select { max-width: 8.5em; }
 table.roles td.applied { min-width: 0; white-space: normal; }
+
+th a.sort { color: inherit; text-decoration: none; }
+th a.sort:hover, th a.sort.on { color: var(--fg); text-decoration: underline; }

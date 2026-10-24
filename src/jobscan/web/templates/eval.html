@@ -22,7 +22,7 @@
 
 <h2>Which score works best</h2>
 <table class="pivot eval">
-  <thead><tr><th>Method</th><th class="num" title="Chance that a good role scores higher than a bad one. 0.5 is a coin toss, 1 is perfect.">AUC</th><th class="num">Average score of good roles</th><th class="num">Average score of bad roles</th><th class="num">Good roles in the top {{ report.top_n }}</th></tr></thead>
+  <thead><tr><th>Method</th><th class="num" data-tip="AUC = Area Under the Curve (of the ROC curve). It is the chance that a good role scores higher than a bad one. 0.5 is a coin toss, 1 is perfect.">AUC</th><th class="num">Average score of good roles</th><th class="num">Average score of bad roles</th><th class="num" data-tip="Good roles among the {{ report.top_n }} highest-scoring rated roles. 'random' is how many you would expect from picking {{ report.top_n }} rated roles at random. The score is only useful if it beats that. With so few roles, a gap of 1 or 2 is weak evidence.">Good roles in the top {{ report.top_n }}</th></tr></thead>
   <tbody>
   {% for v in report.variants %}
     <tr><td>{{ v.name }}</td><td class="num">{{ '%.2f' % v.auc if v.auc is not none else 'n/a' }}</td><td class="num">{{ '%.0f' % v.mean_good }}</td><td class="num">{{ '%.0f' % v.mean_bad }}</td><td class="num">{{ v.top_hits }} <span class="muted">(random: {{ '%.1f' % report.random_hits }})</span></td></tr>

@@ -256,6 +256,13 @@ def test_sort_puts_best_fit_first_and_unscored_last(scored: Harness) -> None:
     assert order[0] < order[1] < order[2]
 
 
+def test_score_sort_can_be_flipped(scored: Harness) -> None:
+    page = body(scored.client.get("/roles?sort=score&dir=asc"))
+    order = [page.index(f'/jobs/view/{j}"') for j in ("1", "2")]
+    assert order[1] < order[0]  # lowest first, and the unscored role is still last
+    assert page.index('/jobs/view/3"') > max(order)
+
+
 def test_score_filters_ignore_unknown_values(scored: Harness) -> None:
     assert sorted(listed(scored.client, "score=bogus&sort=bogus")) == ["1", "2", "3"]
 

@@ -39,10 +39,6 @@
         <option value="">Any score</option>
         {% for value, label in (('scored', 'Scored only'), ('strong', 'Strong fit'), ('partial', 'Partial fit'), ('weak', 'Weak fit'), ('unscored', 'Unscored')) %}<option value="{{ value }}" {% if filters.get('score') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
-      <select name="sort" aria-label="Sort order">
-        <option value="">Newest first</option>
-        <option value="score" {% if filters.get('sort') == 'score' %}selected{% endif %}>Best fit first</option>
-      </select>
     </div>
   </details>
 </form>
@@ -69,8 +65,8 @@
   <thead>
     <tr>
       <th><input type="checkbox" id="all" aria-label="Select all on this page"></th>
-      <th>Title</th><th>Company</th><th>Location</th><th>Posted (IST)</th><th>Fetched (IST)</th>
-      <th>Fit</th><th>Score</th><th>Status</th><th>Applied</th><th></th>
+      {% for key, h in heads.items() %}<th aria-sort="{{ 'ascending' if h.arrow == 'asc' else 'descending' if h.arrow == 'desc' else 'none' }}"><a class="sort{% if h.arrow %} on{% endif %}" href="{{ h.url }}">{{ h.label }}{% if h.arrow == 'asc' %} &#9650;{% elif h.arrow == 'desc' %} &#9660;{% endif %}</a></th>{% endfor %}
+      <th></th>
     </tr>
   </thead>
   <tbody>

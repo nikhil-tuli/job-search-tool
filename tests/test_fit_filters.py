@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from jobscan.config import Config, ConfigError, split_list
-from jobscan.fit_filters import FitRules, evaluate, required_years
+from jobscan.fit_filters import FitRules, evaluate, listed_salary, required_years, rupee_text
 from jobscan.models import Role
 from jobscan.timeutil import IST, to_iso
 
@@ -355,3 +355,63 @@ def test_excluded_industries_are_a_tidy_list_setting() -> None:
     config = Config.from_raw({"fit_excluded_industries": " Construction ,,construction, Mining "})
     assert config.fit_excluded_industries == "Construction, Mining"
     assert Config.from_raw(config.to_raw()) == config
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Salary: \u20b96,00,000.00/yr - \u20b99,00,000.00/yr", 600_000),
+        ("CTC 8-12 LPA", 800_000),
+        ("INR 50,000 per month", 600_000),
+        ("Rs. 10 lakh - 14 lakh per annum", 1_000_000),
+        ("up to \u20b925 LPA", 2_500_000),
+        ("\u20b910-15 lakhs", 1_000_000),
+        ("\u20b940k a month", 480_000),
+        ("1.5 crore a year", 15_000_000),
+        ("\u20b98,00,000 - \u20b912,00,000 per year", 800_000),
+        ("\u20b950,000 - \u20b970,000 per month", 600_000),
+        ("CTC 6 LPA, or \u20b950,00,000 per year", 5_000_000),
+        ("bonus \u20b95,000 on joining", None),
+        ("$120,000 a year", None),
+        ("\u20b91,20,000 per hour", None),
+        ("\u20b980,000", None),  # monthly or yearly: unclear, so ignored
+        ("Experience 5-8 years", None),
+        ("10 positions open", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_listed_salary(text: str | None, expected: int | None) -> None:
+    assert listed_salary(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("description", "hit"),
+    [
+        ("CTC 6-9 LPA", True),
+        ("\u20b950,000 per month", True),  # 6 lakh a year
+        ("CTC 8-14 LPA", True),  # the lower end decides
+        ("CTC 10-14 LPA", False),
+        ("\u20b91,00,000 per month", False),
+        ("No pay is mentioned", False),
+        (None, False),
+    ],
+)
+def test_salary_rule_uses_the_lower_end(description: str | None, hit: bool) -> None:
+    assert (kinds(make_role(description=description)) == ["salary"]) is hit
+
+
+def test_salary_rule_can_be_switched_off() -> None:
+    role = make_role(description="CTC 3-4 LPA")
+    assert kinds(role, replace(RULES, min_salary=0)) == []
+
+
+def test_salary_reason_is_readable() -> None:
+    result = evaluate(make_role(description="CTC 6-9 LPA"), RULES, NOW)
+    assert result.summary == "lists \u20b96 lakh a year, below \u20b910 lakh"
+
+
+def test_salary_minimum_defaults_to_ten_lakh() -> None:
+    assert Config().fit_min_salary == 1_000_000
+    assert rupee_text(1_000_000) == "\u20b910 lakh"
+    assert rupee_text(15_000_000) == "\u20b91.5 crore"

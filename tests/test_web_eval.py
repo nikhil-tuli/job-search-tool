@@ -224,7 +224,7 @@ def test_fit_score_and_sort_live_in_a_collapsed_advanced_section(web: Harness) -
     head, _, advanced = page.partition('<details class="advanced"')
     inside, _, _ = advanced.partition("</details>")
     assert advanced.startswith(">")  # no open attribute
-    for name in ('name="fit"', 'name="score"', 'name="sort"'):
+    for name in ('name="fit"', 'name="score"'):
         assert name in inside
         assert name not in head
     assert 'name="q"' in head
@@ -232,7 +232,7 @@ def test_fit_score_and_sort_live_in_a_collapsed_advanced_section(web: Harness) -
     assert 'name="dup"' in head
 
 
-@pytest.mark.parametrize("query", ["fit=eligible", "score=weak", "sort=score"])
+@pytest.mark.parametrize("query", ["fit=eligible", "score=weak"])
 def test_the_section_opens_when_an_advanced_filter_is_on(web: Harness, query: str) -> None:
     add_role(web.store, "1")
     page = body(web.client.get(f"/roles?{query}"))
@@ -249,10 +249,9 @@ def test_basic_filters_leave_the_section_collapsed(web: Harness) -> None:
 
 def test_advanced_choices_survive_the_round_trip(web: Harness) -> None:
     add_role(web.store, "1")
-    page = body(web.client.get("/roles?fit=eligible&score=unscored&sort=score"))
+    page = body(web.client.get("/roles?fit=eligible&score=unscored"))
     assert '<option value="eligible" selected>' in page
     assert '<option value="unscored" selected>' in page
-    assert '<option value="score" selected>' in page
 
 
 # ---- excluding industries ------------------------------------------------------------------

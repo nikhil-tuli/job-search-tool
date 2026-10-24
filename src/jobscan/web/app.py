@@ -81,7 +81,19 @@ EXCLUDE_KINDS = {
 }
 FIT_CHOICES = ("eligible", "excluded")
 SCORE_CHOICES = ("scored", "strong", "partial", "weak", "unscored")
-SORT_CHOICES = ("score",)
+# Sortable columns of the roles table: key -> (header, direction on the first click).
+SORT_COLUMNS = {
+    "title": ("Title", "asc"),
+    "company": ("Company", "asc"),
+    "location": ("Location", "asc"),
+    "posted": ("Posted (IST)", "desc"),
+    "fetched": ("Fetched (IST)", "desc"),
+    "fit": ("Fit", "asc"),
+    "score": ("Score", "desc"),
+    "status": ("Status", "asc"),
+    "applied": ("Applied", "desc"),
+}
+SORT_CHOICES = tuple(SORT_COLUMNS)
 SCORE_WAIT_SECONDS = 15.0  # the app handles one request at a time, so a button must not wait long
 TRIGGER_LABELS = {"scan": "After a scan", "manual": "jobscan score", "role": "Score this role"}
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]", "::1"})
@@ -172,6 +184,12 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "fit_min_years",
                 "Minimum years of experience asked",
                 "Roles asking for fewer are excluded. 0 turns it off. Roles naming no years stay",
+            ),
+            (
+                "fit_min_salary",
+                "Minimum salary (INR per year)",
+                "Roles whose description lists a lower salary are excluded. 0 turns it off. "
+                "Roles listing no salary stay",
             ),
             (
                 "fit_junior_words",
@@ -485,6 +503,8 @@ def create_app(
             "score": score if score in SCORE_CHOICES else "",
             "sort": sort if sort in SORT_CHOICES else "",
         }
+        if shown["sort"] and args.get("dir", "") in ("asc", "desc"):
+            shown["dir"] = args["dir"]
         return flt, {k: v for k, v in shown.items() if v}
 
     @app.get("/")
@@ -507,19 +527,69 @@ def create_app(
         return rows, results
 
     def scored_filtered(
-        rows: list[Role], views: Mapping[str, ScoreView], choice: str, sort: str
+        rows: list[Role], views: Mapping[str, ScoreView], choice: str
     ) -> list[Role]:
-        """Rows with the chosen score band (or none), best fit first when asked."""
+        """Rows with the chosen score band (or none)."""
         if choice == "unscored":
             rows = [r for r in rows if r.key not in views]
         elif choice == "scored":
             rows = [r for r in rows if r.key in views]
         elif choice:
             rows = [r for r in rows if r.key in views and views[r.key].band == choice]
-        if sort == "score":
-            # Stable, so equal scores keep the newest-first order. Unscored roles go last.
-            rows = sorted(rows, key=lambda r: -views[r.key].final if r.key in views else 1)
         return rows
+
+    def sorted_rows(
+        rows: list[Role],
+        views: Mapping[str, ScoreView],
+        fits: Mapping[str, FitResult],
+        sort: str,
+        direction: str,
+    ) -> list[Role]:
+        """Rows ordered by a column. Empty values go last either way; ties keep newest first."""
+        if sort not in SORT_COLUMNS:
+            return rows
+
+        def value(r: Role) -> str | int | float | None:
+            if sort == "title":
+                return r.title.casefold() or None
+            if sort == "company":
+                return r.company.casefold() or None
+            if sort == "location":
+                return r.location.casefold() or None
+            if sort == "posted":
+                return r.posted_on or None
+            if sort == "fetched":
+                return r.fetched_on
+            if sort == "fit":
+                fit = fits[r.key]
+                return f"{0 if fit.eligible else 1}{fit.label}"
+            if sort == "score":
+                return views[r.key].final if r.key in views else None
+            if sort == "status":
+                return r.status.casefold()
+            return r.applied_on or None
+
+        # Stable sorts, so rows with equal values keep their newest-first order.
+        present = [r for r in rows if value(r) is not None]
+        missing = [r for r in rows if value(r) is None]
+        present.sort(key=lambda r: value(r), reverse=direction == "desc")  # type: ignore[arg-type,return-value]
+        return present + missing
+
+    def sort_heads(
+        active: Mapping[str, str], per: int, current: str, direction: str
+    ) -> dict[str, dict[str, str]]:
+        """Header link and arrow for each sortable column: a click flips the active one."""
+        base = {k: v for k, v in active.items() if k not in ("sort", "dir")}
+        heads: dict[str, dict[str, str]] = {}
+        for key, (label, first) in SORT_COLUMNS.items():
+            nxt = ("asc" if direction == "desc" else "desc") if key == current else first
+            query: dict[str, Any] = {**base, "per": per, "sort": key, "dir": nxt}
+            heads[key] = {
+                "label": label,
+                "url": url_for("roles", **query),
+                "arrow": direction if key == current else "",
+            }
+        return heads
 
     @app.get("/roles")
     def roles() -> Response | str:
@@ -531,6 +601,7 @@ def create_app(
             DEFAULT_PAGE_SIZE,
         )
         fit, score_choice, sort = (active.get(k, "") for k in ("fit", "score", "sort"))
+        direction = active.get("dir") or (SORT_COLUMNS[sort][1] if sort else "desc")
         try:
             page = int(request.args.get("page", "1"))
         except ValueError:
@@ -540,7 +611,9 @@ def create_app(
             # Fit and score are worked out in Python, so filter and sort first, then cut the page.
             filtered, fits = fit_filtered(store.list_roles(flt), fit)
             views = score_views(store, config, cv, filtered)
-            matching = scored_filtered(filtered, views, score_choice, sort)
+            matching = sorted_rows(
+                scored_filtered(filtered, views, score_choice), views, fits, sort, direction
+            )
             total = len(matching)
             pages = max(1, math.ceil(total / per))
             page = min(max(page, 1), pages)
@@ -570,7 +643,8 @@ def create_app(
                 page=page,
                 pages=pages,
                 filters=active,
-                advanced_open=any(k in active for k in ("fit", "score", "sort")),
+                advanced_open=any(k in active for k in ("fit", "score")),
+                heads=sort_heads(active, per, sort or "fetched", direction),
                 here=here,
                 last_success=store.last_successful_run(),
             )
@@ -770,9 +844,13 @@ def create_app(
     @app.get("/export.csv")
     def export_csv() -> Response:
         flt, active = read_filter(request.args)
-        rows, _ = fit_filtered(store.list_roles(flt), active.get("fit", ""))
+        rows, fits = fit_filtered(store.list_roles(flt), active.get("fit", ""))
         views = score_views(store, current_config(), store.get_cv(), rows)
-        rows = scored_filtered(rows, views, active.get("score", ""), active.get("sort", ""))
+        sort = active.get("sort", "")
+        direction = active.get("dir") or (SORT_COLUMNS[sort][1] if sort else "desc")
+        rows = sorted_rows(
+            scored_filtered(rows, views, active.get("score", "")), views, fits, sort, direction
+        )
         body = roles_to_csv(rows, views)
         stamp = now_ist().strftime("%Y-%m-%d_%H%M")
         return Response(

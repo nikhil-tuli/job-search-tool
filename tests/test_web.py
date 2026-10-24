@@ -928,7 +928,7 @@ def test_fit_column_tags_roles(client: FlaskClient, store: Store, run_id: int) -
     add_role(store, run_id, "2", fetched_on=fresh(), company="Amazon Development Centre")
     add_role(store, run_id, "3")  # fetched days ago
     body = text(client.get("/roles"))
-    assert "<th>Fit</th>" in body
+    assert ">Fit</a></th>" in body
     assert body.count('muted">Eligible<') == 1
     assert "Excluded: company" in body
     assert "Excluded: recency" in body
@@ -1084,3 +1084,46 @@ def test_config_fit_group_has_info_icon(client: FlaskClient) -> None:
     html = client.get("/config").get_data(as_text=True)
     assert html.count('class="info"') == len(GROUP_INFO)
     assert "apply immediately" in html
+
+
+def order(page: str, ids: list[str]) -> list[str]:
+    return sorted(ids, key=lambda j: page.index(f'/jobs/view/{j}"'))
+
+
+def test_headers_sort_columns_and_flip_direction(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1", company="Beta", title="Gamma role")
+    add_role(store, run_id, "2", company="alpha", title="Zed role")
+    add_role(store, run_id, "3", company="Cleo", title="Alpha role")
+    ids = ["1", "2", "3"]
+    by_company = text(client.get("/roles?sort=company"))  # first click: A to Z
+    assert order(by_company, ids) == ["2", "1", "3"]
+    assert "sort=company&amp;dir=desc" in by_company  # next click flips it
+    assert 'aria-sort="ascending"' in by_company
+    desc = text(client.get("/roles?sort=company&dir=desc"))
+    assert order(desc, ids) == ["3", "1", "2"]
+    assert "sort=company&amp;dir=asc" in desc
+    assert order(text(client.get("/roles?sort=title")), ids) == ["3", "1", "2"]
+    # With no sort the list is newest fetched first, shown on the Fetched header.
+    assert 'aria-sort="descending"' in text(client.get("/roles"))
+
+
+def test_sorting_puts_empty_values_last_and_spans_pages(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    for i in range(1, 31):
+        add_role(store, run_id, str(i), company=f"Co {i:02d}")
+    add_role(store, run_id, "99", company="", fetched_on="2026-10-14T08:00:00+05:30")
+    first = text(client.get("/roles?sort=company&dir=desc&per=20"))
+    assert '/jobs/view/30"' in first
+    assert '/jobs/view/99"' not in first
+    last = text(client.get("/roles?sort=company&dir=desc&per=20&page=2"))
+    assert last.index('/jobs/view/99"') > last.index('/jobs/view/1"')  # empty company last
+    assert "sort=company" in first  # the pager keeps the sort
+    assert "dir=desc" in first
+
+
+def test_bad_sort_values_are_ignored(client: FlaskClient, store: Store, run_id: int) -> None:
+    add_role(store, run_id, "1")
+    assert client.get("/roles?sort=bogus&dir=sideways").status_code == 200
