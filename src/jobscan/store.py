@@ -648,6 +648,30 @@ class Store:
             for r in self._conn.execute(sql, params).fetchall()
         ]
 
+    def recent_skipped(self, since: str, limit: int) -> tuple[list[SkippedTitle], int]:
+        """Titles skipped since `since` across all runs, each role once, newest first.
+
+        Returns the first `limit` of them and how many there are in all.
+        """
+        rows = self._conn.execute(
+            "SELECT run_id, portal, job_id, title, company, MAX(fetched_on) AS fetched_on "
+            "FROM skipped_titles WHERE fetched_on >= ? GROUP BY portal, job_id "
+            "ORDER BY fetched_on DESC, id DESC LIMIT ?",
+            (since, limit),
+        ).fetchall()
+        total = self._conn.execute(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM skipped_titles WHERE fetched_on >= ? "
+            "GROUP BY portal, job_id)",
+            (since,),
+        ).fetchone()[0]
+        titles = [
+            SkippedTitle(
+                r["run_id"], r["portal"], r["job_id"], r["title"], r["company"], r["fetched_on"]
+            )
+            for r in rows
+        ]
+        return titles, total
+
     def purge_skipped(self, retention_days: int, *, now: datetime | None = None) -> int:
         cutoff = to_iso((now or now_ist()) - timedelta(days=retention_days))
         cursor = self._conn.execute("DELETE FROM skipped_titles WHERE fetched_on < ?", (cutoff,))

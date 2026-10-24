@@ -467,7 +467,7 @@ def test_role_save_validation_error_keeps_input_and_saves_nothing(
 
 
 def test_empty_run_log(client: FlaskClient) -> None:
-    body = text(client.get("/runs"))
+    body = text(client.get("/summary"))
     assert "No runs yet" in body
 
 
@@ -480,17 +480,15 @@ def seed_run(store: Store) -> int:
     )  # fmt: skip
     store.record_pages(run, "Technical Program Manager", [PageStat(0, 10, 6), PageStat(1, 10, 2)])
     store.add_phrase_matches(run, {"Technical Program Manager": 8})
-    store.add_skipped(
-        run, [("LinkedIn", "9", "<b>Chef</b>", "Kitchen", "2026-10-15T09:00:00+05:30")]
-    )
+    store.add_skipped(run, [("LinkedIn", "9", "<b>Chef</b>", "Kitchen", fresh())])
     store.finish_run(run, RUN_SUCCESS, "all good")
     return run
 
 
-def test_run_log_details(client: FlaskClient, store: Store) -> None:
+def test_summary_shows_run_details(client: FlaskClient, store: Store) -> None:
     seed_run(store)
-    body = text(client.get("/runs"))
-    assert "Run #1" in body
+    body = text(client.get("/summary"))
+    assert "Details of run #1" in body
     assert "40% of cards matched" in body
     assert "60%" in body
     assert "20%" in body
@@ -501,13 +499,43 @@ def test_run_log_details(client: FlaskClient, store: Store) -> None:
     assert "end" in body
 
 
-def test_run_log_selects_a_run_and_ignores_bad_ids(client: FlaskClient, store: Store) -> None:
+def test_run_details_start_closed_and_open_for_a_chosen_run(
+    client: FlaskClient, store: Store
+) -> None:
     seed_run(store)
     seed_run(store)
-    assert "Run #1" in text(client.get("/runs?run=1")).split("<h2>")[1]
-    assert "Run #2" in text(client.get("/runs")).split("<h2>")[1]
-    assert "Run #2" in text(client.get("/runs?run=999")).split("<h2>")[1]
-    assert client.get("/runs?run=abc").status_code == 200
+    assert '<details id="run-detail" class="run-detail">' in text(client.get("/summary"))
+    chosen = text(client.get("/summary?run=1"))
+    assert '<details id="run-detail" class="run-detail" open>' in chosen
+    assert "Details of run #1" in chosen
+    assert "Details of run #2" in text(client.get("/summary"))  # the latest by default
+    assert "Details of run #2" in text(client.get("/summary?run=999"))
+    assert client.get("/summary?run=abc").status_code == 200
+
+
+def test_scans_table_shows_ten_runs_and_a_link_for_more(client: FlaskClient, store: Store) -> None:
+    for _ in range(12):
+        seed_run(store)
+    short = text(client.get("/summary"))
+    assert short.count('class="status success"') >= 10
+    assert "Show more runs" in short
+    assert "#2<" not in short.split('id="scans"')[1].split("Details of run")[0]  # run 2 is cut
+    longer = text(client.get("/summary?runs=all"))
+    assert "Show fewer runs" in longer
+    assert "Show more runs" not in longer
+    assert ">#1<" in longer
+
+
+def test_old_run_log_address_redirects_to_the_summary(client: FlaskClient) -> None:
+    plain = client.get("/runs")
+    assert plain.status_code == 302
+    assert plain.headers["Location"].endswith("/summary#scans")
+    chosen = client.get("/runs?run=3")
+    assert chosen.headers["Location"].endswith("/summary?run=3#run-detail")
+
+
+def test_nav_has_no_run_log_tab(client: FlaskClient) -> None:
+    assert "Run Log" not in text(client.get("/summary"))
 
 
 # ---- config --------------------------------------------------------------------------------
@@ -1127,3 +1155,55 @@ def test_sorting_puts_empty_values_last_and_spans_pages(
 def test_bad_sort_values_are_ignored(client: FlaskClient, store: Store, run_id: int) -> None:
     add_role(store, run_id, "1")
     assert client.get("/roles?sort=bogus&dir=sideways").status_code == 200
+
+
+def test_summary_shows_descriptions_pending(client: FlaskClient, store: Store, run_id: int) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh())
+    add_role(store, run_id, "2", fetched_on=fresh())
+    assert "Descriptions pending: 2 (roles from the last 3 days)" in text(client.get("/summary"))
+
+
+def skip_rows(store: Store, run: int, ids: range, fetched_on: str) -> None:
+    store.add_skipped(
+        run, [("LinkedIn", str(i), f"Skipped title {i}", "Co", fetched_on) for i in ids]
+    )
+
+
+def test_skipped_titles_show_ten_then_more_on_request(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    skip_rows(store, run_id, range(1, 26), fresh())
+    body = text(client.get("/summary"))
+    assert "Skipped titles, last 7 days (25)" in body
+    assert body.count("Skipped title ") == 10
+    assert "Show more" in body
+    assert '<details id="skipped" class="run-detail">' in body  # closed until asked
+    more = text(client.get("/summary?skipped=all"))
+    assert more.count("Skipped title ") == 25
+    assert '<details id="skipped" class="run-detail" open>' in more
+    assert "Show fewer" in more
+
+
+def test_skipped_titles_span_runs_without_repeats_and_ignore_old_ones(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    second = store.start_run(window_seconds=86400, keywords_total=1)
+    skip_rows(store, run_id, range(1, 4), fresh())
+    skip_rows(store, second, range(2, 6), fresh())  # 2 and 3 were seen again
+    skip_rows(store, second, range(90, 92), "2026-01-01T09:00:00+05:30")  # too old
+    body = text(client.get("/summary"))
+    assert "Skipped titles, last 7 days (5)" in body
+    assert body.count("Skipped title ") == 5
+    assert "Skipped title 90" not in body
+    assert "Skipped title 1<" in body  # from the first run, still listed
+
+
+def test_skipped_titles_are_not_part_of_the_run_details(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    skip_rows(store, run_id, range(1, 3), fresh())
+    body = text(client.get("/summary"))
+    detail = body.split('id="run-detail"')[1].split("</details>")[0]
+    assert "Skipped title" not in detail
+    assert "Match rate by page depth" in detail
+    assert "Matches by phrase" in detail

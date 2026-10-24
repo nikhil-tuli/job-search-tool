@@ -17,7 +17,7 @@ from . import schedule as scheduling
 from .client import DetailFetcher, LinkedInClient, PageFetcher
 from .config import Config, ConfigError
 from .db import SchemaTooNewError, connect, migrate
-from .details import fetch_descriptions
+from .details import fetch_descriptions, waiting_for_description
 from .embeddings import Embedder
 from .evaluation import build_report, load_labelled, roles_to_score
 from .fit_filters import listed_salary, rupee_text
@@ -119,6 +119,15 @@ def cmd_status(store: Store, out: TextIO) -> int:
             )
     print(scheduling.describe_state(scheduling.schedule_state()), file=out)
     print(f"Roles: {store.count_roles()}", file=out)
+    try:
+        config = Config.from_raw(store.get_config_raw())
+    except ConfigError:
+        config = Config()
+    print(
+        f"Descriptions pending: {waiting_for_description(store, config)} "
+        f"(roles from the last {config.detail_max_age_days} days)",
+        file=out,
+    )
     for status in STATUSES:
         print(f"  {status}: {store.count_roles(RoleFilter(status=status))}", file=out)
     return EXIT_OK

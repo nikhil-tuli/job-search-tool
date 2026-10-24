@@ -353,3 +353,32 @@ This reverses the earlier "no schedule" goal, so it stays off until switched on.
 - If several salaries appear, the highest lower end is used, so a stray small figure cannot exclude a role.
 - A role with no salary found stays eligible.
 - `jobscan salary-check` shows how many stored descriptions list a salary, how many fall below the minimum, and some examples.
+
+## Description throttling (built)
+- Job descriptions use the same two Config settings as the listing pages: "Retries per page or description" and "Abort after throttled responses in a row". The retry wait is shared too.
+- A throttled description is retried after the retry wait, up to the retry limit. If it is still throttled, it is left for the next run and does not count as a failure.
+- Any success resets the count. The description step stops once the abort limit is reached in a row. The scan itself is not affected.
+
+## Descriptions pending (built)
+- `jobscan status` and the Summary page show "Descriptions pending: N".
+- N counts roles without a description from the last few days (Config "detail_max_age_days", 3 by default), the same ones `jobscan details` fetches. Roles it gave up on are not counted.
+
+## Summary page now holds the run log (built)
+- The Run Log tab is gone. The Summary page has four parts, top to bottom: roles by day, Scans, run details, Scoring.
+- Scans is the old run table. It shows the last 10 runs, with a "Show more runs" link for 30 and "Show fewer runs" to go back.
+- Click a run number to see its details. They sit in a collapsed "Details of run #N" section, like Advanced filters, and open when you choose a run. By default they are for the latest run.
+- The details are the same as before: by keyword, match rate by page depth, matches by phrase, skipped titles.
+- Old `/runs` links redirect to the Summary page.
+
+## Skipped titles section (built)
+- Skipped titles are no longer part of "Details of run #N". The run details keep the status line, note, by keyword, match rate by page depth and matches by phrase.
+- A separate collapsed section "Skipped titles, last 7 days (N)" lists titles that matched no phrase, across all scans, each role once, newest first.
+- It shows 10 rows. "Show more" opens up to 200, and "Show fewer" goes back.
+- The number of days follows Config "skipped_titles_retention_days" (7 by default).
+
+## Export of rated roles (built)
+- The Eval tab has "Export rated roles (CSV)". It appears once at least one role is rated.
+- One row per role you rated. Columns: title, company, location, matched phrase, your rating, comments, status, final score and band, keyword and meaning scores (0 to 100 and raw), fit filter result, level, employment type, job function, industries, description.
+- Contact names, application dates, links and the CV are left out.
+- A score is blank when it is out of date or the role has not been scored.
+- It is meant for working out why the score gets some roles wrong.

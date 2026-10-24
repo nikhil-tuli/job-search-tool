@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .client import DetailFetcher, DetailOutcome
 from .config import Config
 from .store import Store
-from .timeutil import to_iso
-
-THROTTLES_BEFORE_STOP = 2
+from .timeutil import now_ist, to_iso
 
 
 @dataclass
@@ -34,22 +32,36 @@ def fetch_descriptions(
 ) -> DetailsResult:
     """Fetch the description of each (portal, job_id), one request at a time.
 
-    A throttled response is not counted against a role, so it is tried again later. Two in a row
-    stop the batch, because more requests would only make things worse.
+    Throttling follows the same Config settings as the listing pages. A throttled role is
+    tried again up to "Retries per page or description" times, after the retry wait. It is not
+    counted against the role, so a role still throttled is left for the next run. The batch
+    stops once "Abort after throttled responses in a row" is reached, because more requests
+    would only make things worse. Any success starts the count again.
     """
     result = DetailsResult()
     throttled_in_row = 0
     for portal, job_id in pending:
         wait(config.delay_seconds_min, config.delay_seconds_max, None)
-        fetched = fetcher.fetch_detail(job_id)
-        if fetched.outcome is DetailOutcome.THROTTLED:
+        attempt = 0
+        while True:
+            fetched = fetcher.fetch_detail(job_id)
+            if fetched.outcome is not DetailOutcome.THROTTLED:
+                break
             throttled_in_row += 1
             emit(f"  description {job_id}: throttled ({fetched.note})")
-            if throttled_in_row >= THROTTLES_BEFORE_STOP:
+            if throttled_in_row >= config.abort_after_consecutive_throttles:
                 result.stopped = True
+                return result
+            if attempt >= config.retry_count:
                 break
-            wait(config.retry_wait_min, config.retry_wait_max, "next description")
-            continue
+            attempt += 1
+            wait(
+                config.retry_wait_min,
+                config.retry_wait_max,
+                f"retry {attempt}/{config.retry_count}",
+            )
+        if fetched.outcome is DetailOutcome.THROTTLED:
+            continue  # left for the next run
         throttled_in_row = 0
         if fetched.outcome is DetailOutcome.OK and fetched.detail is not None:
             store.save_detail(portal, job_id, fetched.detail, when=to_iso(clock()))
@@ -60,3 +72,13 @@ def fetch_descriptions(
             result.failed_ids.add(job_id)
             emit(f"  description {job_id}: none ({fetched.note})")
     return result
+
+
+def recent_since(config: Config) -> str:
+    """Roles fetched at or after this time are the ones a scan or `jobscan details` covers."""
+    return to_iso(now_ist() - timedelta(days=config.detail_max_age_days))
+
+
+def waiting_for_description(store: Store, config: Config) -> int:
+    """Recent roles still without a description, not counting ones given up on."""
+    return len(store.pending_details(recent_since(config), 1_000_000))

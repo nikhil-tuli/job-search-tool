@@ -7,7 +7,7 @@ import pytest
 
 from jobscan import db
 from jobscan.config import Config
-from jobscan.details import THROTTLES_BEFORE_STOP, fetch_descriptions
+from jobscan.details import fetch_descriptions
 from jobscan.models import NewRole
 from jobscan.store import MAX_DETAIL_ATTEMPTS, Store
 from jobscan.timeutil import IST
@@ -47,14 +47,16 @@ def store() -> Iterator[Store]:
     conn.close()
 
 
-def fetch(store: Store, details: ScriptedDetails, ids: list[str]) -> tuple:  # type: ignore[type-arg]
+def fetch(
+    store: Store, details: ScriptedDetails, ids: list[str], config: Config | None = None
+) -> tuple:  # type: ignore[type-arg]
     lines: list[str] = []
     waits: list[tuple[float, float, str | None]] = []
     result = fetch_descriptions(
         store=store,
         fetcher=details,
         pending=[("LinkedIn", j) for j in ids],
-        config=Config(),
+        config=config or Config(),
         emit=lines.append,
         wait=lambda low, high, why: waits.append((low, high, why)),
         clock=lambda: NOW,
@@ -86,29 +88,44 @@ def test_a_missing_posting_counts_against_the_role(store: Store) -> None:
     assert count == 1
 
 
-def test_one_throttle_is_waited_out_and_not_counted(store: Store) -> None:
-    details = ScriptedDetails({"1": [detail_throttled()], "2": [detail_ok("two")]})
-    result, _, waits = fetch(store, details, ["1", "2"])
+def test_a_throttled_description_is_retried_and_not_counted(store: Store) -> None:
+    details = ScriptedDetails({"1": [detail_throttled(), detail_ok("one")]})
+    result, _, waits = fetch(store, details, ["1"])
     assert (result.saved, result.failed, result.stopped) == (1, 0, False)
-    assert any(w[2] == "next description" for w in waits)
+    assert details.calls == ["1", "1"]
+    assert any(w[2] == "retry 1/3" for w in waits)
     count = store.conn.execute("SELECT detail_attempts FROM roles WHERE job_id = '1'").fetchone()[0]
     assert count == 0
 
 
-def test_repeated_throttling_stops_the_batch(store: Store) -> None:
-    script = {str(i): [detail_throttled()] for i in range(1, 5)}
+def test_a_role_throttled_past_the_retry_limit_is_left_for_later(store: Store) -> None:
+    script = {"1": [detail_throttled()] * 4, "2": [detail_ok("two")]}
     details = ScriptedDetails(script)
-    result, _, _ = fetch(store, details, ["1", "2", "3", "4"])
+    config = Config(retry_count=3, abort_after_consecutive_throttles=10)
+    result, _, _ = fetch(store, details, ["1", "2"], config=config)
+    assert details.calls == ["1", "1", "1", "1", "2"]  # first try plus 3 retries
+    assert (result.saved, result.failed, result.stopped) == (1, 0, False)
+    assert role(store, "1").description is None
+    count = store.conn.execute("SELECT detail_attempts FROM roles WHERE job_id = '1'").fetchone()[0]
+    assert count == 0
+
+
+def test_the_batch_stops_after_the_set_number_of_throttles_in_a_row(store: Store) -> None:
+    script = {str(i): [detail_throttled()] * 9 for i in range(1, 5)}
+    details = ScriptedDetails(script)
+    config = Config(retry_count=3, abort_after_consecutive_throttles=5)
+    result, _, _ = fetch(store, details, ["1", "2", "3", "4"], config=config)
     assert result.stopped
-    assert len(details.calls) == THROTTLES_BEFORE_STOP
+    assert len(details.calls) == 5
     assert result.saved == 0
 
 
 def test_a_success_resets_the_throttle_count(store: Store) -> None:
-    script = {"1": [detail_throttled()], "3": [detail_throttled()]}
-    result, _, _ = fetch(store, ScriptedDetails(script), ["1", "2", "3", "4"])
-    assert not result.stopped
-    assert result.saved == 2
+    script = {"1": [detail_throttled()] * 3, "3": [detail_throttled()] * 3}
+    config = Config(retry_count=3, abort_after_consecutive_throttles=5)
+    result, _, _ = fetch(store, ScriptedDetails(script), ["1", "2", "3", "4"], config=config)
+    assert not result.stopped  # 3 + 3 throttles, but the success on role 2 reset the count
+    assert result.saved == 4
 
 
 def test_nothing_pending_is_a_no_op(store: Store) -> None:

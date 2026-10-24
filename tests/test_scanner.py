@@ -613,9 +613,10 @@ def test_a_missing_description_counts_an_attempt_and_is_given_up_after_three(
 
 
 def test_throttled_descriptions_do_not_use_up_attempts(store: Store, cfg: Config) -> None:
+    cfg = replace(cfg, retry_count=2, abort_after_consecutive_throttles=50)
     h = described(store, cfg, ids=("1",))
     assert h.details is not None
-    h.details.script["1"] = [detail_throttled()]
+    h.details.script["1"] = [detail_throttled()] * 3  # first try plus both retries
     h.run()
     assert len(store.pending_details("2000-01-01", 10)) == 1
     role = store.get_role("LinkedIn", "1")
@@ -624,13 +625,14 @@ def test_throttled_descriptions_do_not_use_up_attempts(store: Store, cfg: Config
 
 
 def test_repeated_throttling_stops_the_phase_but_not_the_scan(store: Store, cfg: Config) -> None:
+    cfg = replace(cfg, retry_count=3, abort_after_consecutive_throttles=5)
     h = described(store, cfg, ids=("1", "2", "3", "4"))
     assert h.details is not None
     for job_id in ("1", "2", "3", "4"):
-        h.details.script[job_id] = [detail_throttled()]
+        h.details.script[job_id] = [detail_throttled()] * 9
     result = h.run()
     assert result.status == RUN_SUCCESS
-    assert len(h.details.calls) == 2
+    assert len(h.details.calls) == 5
     assert "Descriptions stopped after repeated throttling" in result.note
     assert len(store.list_roles()) == 4
 
@@ -640,9 +642,9 @@ def test_a_throttle_between_successes_does_not_stop_the_phase(store: Store, cfg:
     assert h.details is not None
     h.details.script["2"] = [detail_throttled()]
     h.run()
-    assert h.details.calls.count("2") == 1
+    assert h.details.calls.count("2") == 2  # throttled once, then retried
     described_ids = {r.job_id for r in store.list_roles() if r.description}
-    assert len(described_ids) == 2
+    assert len(described_ids) == 3
 
 
 def test_descriptions_are_skipped_when_the_search_was_cut_short(store: Store, cfg: Config) -> None:

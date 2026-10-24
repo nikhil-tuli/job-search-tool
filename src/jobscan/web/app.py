@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 from collections.abc import Callable, Collection, Mapping
+from datetime import timedelta
 from typing import Any
 from urllib.parse import urlparse
 
@@ -27,6 +28,7 @@ from werkzeug.wrappers import Response as WerkzeugResponse
 from .. import schedule as schedule_module
 from ..config import LIST_SETTINGS, Config, ConfigError, split_list
 from ..cv import MAX_UPLOAD_BYTES, CvError, extract_text, sha_of
+from ..details import waiting_for_description
 from ..embeddings import API_KEY_ENV, Embedder
 from ..evaluation import build_report, load_labelled, score_bands
 from ..fit_filters import FitResult, FitRules, evaluate
@@ -41,6 +43,7 @@ from ..models import (
 from ..scoring import (
     DAILY_WINDOW,
     TRIGGER_ROLE,
+    ScoreModel,
     Scorer,
     ScoringUnavailable,
     cv_chunks,
@@ -61,11 +64,13 @@ from .forms import (
     NEW_PHRASE_ROWS,
     parse_config_form,
     parse_role_form,
+    rated_to_csv,
     roles_to_csv,
     safe_next,
 )
 from .scores import ScoreView, score_views
 
+SKIPPED_PREVIEW = 10  # skipped titles shown until someone asks for more
 PAGE_SIZES = (20, 50, 100)
 DEFAULT_PAGE_SIZE = 20
 PAGE_SIZE_COOKIE = "jobscan_rows"
@@ -151,10 +156,14 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
     (
         "Throttling",
         (
-            ("retry_count", "Retries per page", ""),
+            ("retry_count", "Retries per page or description", ""),
             ("retry_wait_min", "Retry wait, min (s)", ""),
             ("retry_wait_max", "Retry wait, max (s)", ""),
-            ("abort_after_consecutive_throttles", "Abort after throttled responses in a row", ""),
+            (
+                "abort_after_consecutive_throttles",
+                "Abort after throttled responses in a row",
+                "Applies to listing pages and job descriptions. Leftover roles wait for next run",
+            ),
         ),
     ),
     (
@@ -815,7 +824,23 @@ def create_app(
             "eval.html",
             report=report,
             bands=score_bands(store, config, cv),
+            rated_count=len(store.list_labelled_roles()),
             has_cv=cv is not None,
+        )
+
+    @app.get("/eval/rated.csv")
+    def eval_export() -> Response:
+        """The rated roles with their scores and descriptions, for working out what to change."""
+        config = current_config()
+        items = load_labelled(store, config, store.get_cv())
+        body = rated_to_csv(
+            items, ScoreModel.from_config(config), FitRules.from_config(config), now_ist()
+        )
+        stamp = now_ist().strftime("%Y-%m-%d_%H%M")
+        return Response(
+            body,
+            mimetype="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="rated_roles_{stamp}.csv"'},
         )
 
     @app.post("/eval/exclude")
@@ -940,41 +965,59 @@ def create_app(
             latest_run=store.latest_run(),
             elapsed=schedule_module.elapsed_text,
             schedule_line=schedule_module.describe_state(schedule_module.schedule_state()),
+            **run_context(),
+            desc_waiting=waiting_for_description(store, current_config()),
+            desc_days=current_config().detail_max_age_days,
             **scoring_context(),
         )
 
-    # ---- run log --------------------------------------------------------------------------
+    # ---- run log (shown on the Summary page) ------------------------------------------------
 
     @app.get("/runs")
-    def runs() -> str:
-        all_runs = store.list_runs(30)
+    def runs() -> WerkzeugResponse:
+        """The old Run Log address: the Summary page now holds it."""
+        args: dict[str, Any] = {k: v for k, v in request.args.items() if k in ("run", "runs")}
+        target = url_for("summary", **args) + ("#run-detail" if "run" in args else "#scans")
+        return redirect(target)
+
+    def run_context() -> dict[str, Any]:
+        """The Scans table (last 10 runs, or all 30) and the details of the selected run."""
+        shown_all = request.args.get("runs") == "all"
+        run_rows = store.list_runs(30 if shown_all else 10)
         selected = None
         raw = request.args.get("run", "")
         if raw.isdigit():
             selected = store.get_run(int(raw))
-        if selected is None and all_runs:
-            selected = all_runs[0]
+        if selected is None and run_rows:
+            selected = run_rows[0]
         detail: dict[str, Any] = {}
         if selected is not None:
             depth = store.depth_stats(selected.id)
-            top = max((d.cards for d in depth), default=0)
             detail = {
                 "keywords": store.keyword_records(selected.id),
                 "depth": depth,
-                "depth_top": top,
                 "phrases": store.phrase_matches(selected.id),
-                "skipped": store.list_skipped(selected.id, limit=200),
                 "precision": (selected.matched / selected.cards_seen)
                 if selected.cards_seen
                 else None,
             }
-        return render_template(
-            "runs.html",
-            runs=all_runs,
-            selected=selected,
-            last_success=store.last_successful_run(),
+        every = request.args.get("skipped") == "all"
+        retention = current_config().skipped_titles_retention_days
+        since = to_iso(now_ist() - timedelta(days=retention))
+        skipped, skipped_total = store.recent_skipped(since, 200 if every else SKIPPED_PREVIEW)
+        return {
+            "skipped": skipped,
+            "skipped_total": skipped_total,
+            "skipped_days": retention,
+            "skipped_all": every,
+            "run_rows": run_rows,
+            "runs": run_rows,
+            "selected": selected,
+            "detail_open": raw.isdigit(),
+            "runs_shown_all": shown_all,
+            "more_runs": not shown_all and len(store.list_runs(11)) > 10,
             **detail,
-        )
+        }
 
     # ---- config ---------------------------------------------------------------------------
 

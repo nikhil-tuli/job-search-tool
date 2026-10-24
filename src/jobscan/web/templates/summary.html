@@ -17,6 +17,7 @@
       Latest scan: #{{ latest_run.id }} {{ latest_run.status }}, {{ latest_run.new_roles }} new roles.
     {% endif %}
     {{ schedule_line }}.
+    Descriptions pending: {{ desc_waiting }} (roles from the last {{ desc_days }} days).
   </p>
 </div>
 
@@ -59,6 +60,95 @@
 {% else %}
 <p class="empty">No roles yet. Run <code>jobscan scan</code> in a terminal to fetch some.</p>
 {% endif %}
+
+<h2 id="scans">Scans</h2>
+{% if run_rows %}
+<div class="scroll-x">
+<table class="runs">
+  <thead><tr><th>Run</th><th>Started (IST)</th><th>Status</th><th>Keywords</th><th>Pages</th><th>Cards</th><th>Matched</th><th>New</th><th>Dups</th><th>Throttled</th><th>Retries</th><th>Skipped pages</th></tr></thead>
+  <tbody>
+  {% for r in run_rows %}
+    <tr {% if selected and selected.id == r.id %}class="sel"{% endif %}>
+      <td><a href="{{ url_for('summary', run=r.id, runs='all' if runs_shown_all else None) ~ '#run-detail' }}">#{{ r.id }}</a></td>
+      <td>{{ r.started_on | ist }}</td>
+      <td><span class="status {{ r.status }}">{{ r.status }}</span></td>
+      <td>{{ r.keywords_done }}/{{ r.keywords_total }}</td>
+      <td>{{ r.pages }}</td><td>{{ r.cards_seen }}</td><td>{{ r.matched }}</td><td>{{ r.new_roles }}</td>
+      <td>{{ r.possible_dups }}</td><td>{{ r.throttled }}</td><td>{{ r.retries }}</td><td>{{ r.failed_pages }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if more_runs %}<p class="muted"><a href="{{ url_for('summary', run=selected.id if selected else None, runs='all') }}#scans">Show more runs</a></p>{% elif runs_shown_all and runs|length > 10 %}<p class="muted"><a href="{{ url_for('summary', run=selected.id if selected else None) }}#scans">Show fewer runs</a></p>{% endif %}
+{% else %}
+<p class="empty">No runs yet. Run <code>jobscan scan</code> in a terminal.</p>
+{% endif %}
+
+{% if selected %}
+<details id="run-detail" class="run-detail"{% if detail_open %} open{% endif %}>
+<summary>Details of run #{{ selected.id }}</summary>
+<p>
+  <span class="status {{ selected.status }}">{{ selected.status }}</span>
+  started {{ selected.started_on | ist }} IST{% if selected.finished_on %}, finished {{ selected.finished_on | ist }} IST{% endif %}.
+  {% if precision is not none %}Title precision: {{ '%.0f' % (precision * 100) }}% of cards matched a phrase.{% endif %}
+</p>
+{% if selected.note %}<p><strong>Note:</strong> {{ selected.note }}</p>{% endif %}
+
+<h3>By keyword</h3>
+<table>
+  <thead><tr><th>Keyword</th><th>Pages</th><th>Cards</th><th>Matched</th><th>Dropped</th><th>New</th><th>Dups</th><th>Throttled</th><th>Retries</th><th>Skipped pages</th><th>Malformed</th><th>Stopped by</th></tr></thead>
+  <tbody>
+  {% for k in keywords %}
+    <tr><td>{{ k.keyword }}</td><td>{{ k.pages }}</td><td>{{ k.cards }}</td><td>{{ k.matched }}</td><td>{{ k.dropped }}</td><td>{{ k.new_roles }}</td><td>{{ k.possible_dups }}</td><td>{{ k.throttled }}</td><td>{{ k.retries }}</td><td>{{ k.failed_pages }}</td><td>{{ k.malformed }}</td><td>{{ k.stopped_by }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h3>Match rate by page depth</h3>
+{% if depth %}
+<table class="depth">
+  <thead><tr><th>Page</th><th>Cards</th><th>Matched</th><th>Match rate</th><th></th></tr></thead>
+  <tbody>
+  {% for d in depth %}
+    <tr>
+      <td>{{ d.page_index + 1 }}</td><td>{{ d.cards }}</td><td>{{ d.matched }}</td>
+      <td>{{ '%.0f' % (d.match_rate * 100) }}%</td>
+      <td class="bar"><span class="fill" style="width: {{ (d.match_rate * 100) | round | int }}%"></span></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">No pages fetched.</p>{% endif %}
+
+<h3>Matches by phrase</h3>
+{% if phrases %}
+<table>
+  <thead><tr><th>Phrase</th><th>Matches</th></tr></thead>
+  <tbody>{% for phrase, n in phrases %}<tr><td>{{ phrase }}</td><td>{{ n }}</td></tr>{% endfor %}</tbody>
+</table>
+{% else %}<p class="muted">No matches.</p>{% endif %}
+
+</details>
+{% endif %}
+
+<details id="skipped" class="run-detail"{% if skipped_all %} open{% endif %}>
+<summary>Skipped titles, last {{ skipped_days }} days ({{ skipped_total }})</summary>
+<p class="muted">Did not match any phrase. Kept briefly for review. Each role appears once, newest first.</p>
+{% if skipped %}
+<table>
+  <thead><tr><th>Title</th><th>Company</th><th>Fetched (IST)</th></tr></thead>
+  <tbody>{% for s in skipped %}<tr><td>{{ s.title }}</td><td>{{ s.company }}</td><td>{{ s.fetched_on | ist }}</td></tr>{% endfor %}</tbody>
+</table>
+{% if not skipped_all and skipped_total > skipped|length %}
+<p class="muted"><a href="{{ url_for('summary', run=selected.id if selected else None, runs='all' if runs_shown_all else None, skipped='all') }}#skipped">Show more</a> ({{ skipped_total - skipped|length }} not shown; up to 200 are listed)</p>
+{% elif skipped_all and skipped_total > skipped|length %}
+<p class="muted">Showing the newest {{ skipped|length }} of {{ skipped_total }}.</p>
+{% elif skipped_all and skipped_total > 10 %}
+<p class="muted"><a href="{{ url_for('summary', run=selected.id if selected else None, runs='all' if runs_shown_all else None) }}#skipped">Show fewer</a></p>
+{% endif %}
+{% else %}<p class="muted">None stored.</p>{% endif %}
+</details>
 
 <h2>Scoring</h2>
 {% if not cv %}

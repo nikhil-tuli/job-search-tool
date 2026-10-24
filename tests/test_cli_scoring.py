@@ -414,11 +414,11 @@ def test_details_fetches_recent_roles_only(db_path: Path) -> None:
 def test_details_stops_on_repeated_throttling(db_path: Path) -> None:
     for n in ("1", "2", "3"):
         add_labelled(db_path, n, "good", "Technical Program Manager", description=None)
-    details = ScriptedDetails({n: [detail_throttled()] for n in ("1", "2", "3")})
+    details = ScriptedDetails({n: [detail_throttled()] * 9 for n in ("1", "2", "3")})
     code, text = run_details(db_path, details)
     assert code == EXIT_PARTIAL
     assert "Stopped after repeated throttling" in text
-    assert len(details.calls) == 2
+    assert len(details.calls) == 5  # "Abort after throttled responses in a row"
 
 
 def test_details_with_invalid_config(db_path: Path) -> None:
@@ -475,3 +475,14 @@ def test_salary_check_counts_descriptions_that_list_a_salary(db_path: Path) -> N
     assert "Listing a salary: 1" in text
     assert "Below the minimum (\u20b910 lakh): 1" in text
     assert "\u20b96 lakh  Technical Program Manager at Acme" in text
+
+
+def test_status_shows_how_many_descriptions_are_pending(db_path: Path) -> None:
+    seed(db_path, cv=False, described=False)
+    code, text, _ = run_cli(db_path, "status")
+    assert code == EXIT_OK
+    assert "Descriptions pending: 1 (roles from the last 3 days)" in text
+    store = cli.open_store(db_path)
+    store.save_detail("LinkedIn", "900", JobDetail("CTC 6-9 LPA"), when=to_iso(now_ist()))
+    store.close()
+    assert "Descriptions pending: 0" in run_cli(db_path, "status")[1]

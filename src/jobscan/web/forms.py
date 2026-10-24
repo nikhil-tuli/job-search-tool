@@ -10,7 +10,10 @@ from datetime import date, datetime
 from urllib.parse import urlparse
 
 from ..config import Config, ConfigError
+from ..evaluation import Labelled
+from ..fit_filters import FitRules, evaluate
 from ..models import DEFAULT_STATUS, STATUSES, Role
+from ..scoring import ScoreModel
 from ..timeutil import IST, format_display, has_time_of_day, to_iso
 from .scores import ScoreView
 
@@ -183,6 +186,75 @@ def roles_to_csv(roles: Iterable[Role], scores: Mapping[str, ScoreView] | None =
                     role.possible_duplicate_of or "",
                     "" if view is None else view.final,
                     "" if view is None else view.band,
+                )
+            ]
+        )
+    return buffer.getvalue()
+
+
+RATED_HEADER = (
+    "Job ID",
+    "Title",
+    "Company",
+    "Location",
+    "Matched Phrase",
+    "Your Rating",
+    "Comments",
+    "Status",
+    "Final Score",
+    "Band",
+    "Keyword Score",
+    "Meaning Score",
+    "Keyword Raw",
+    "Meaning Raw",
+    "Fit Filter",
+    "Level",
+    "Employment Type",
+    "Job Function",
+    "Industries",
+    "Description",
+)
+
+
+def rated_to_csv(
+    items: Iterable[Labelled], model: ScoreModel, rules: FitRules, now: datetime
+) -> str:
+    """The roles you rated, with what the scorer saw, for working out why it got some wrong.
+
+    Contact names, application dates and the CV are left out. A score is blank when the saved
+    one is out of date.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\r\n")
+    writer.writerow(RATED_HEADER)
+    for item in items:
+        role, score = item.role, item.score
+        fit = evaluate(role, rules, now)
+        final = "" if score is None else model.final(score)
+        writer.writerow(
+            [
+                csv_cell(v)
+                for v in (
+                    role.job_id,
+                    role.title,
+                    role.company,
+                    role.location,
+                    role.matched_phrase,
+                    item.label,
+                    role.comments,
+                    role.status,
+                    final,
+                    "" if score is None else model.band(model.final(score)),
+                    "" if score is None else round(model.keyword(score)),
+                    "" if score is None else round(model.semantic(score)),
+                    "" if score is None else round(score.keyword_raw, 4),
+                    "" if score is None else round(score.semantic_raw, 4),
+                    fit.label if fit.eligible else fit.summary,
+                    role.seniority,
+                    role.employment_type,
+                    role.job_function,
+                    role.industries,
+                    role.description,
                 )
             ]
         )

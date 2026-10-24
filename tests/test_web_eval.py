@@ -319,3 +319,65 @@ def test_the_config_page_lists_excluded_industries(client: FlaskClient) -> None:
     page = body(client.get("/config"))
     assert 'name="fit_excluded_industries" value=""' in page
     assert "Excluded industries" in page
+
+
+# ---- export of rated roles -----------------------------------------------------------------
+
+
+def export_rows(web: Harness) -> list[dict[str, str]]:
+    import csv
+    import io
+
+    response = web.client.get("/eval/rated.csv")
+    assert response.status_code == 200
+    assert response.mimetype == "text/csv"
+    assert "rated_roles_" in response.headers["Content-Disposition"]
+    return list(csv.DictReader(io.StringIO(response.get_data(as_text=True))))
+
+
+def test_the_export_holds_only_rated_roles_with_their_notes_and_scores(web: Harness) -> None:
+    upload_cv(web.store)
+    add_role(web.store, "1", "Payments platform program role")
+    add_role(web.store, "2", "Warehouse operations coordinator")
+    add_role(web.store, "3", "Never rated")
+    assert web.client.post("/roles/LinkedIn/1/score").status_code == 302
+    web.store.set_fit_rating("LinkedIn", "1", "good")
+    web.store.set_fit_rating("LinkedIn", "2", "bad")
+    web.store.conn.execute(
+        "UPDATE roles SET comments = ?, industries = ? WHERE job_id = '2'",
+        ("Ops role, not program work", "Logistics"),
+    )
+    rows = {r["Job ID"]: r for r in export_rows(web)}
+    assert set(rows) == {"1", "2"}  # the unrated role is left out
+    assert rows["1"]["Your Rating"] == "good"
+    assert rows["1"]["Final Score"] != ""
+    assert rows["1"]["Keyword Raw"] != ""
+    assert rows["1"]["Description"] != ""
+    assert rows["2"]["Your Rating"] == "bad"
+    assert rows["2"]["Comments"] == "Ops role, not program work"
+    assert rows["2"]["Industries"] == "Logistics"
+    assert rows["2"]["Final Score"] == ""  # never scored
+
+
+def test_the_export_leaves_out_contacts_and_dates(web: Harness) -> None:
+    add_role(web.store, "1")
+    web.store.set_fit_rating("LinkedIn", "1", "good")
+    header = export_rows(web)[0].keys()
+    for name in ("Contact Person", "Applied On (IST)", "Link"):
+        assert name not in header
+
+
+def test_the_export_neutralises_spreadsheet_formulas(web: Harness) -> None:
+    add_role(web.store, "1")
+    web.store.set_fit_rating("LinkedIn", "1", "good")
+    web.store.conn.execute("UPDATE roles SET comments = '=HYPERLINK(1)' WHERE job_id = '1'")
+    assert export_rows(web)[0]["Comments"] == "'=HYPERLINK(1)"
+
+
+def test_the_eval_page_offers_the_export_only_when_there_are_ratings(web: Harness) -> None:
+    add_role(web.store, "1")
+    assert "Export rated roles" not in body(web.client.get("/eval"))
+    web.store.set_fit_rating("LinkedIn", "1", "good")
+    page = body(web.client.get("/eval"))
+    assert "Export rated roles (CSV)" in page
+    assert "/eval/rated.csv" in page
