@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+src/jobscan/__init__.py
+src/jobscan.egg-info/PKG-INFO
+src/jobscan.egg-info/SOURCES.txt
+src/jobscan.egg-info/dependency_links.txt
+src/jobscan.egg-info/entry_points.txt
+src/jobscan.egg-info/requires.txt
+src/jobscan.egg-info/top_level.txt

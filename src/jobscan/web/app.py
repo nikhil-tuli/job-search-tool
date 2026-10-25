@@ -6,8 +6,8 @@ import math
 import os
 import re
 import secrets
-from collections.abc import Callable, Collection, Mapping
-from datetime import timedelta
+from collections.abc import Callable, Collection, Iterable, Mapping
+from datetime import date, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
@@ -34,6 +34,7 @@ from ..evaluation import build_report, load_labelled, score_bands
 from ..fit_filters import FitResult, FitRules, evaluate
 from ..matching import MATCH_MODES
 from ..models import (
+    FOLLOW_UP_STATES,
     SORTED_STATUSES,
     STATUSES,
     Cv,
@@ -85,7 +86,7 @@ EXCLUDE_KINDS = {
     ),
 }
 FIT_CHOICES = ("eligible", "excluded")
-SCORE_CHOICES = ("scored", "strong", "partial", "weak", "unscored")
+SCORE_CHOICES = ("strong", "partial", "weak", "unscored")
 # Sortable columns of the roles table: key -> (header, direction on the first click).
 SORT_COLUMNS = {
     "title": ("Title", "asc"),
@@ -475,13 +476,27 @@ def create_app(
         text = format_display(role.posted_on, with_time=False)
         return text if role.posted_precision == "day" else f"~{text}"
 
+    @app.template_filter("short_day")
+    def short_day(value: str) -> str:
+        try:
+            day = date.fromisoformat(value)
+        except ValueError:
+            return value
+        return f"{day.day} {day.strftime('%b')}"
+
     @app.template_filter("safe_link")
     def safe_link(url: str) -> str:
         return url if url.startswith("https://") else ""
 
     @app.template_global("without")
-    def without(values: Mapping[str, str], key: str) -> dict[str, str]:
-        return {k: v for k, v in values.items() if k != key}
+    def without(values: Mapping[str, Any], key: str, drop: str = "") -> dict[str, Any]:
+        """The filters minus one key, or minus one ticked value of it."""
+        out = {k: v for k, v in values.items() if k != key}
+        if drop and isinstance(values.get(key), list):
+            left = [v for v in values[key] if v != drop]
+            if left:
+                out[key] = left
+        return out
 
     @app.context_processor
     def inject() -> dict[str, Any]:
@@ -489,27 +504,38 @@ def create_app(
 
     # ---- roles ----------------------------------------------------------------------------
 
-    def read_filter(args: Mapping[str, str]) -> tuple[RoleFilter, dict[str, str]]:
-        status = args.get("status", "")
+    def read_filter(args: Any) -> tuple[RoleFilter, dict[str, Any]]:
+        """Filter from the query string. Status, fit, score, follow-up and fetched take several
+        values (repeated parameters); none ticked means no filter on that one."""
+
+        def picked(name: str, allowed: Iterable[str]) -> list[str]:
+            ok = set(allowed)
+            return sorted({v for v in args.getlist(name) if v in ok})
+
+        statuses = [s for s in STATUSES if s in args.getlist("status")]
+        days = sorted({v for v in args.getlist("fetched") if is_day(v)}, reverse=True)
+        follow = [s for s in FOLLOW_UP_STATES if s in args.getlist("followup")]
+        fit = picked("fit", FIT_CHOICES)
+        score = [c for c in SCORE_CHOICES if c in args.getlist("score")]
+        sort = args.get("sort", "")
         query = args.get("q", "").strip()
         dup = args.get("dup", "") == "1"
-        fetched = args.get("fetched", "")
-        fit = args.get("fit", "")
-        score = args.get("score", "")
-        sort = args.get("sort", "")
         flt = RoleFilter(
             query=query,
-            status=status if status in STATUSES else None,
+            statuses=tuple(statuses),
             duplicates_only=dup,
-            fetched_on=fetched if is_day(fetched) else None,
+            fetched_days=tuple(days),
+            follow_ups=tuple(follow),
+            today=today_iso(),
         )
-        shown = {
-            "q": flt.query,
-            "status": flt.status or "",
+        shown: dict[str, Any] = {
+            "q": query,
+            "status": statuses,
             "dup": "1" if dup else "",
-            "fetched": flt.fetched_on or "",
-            "fit": fit if fit in FIT_CHOICES else "",
-            "score": score if score in SCORE_CHOICES else "",
+            "fetched": days,
+            "followup": follow,
+            "fit": fit,
+            "score": score,
             "sort": sort if sort in SORT_CHOICES else "",
         }
         if shown["sort"] and args.get("dir", "") in ("asc", "desc"):
@@ -526,26 +552,29 @@ def create_app(
         except ConfigError:
             return Config()
 
-    def fit_filtered(rows: list[Role], fit: str) -> tuple[list[Role], dict[str, FitResult]]:
-        """Fit result for every row, and only the rows matching the Fit choice when one is set."""
+    def fit_filtered(
+        rows: list[Role], fit: Iterable[str]
+    ) -> tuple[list[Role], dict[str, FitResult]]:
+        """Fit result for every row, and only the rows matching the ticked Fit choices."""
         rules, now = FitRules.from_config(current_config()), now_ist()
         results = {r.key: evaluate(r, rules, now) for r in rows}
-        if fit in FIT_CHOICES:
-            wanted = fit == "eligible"
-            rows = [r for r in rows if results[r.key].eligible == wanted]
+        wanted = {c for c in fit if c in FIT_CHOICES}
+        if wanted and len(wanted) < len(FIT_CHOICES):
+            rows = [r for r in rows if (results[r.key].eligible) == ("eligible" in wanted)]
         return rows, results
 
     def scored_filtered(
-        rows: list[Role], views: Mapping[str, ScoreView], choice: str
+        rows: list[Role], views: Mapping[str, ScoreView], choices: Iterable[str]
     ) -> list[Role]:
-        """Rows with the chosen score band (or none)."""
-        if choice == "unscored":
-            rows = [r for r in rows if r.key not in views]
-        elif choice == "scored":
-            rows = [r for r in rows if r.key in views]
-        elif choice:
-            rows = [r for r in rows if r.key in views and views[r.key].band == choice]
-        return rows
+        """Rows in any of the ticked score bands (unscored means no score yet)."""
+        wanted = set(choices)
+        if not wanted:
+            return rows
+        return [
+            r
+            for r in rows
+            if ("unscored" in wanted if r.key not in views else views[r.key].band in wanted)
+        ]
 
     def sorted_rows(
         rows: list[Role],
@@ -585,7 +614,7 @@ def create_app(
         return present + missing
 
     def sort_heads(
-        active: Mapping[str, str], per: int, current: str, direction: str
+        active: Mapping[str, Any], per: int, current: str, direction: str
     ) -> dict[str, dict[str, str]]:
         """Header link and arrow for each sortable column: a click flips the active one."""
         base = {k: v for k, v in active.items() if k not in ("sort", "dir")}
@@ -600,6 +629,16 @@ def create_app(
             }
         return heads
 
+    def fetch_options(picked: Iterable[str]) -> list[tuple[str, str]]:
+        """Last 14 days with counts, plus any older day already ticked from a link."""
+        days = dict(store.recent_fetch_days(today_iso()))
+        for day in picked:
+            days.setdefault(day, store.count_roles(RoleFilter(fetched_days=(day,))))
+        return [
+            (d, f"{date.fromisoformat(d).strftime('%d %b')} ({n})")
+            for d, n in sorted(days.items(), reverse=True)
+        ]
+
     @app.get("/roles")
     def roles() -> Response | str:
         flt, active = read_filter(request.args)
@@ -609,7 +648,8 @@ def create_app(
             (int(v) for v in (asked, remembered) if v.isdigit() and int(v) in PAGE_SIZES),
             DEFAULT_PAGE_SIZE,
         )
-        fit, score_choice, sort = (active.get(k, "") for k in ("fit", "score", "sort"))
+        fit, score_choice = active.get("fit", []), active.get("score", [])
+        sort = active.get("sort", "")
         direction = active.get("dir") or (SORT_COLUMNS[sort][1] if sort else "desc")
         try:
             page = int(request.args.get("page", "1"))
@@ -652,7 +692,23 @@ def create_app(
                 page=page,
                 pages=pages,
                 filters=active,
-                advanced_open=any(k in active for k in ("fit", "score")),
+                advanced_open=any(k in active for k in ("fit", "score", "followup", "fetched")),
+                today=today_iso(),
+                status_options=[(v, v) for v in SORTED_STATUSES],
+                fit_options=(("eligible", "Eligible"), ("excluded", "Excluded")),
+                score_options=(
+                    ("strong", "Strong fit"),
+                    ("partial", "Partial fit"),
+                    ("weak", "Weak fit"),
+                    ("unscored", "Unscored"),
+                ),
+                follow_options=(
+                    ("due", "Due"),
+                    ("upcoming", "Upcoming"),
+                    ("overdue", "Overdue"),
+                    ("nodate", "No date set"),
+                ),
+                fetch_options=fetch_options(active.get("fetched", [])),
                 heads=sort_heads(active, per, sort or "fetched", direction),
                 here=here,
                 last_success=store.last_successful_run(),
@@ -682,14 +738,39 @@ def create_app(
             if error:
                 return jsonify(error=error), 400
             applied = {}
+            fits = {}
             for key in dict.fromkeys(ids):
                 portal, _, job_id = key.partition("|")
                 role = store.get_role(portal, job_id)
                 if role is not None:
                     applied[key] = _role_values(role)["applied_on"]
-            return jsonify(status=status, applied_on=applied)
+                    fits[key] = fit_fragments(role)["cell"]
+            return jsonify(status=status, applied_on=applied, fit=fits)
         flash(error or f"{count} role(s) set to {status}.", "error" if error else "ok")
         return redirect(target)
+
+    def fit_fragments(role: Role) -> dict[str, str]:
+        """The Fit cell and the panel's Fit line as they read now, for a background save."""
+        fit = evaluate(role, FitRules.from_config(current_config()), now_ist())
+        macros = app.jinja_env.get_template("_fit.html").module
+        return {
+            "cell": str(getattr(macros, "cell")(fit)),  # noqa: B009
+            "detail": str(getattr(macros, "detail")(fit)),  # noqa: B009
+        }
+
+    def today_iso() -> str:
+        return to_iso(now_ist())[:10]
+
+    def follow_up_tag(role: Role) -> str:
+        macros = app.jinja_env.get_template("_followup.html").module
+        return str(getattr(macros, "tag")(role, today_iso()))  # noqa: B009
+
+    def contact_links(role: Role) -> dict[str, str]:
+        """Where the email and LinkedIn icons point once a role is saved. Empty hides one."""
+        return {
+            "email": f"mailto:{role.contact_email}" if role.contact_email else "",
+            "linkedin": role.contact_linkedin,
+        }
 
     def role_context(role: Role) -> dict[str, Any]:
         config, cv = current_config(), store.get_cv()
@@ -764,6 +845,11 @@ def create_app(
             applied_on=edit.applied_on,
             contact_person=edit.contact_person,
             comments=edit.comments,
+            follow_up_needed=edit.follow_up_needed,
+            follow_up_on=edit.follow_up_on,
+            contact_email=edit.contact_email,
+            contact_phone=edit.contact_phone,
+            contact_linkedin=edit.contact_linkedin,
         )
         if panel:
             saved = store.get_role(portal, job_id)
@@ -772,6 +858,9 @@ def create_app(
                 status=saved.status,
                 applied_on=_role_values(saved)["applied_on"],
                 note=label_note(saved),
+                fit=fit_fragments(saved),
+                follow_up=follow_up_tag(saved),
+                links=contact_links(saved),
             )
         flash("Saved.", "ok")
         return redirect(target)
@@ -869,12 +958,12 @@ def create_app(
     @app.get("/export.csv")
     def export_csv() -> Response:
         flt, active = read_filter(request.args)
-        rows, fits = fit_filtered(store.list_roles(flt), active.get("fit", ""))
+        rows, fits = fit_filtered(store.list_roles(flt), active.get("fit", []))
         views = score_views(store, current_config(), store.get_cv(), rows)
         sort = active.get("sort", "")
         direction = active.get("dir") or (SORT_COLUMNS[sort][1] if sort else "desc")
         rows = sorted_rows(
-            scored_filtered(rows, views, active.get("score", "")), views, fits, sort, direction
+            scored_filtered(rows, views, active.get("score", [])), views, fits, sort, direction
         )
         body = roles_to_csv(rows, views)
         stamp = now_ist().strftime("%Y-%m-%d_%H%M")
@@ -1075,4 +1164,9 @@ def _role_values(role: Role) -> dict[str, str]:
         "applied_on": format_display(role.applied_on, with_time=False),
         "contact_person": role.contact_person,
         "comments": role.comments,
+        "follow_up_needed": "1" if role.follow_up_needed else "",
+        "follow_up_on": role.follow_up_on or "",
+        "contact_email": role.contact_email,
+        "contact_phone": role.contact_phone,
+        "contact_linkedin": role.contact_linkedin,
     }

@@ -1,0 +1,6 @@
+{% macro cell(fit) -%}
+{% if fit.eligible %}<span class="muted">Eligible</span>{% else %}<span class="tag out" title="{{ fit.summary }}">{{ fit.label }}</span>{% if fit.more %}<span class="muted" title="{{ fit.summary }}">+{{ fit.more }}</span>{% endif %}{% endif %}
+{%- endmacro %}
+{% macro detail(fit) -%}
+{% if fit.eligible %}Eligible{% else %}<span class="tag out">{{ fit.label }}</span><ul class="reasons">{% for reason in fit.reasons %}<li>{{ reason.detail }}</li>{% endfor %}</ul>{% endif %}
+{%- endmacro %}

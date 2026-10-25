@@ -840,8 +840,7 @@ def test_roles_fetch_date_filter_chip_and_clear(client: FlaskClient, store: Stor
     body = text(client.get("/roles?fetched=2026-10-15"))
     assert "/jobs/view/1" in body
     assert "/jobs/view/2" not in body
-    assert "Fetched 2026-10-15" in body
-    assert 'name="fetched" value="2026-10-15"' in body
+    assert 'name="fetched" value="2026-10-15" checked' in body
 
 
 def test_invalid_fetch_date_is_ignored(client: FlaskClient, store: Store) -> None:
@@ -979,7 +978,7 @@ def test_fit_filter_eligible_and_excluded(client: FlaskClient, store: Store, run
     excluded = text(client.get("/roles?fit=excluded"))
     assert "Program Two" in excluded
     assert "Technical Program Manager One" not in excluded
-    assert 'value="excluded" selected' in excluded
+    assert 'name="fit" value="excluded" checked' in excluded
     assert 'Roles <span class="muted">1</span>' in excluded
 
 
@@ -1207,3 +1206,46 @@ def test_skipped_titles_are_not_part_of_the_run_details(
     assert "Skipped title" not in detail
     assert "Match rate by page depth" in detail
     assert "Matches by phrase" in detail
+
+
+def test_a_background_status_save_returns_the_new_fit(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh())
+    assert 'muted">Eligible<' in text(client.get("/roles"))
+    response = client.post(
+        "/roles/status",
+        data={"ids": "LinkedIn|1", "status": "Not relevant"},
+        headers={"X-Panel": "1"},
+    )
+    cell = response.get_json()["fit"]["LinkedIn|1"]
+    assert "Excluded: status" in cell
+    assert "Eligible" not in cell
+    back = client.post(
+        "/roles/status",
+        data={"ids": "LinkedIn|1", "status": "Not Applied"},
+        headers={"X-Panel": "1"},
+    )
+    assert "Eligible" in back.get_json()["fit"]["LinkedIn|1"]
+
+
+def test_a_panel_save_returns_the_new_fit_cell_and_detail(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh())
+    response = client.post(
+        "/roles/LinkedIn/1",
+        data={"status": "Skipped", "applied_on": "", "contact_person": "", "comments": ""},
+        headers={"X-Panel": "1"},
+    )
+    fit = response.get_json()["fit"]
+    assert "Excluded: status" in fit["cell"]
+    assert "status is Skipped" in fit["detail"]
+
+
+def test_the_roles_page_marks_the_fit_cell_for_updates(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1", fetched_on=fresh())
+    assert '<td class="fit">' in text(client.get("/roles"))
+    assert "data-fit-detail" in text(client.get("/roles/LinkedIn/1?partial=1"))

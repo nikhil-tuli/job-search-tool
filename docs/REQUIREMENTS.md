@@ -382,3 +382,31 @@ This reverses the earlier "no schedule" goal, so it stays off until switched on.
 - Contact names, application dates, links and the CV are left out.
 - A score is blank when it is out of date or the role has not been scored.
 - It is meant for working out why the score gets some roles wrong.
+
+## Fit refreshes after a status change (built)
+- Changing a role's status from the Roles table or the side panel now updates its Fit cell, and the Fit line in the panel, straight away. Before, they showed the old result until the page was reloaded.
+
+## Round 6: follow-ups and multi-select filters (built)
+
+### Follow-up tracking
+- Each role gets a "Follow-up needed" checkbox and a "Next follow-up" date. The date stays blank until you set it.
+- Each role also keeps contact details: name (the existing Contact person field), email, phone and LinkedIn URL. All are optional.
+- Notes about a follow-up go in the existing Comments field.
+- In the side panel, the follow-up row sits under Status and Applied On. The contact block sits above Comments.
+- Email and LinkedIn show as links once filled. The LinkedIn link must be a linkedin.com address.
+- A role with the box ticked has one follow-up state:
+  - Due: the date is today.
+  - Upcoming: the date is after today.
+  - Overdue: the date is before today. It shows in red.
+  - No date set: the box is ticked and the date is blank.
+- The Roles table shows the state as a tag in the Title cell, for example "Follow-up: Overdue (24 Oct)". There is no new column.
+- If the box is not ticked, the date is kept but ignored.
+- Export CSV includes the new fields.
+
+### Multi-select filters
+- Status, Fit, Score, Follow-up and Fetched date are tick-box dropdowns. You can tick one or more values.
+- Nothing ticked means All. So the "Any ..." entries, "Scored only" and "All follow-ups" are removed.
+- Fetched date lists the last 14 days, newest first, with a count for each. Nothing ticked means every date, including older ones.
+- Follow-up filter values: Due, Upcoming, Overdue, No date set.
+- When Due, Upcoming or Overdue is ticked, the list sorts by the earliest follow-up date.
+- Paging, sorting, Export CSV and the Summary page links keep working with several values.

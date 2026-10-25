@@ -1,0 +1,8 @@
+{% macro tag(role, today) -%}
+{% set state = role.follow_up_state(today) -%}
+{% if state == 'overdue' %}<span class="tag out follow-tag" title="Follow-up was due {{ role.follow_up_on }}">Follow-up: Overdue ({{ role.follow_up_on | short_day }})</span>
+{%- elif state == 'due' %}<span class="tag warn follow-tag" title="Follow-up is due today">Follow-up: Due today</span>
+{%- elif state == 'upcoming' %}<span class="tag follow-tag" title="Next follow-up {{ role.follow_up_on }}">Follow-up: {{ role.follow_up_on | short_day }}</span>
+{%- elif state == 'nodate' %}<span class="tag follow-tag" title="Follow-up needed, no date set">Follow-up: no date</span>
+{%- endif %}
+{%- endmacro %}

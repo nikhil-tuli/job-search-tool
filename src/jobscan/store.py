@@ -10,6 +10,10 @@ from datetime import date, datetime, timedelta
 
 from .models import (
     DEFAULT_STATUS,
+    FOLLOW_UP_DUE,
+    FOLLOW_UP_NO_DATE,
+    FOLLOW_UP_OVERDUE,
+    FOLLOW_UP_UPCOMING,
     STATUSES,
     Cv,
     DepthStat,
@@ -139,6 +143,11 @@ def _role(row: sqlite3.Row) -> Role:
         industries=row["industries"],
         job_function=row["job_function"],
         fit_rating=row["fit_rating"],
+        follow_up_needed=bool(row["follow_up_needed"]),
+        follow_up_on=row["follow_up_on"],
+        contact_email=row["contact_email"],
+        contact_phone=row["contact_phone"],
+        contact_linkedin=row["contact_linkedin"],
     )
 
 
@@ -308,22 +317,45 @@ class Store:
             clauses.append(
                 "(title LIKE ? ESCAPE '\\' OR company LIKE ? ESCAPE '\\' "
                 "OR location LIKE ? ESCAPE '\\' OR comments LIKE ? ESCAPE '\\' "
-                "OR contact_person LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')"
+                "OR contact_person LIKE ? ESCAPE '\\' OR contact_email LIKE ? ESCAPE '\\' "
+                "OR contact_phone LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')"
             )
-            params.extend([like] * 6)
-        if flt.status:
-            if flt.status not in STATUSES:
-                raise StoreError(f"unknown status: {flt.status!r}")
-            clauses.append("status = ?")
-            params.append(flt.status)
+            params.extend([like] * 8)
+        statuses = [*flt.statuses, *([flt.status] if flt.status else [])]
+        if statuses:
+            for status in statuses:
+                if status not in STATUSES:
+                    raise StoreError(f"unknown status: {status!r}")
+            clauses.append(f"status IN ({', '.join('?' * len(statuses))})")
+            params.extend(statuses)
         if flt.duplicates_only:
             clauses.append("possible_duplicate_of IS NOT NULL")
-        if flt.fetched_on:
-            if not is_day(flt.fetched_on):
-                raise StoreError(f"invalid fetch date: {flt.fetched_on!r}")
+        days = [*flt.fetched_days, *([flt.fetched_on] if flt.fetched_on else [])]
+        if days:
+            for day in days:
+                if not is_day(day):
+                    raise StoreError(f"invalid fetch date: {day!r}")
             # Timestamps are stored in IST, so the first ten characters are the IST day.
-            clauses.append("substr(fetched_on, 1, 10) = ?")
-            params.append(flt.fetched_on)
+            clauses.append(f"substr(fetched_on, 1, 10) IN ({', '.join('?' * len(days))})")
+            params.extend(days)
+        if flt.follow_ups:
+            today = flt.today or to_iso(now_ist())[:10]
+            if not is_day(today):
+                raise StoreError(f"invalid date: {today!r}")
+            states = {
+                FOLLOW_UP_DUE: ("follow_up_on = ?", [today]),
+                FOLLOW_UP_UPCOMING: ("follow_up_on > ?", [today]),
+                FOLLOW_UP_OVERDUE: ("follow_up_on < ?", [today]),
+                FOLLOW_UP_NO_DATE: ("follow_up_on IS NULL", []),
+            }
+            parts: list[str] = []
+            for state in flt.follow_ups:
+                if state not in states:
+                    raise StoreError(f"unknown follow-up state: {state!r}")
+                sql, values = states[state]
+                parts.append(sql)
+                params.extend(values)
+            clauses.append(f"follow_up_needed = 1 AND ({' OR '.join(parts)})")
         return (" WHERE " + " AND ".join(clauses)) if clauses else "", params
 
     def count_roles(self, flt: RoleFilter | None = None) -> int:
@@ -334,12 +366,17 @@ class Store:
     def list_roles(
         self, flt: RoleFilter | None = None, *, limit: int | None = None, offset: int = 0
     ) -> list[Role]:
-        """Newest fetched first; ties ordered by posted time (newest first), then job id."""
-        where, params = self._where(flt or RoleFilter())
-        sql = (
-            f"SELECT * FROM roles{where} "
-            "ORDER BY fetched_on DESC, COALESCE(posted_on, '') DESC, job_id DESC"
-        )
+        """Newest fetched first; ties ordered by posted time (newest first), then job id.
+
+        With a follow-up filter, the earliest follow-up date comes first and roles without a
+        date last.
+        """
+        flt = flt or RoleFilter()
+        where, params = self._where(flt)
+        order = "fetched_on DESC, COALESCE(posted_on, '') DESC, job_id DESC"
+        if flt.follow_ups:
+            order = "follow_up_on IS NULL, follow_up_on ASC, " + order
+        sql = f"SELECT * FROM roles{where} ORDER BY {order}"
         if limit is not None:
             sql += " LIMIT ? OFFSET ?"
             params = [*params, limit, max(offset, 0)]
@@ -386,6 +423,19 @@ class Store:
             "WHERE portal = ? AND job_id = ?",
             (portal, job_id),
         )
+
+    def recent_fetch_days(self, today: str, days: int = 14) -> list[tuple[str, int]]:
+        """(IST day, roles first fetched that day) for the last `days` days, newest first.
+
+        Only days with roles are listed.
+        """
+        first = (date.fromisoformat(today) - timedelta(days=days - 1)).isoformat()
+        rows = self._conn.execute(
+            "SELECT substr(fetched_on, 1, 10) AS day, COUNT(*) AS n FROM roles "
+            "WHERE substr(fetched_on, 1, 10) >= ? GROUP BY day ORDER BY day DESC",
+            (first,),
+        ).fetchall()
+        return [(row["day"], int(row["n"])) for row in rows]
 
     def fetch_summary(self) -> list[FetchDay]:
         """Roles per IST fetch day and current status, newest day first.
@@ -481,18 +531,31 @@ class Store:
         applied_on: str | None,
         contact_person: str,
         comments: str,
+        follow_up_needed: bool = False,
+        follow_up_on: str | None = None,
+        contact_email: str = "",
+        contact_phone: str = "",
+        contact_linkedin: str = "",
     ) -> None:
         """Save the editable fields of one role. applied_on is an ISO timestamp or None."""
         if status not in STATUSES:
             raise StoreError(f"unknown status: {status!r}")
+        if follow_up_on is not None and not is_day(follow_up_on):
+            raise StoreError(f"invalid follow-up date: {follow_up_on!r}")
         cursor = self._conn.execute(
-            "UPDATE roles SET status = ?, applied_on = ?, contact_person = ?, comments = ? "
-            "WHERE portal = ? AND job_id = ?",
+            "UPDATE roles SET status = ?, applied_on = ?, contact_person = ?, comments = ?, "
+            "follow_up_needed = ?, follow_up_on = ?, contact_email = ?, contact_phone = ?, "
+            "contact_linkedin = ? WHERE portal = ? AND job_id = ?",
             (
                 status,
                 applied_on,
                 contact_person.strip(),
                 comments.strip(),
+                1 if follow_up_needed else 0,
+                follow_up_on,
+                contact_email.strip(),
+                contact_phone.strip(),
+                contact_linkedin.strip(),
                 portal,
                 job_id,
             ),

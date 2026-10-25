@@ -3,7 +3,7 @@
   'use strict';
   var table = document.querySelector('table.roles');
   if (!table) { return; }
-  var filterStatus = table.dataset.filterStatus || '';
+  var filterStatus = (table.dataset.filterStatus || '').split('|').filter(Boolean);
 
   function note(row, text, isError) {
     var el = row.querySelector('.note');
@@ -46,7 +46,11 @@
       select.dataset.prev = select.value;
       var key = form.querySelector('input[name=ids]').value;
       row.querySelector('td.applied').textContent = result.data.applied_on[key] || '';
-      var outside = filterStatus && select.value !== filterStatus;
+      var fitCell = row.querySelector('td.fit');
+      if (fitCell && result.data.fit && result.data.fit[key] !== undefined) {
+        fitCell.innerHTML = result.data.fit[key];  // server-rendered, escaped by the template
+      }
+      var outside = filterStatus.length > 0 && filterStatus.indexOf(select.value) < 0;
       row.classList.toggle('stale', !!outside);
       note(row, outside ? 'Saved ✓ (no longer matches this filter)' : 'Saved ✓', false);
     }).catch(function () {

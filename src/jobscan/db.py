@@ -384,6 +384,18 @@ def _migration_8(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_9(conn: sqlite3.Connection) -> None:
+    """Follow-up tracking and contact details on each role."""
+    conn.execute(
+        "ALTER TABLE roles ADD COLUMN follow_up_needed INTEGER NOT NULL DEFAULT 0 "
+        "CHECK (follow_up_needed IN (0, 1))"
+    )
+    conn.execute("ALTER TABLE roles ADD COLUMN follow_up_on TEXT")  # YYYY-MM-DD or NULL
+    conn.execute("ALTER TABLE roles ADD COLUMN contact_email TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE roles ADD COLUMN contact_phone TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE roles ADD COLUMN contact_linkedin TEXT NOT NULL DEFAULT ''")
+
+
 # Append new migrations to the end; never edit one that has shipped.
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_1,
@@ -394,6 +406,7 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_6,
     _migration_7,
     _migration_8,
+    _migration_9,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 

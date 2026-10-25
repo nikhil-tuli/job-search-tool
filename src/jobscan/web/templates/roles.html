@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Roles{% endblock %}
+{% import "_fit.html" as fit_html %}
+{% import "_followup.html" as follow_html %}
+{% import "_multi.html" as multi %}
 {% block content %}
 {% macro pager() %}
 {% if pages > 1 %}
@@ -13,14 +16,7 @@
 <form id="filterform" class="filters" method="get" action="{{ url_for('roles') }}">
   <h1>Roles <span class="muted">{{ total }}</span></h1>
   <input type="search" name="q" value="{{ filters.get('q', '') }}" placeholder="Search title, company, location, notes, description" aria-label="Search">
-  <select name="status" aria-label="Status filter">
-    <option value="">Any status</option>
-    {% for s in statuses %}<option value="{{ s }}" {% if filters.get('status') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
-  </select>
-  {% if filters.get('fetched') %}
-  <input type="hidden" name="fetched" value="{{ filters['fetched'] }}">
-  <span class="tag chip">Fetched {{ filters['fetched'] }} <a href="{{ url_for('roles', **without(filters, 'fetched')) }}" aria-label="Remove date filter">&times;</a></span>
-  {% endif %}
+  {{ multi.pick('status', 'Status', status_options, filters.get('status', [])) }}
   <label class="check"><input type="checkbox" name="dup" value="1" {% if filters.get('dup') %}checked{% endif %}> Possible duplicates only</label>
   <button type="submit">Filter</button>
   <a href="{{ url_for('roles') }}">Clear</a>
@@ -30,15 +26,10 @@
   <details class="advanced"{% if advanced_open %} open{% endif %}>
     <summary>Advanced filters{% if advanced_open %} <span class="tag chip">on</span>{% endif %}</summary>
     <div class="advanced-body">
-      <select name="fit" aria-label="Fit filter">
-        <option value="">Any fit</option>
-        <option value="eligible" {% if filters.get('fit') == 'eligible' %}selected{% endif %}>Eligible</option>
-        <option value="excluded" {% if filters.get('fit') == 'excluded' %}selected{% endif %}>Excluded</option>
-      </select>
-      <select name="score" aria-label="Score filter">
-        <option value="">Any score</option>
-        {% for value, label in (('scored', 'Scored only'), ('strong', 'Strong fit'), ('partial', 'Partial fit'), ('weak', 'Weak fit'), ('unscored', 'Unscored')) %}<option value="{{ value }}" {% if filters.get('score') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
-      </select>
+      {{ multi.pick('fit', 'Fit', fit_options, filters.get('fit', [])) }}
+      {{ multi.pick('score', 'Score', score_options, filters.get('score', [])) }}
+      {{ multi.pick('followup', 'Follow-up', follow_options, filters.get('followup', [])) }}
+      {{ multi.pick('fetched', 'Fetched', fetch_options, filters.get('fetched', [])) }}
     </div>
   </details>
 </form>
@@ -61,7 +52,7 @@
 </form>
 
 {% if roles %}
-<table class="roles" data-filter-status="{{ filters.get('status', '') }}">
+<table class="roles" data-filter-status="{{ filters.get('status', []) | join('|') }}">
   <thead>
     <tr>
       <th><input type="checkbox" id="all" aria-label="Select all on this page"></th>
@@ -77,6 +68,7 @@
         <a class="row-link" href="{{ url_for('role_page', portal=r.portal, job_id=r.job_id, next=here) }}">{{ r.title }}</a>
         <span class="rating-mark" title="Your rating">{% if r.fit_rating == 'good' %}&#128077;{% elif r.fit_rating == 'bad' %}&#128078;{% endif %}</span>
         {% if r.actively_hiring %}<span class="tag">Actively hiring</span>{% endif %}
+        <span data-follow-slot>{{ follow_html.tag(r, today) }}</span>
         {% if r.possible_duplicate_of %}<span class="tag warn" title="Same company, title and city as {{ r.possible_duplicate_of }}">Possible duplicate</span>{% endif %}
       </td>
       <td>{{ r.company }}</td>
@@ -84,9 +76,7 @@
       <td class="date">{{ r | posted }}</td>
       <td class="date">{{ r.fetched_on | ist }}</td>
       {% set fit = fits[r.key] %}
-      <td class="fit">
-        {% if fit.eligible %}<span class="muted">Eligible</span>{% else %}<span class="tag out" title="{{ fit.summary }}">{{ fit.label }}</span>{% if fit.more %}<span class="muted" title="{{ fit.summary }}">+{{ fit.more }}</span>{% endif %}{% endif %}
-      </td>
+      <td class="fit">{{ fit_html.cell(fit) }}</td>
       {% set sc = scores.get(r.key) %}
       <td class="nw score">{% if sc %}<span class="band {{ sc.band }}{% if sc.stale %} stale{% endif %}" title="{{ sc.detail }}">{{ sc.final }}</span> <small>{{ sc.band | capitalize }}</small>{% else %}<span class="muted">&ndash;</span>{% endif %}</td>
       <td>
@@ -117,6 +107,7 @@
   <button type="button" id="panel-close" class="plain" aria-label="Close">&times;</button>
   <div id="panel-body"></div>
 </aside>
+<script src="{{ url_for('static', filename='multi.js') }}"></script>
 <script src="{{ url_for('static', filename='panel.js') }}"></script>
 <script src="{{ url_for('static', filename='autosave.js') }}"></script>
 <script>

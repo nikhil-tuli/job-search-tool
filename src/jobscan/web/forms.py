@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields
 from datetime import date, datetime
@@ -19,6 +20,10 @@ from .scores import ScoreView
 
 MAX_CONTACT = 200
 MAX_COMMENTS = 5000
+MAX_PHONE = 30
+MAX_URL = 300
+_EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+_PHONE = re.compile(r"[0-9+()\-\s.]+")
 MAX_PHRASE = 100
 NEW_PHRASE_ROWS = 3
 _CSV_DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
@@ -30,6 +35,25 @@ class RoleEdit:
     applied_on: str | None
     contact_person: str
     comments: str
+    follow_up_needed: bool = False
+    follow_up_on: str | None = None
+    contact_email: str = ""
+    contact_phone: str = ""
+    contact_linkedin: str = ""
+
+
+def linkedin_url(raw: str) -> str | None:
+    """A LinkedIn address as a full https link, or None when it is not one."""
+    text = raw.strip()
+    if not re.match(r"[a-z][a-z0-9+.-]*://", text, re.IGNORECASE):
+        text = "https://" + text
+    parsed = urlparse(text)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in ("http", "https") or not (
+        host == "linkedin.com" or host.endswith(".linkedin.com")
+    ):
+        return None
+    return "https://" + text.split("://", 1)[1]
 
 
 def resolve_applied_on(status: str, applied_on: str | None, today: datetime) -> str | None:
@@ -69,10 +93,42 @@ def parse_role_form(
     if len(comments) > MAX_COMMENTS:
         errors["comments"] = f"At most {MAX_COMMENTS} characters."
 
+    follow_up_on: str | None = None
+    follow_raw = form.get("follow_up_on", "").strip()
+    if follow_raw:
+        try:
+            follow_up_on = date.fromisoformat(follow_raw).isoformat()
+        except ValueError:
+            errors["follow_up_on"] = "Use the format YYYY-MM-DD."
+
+    email = form.get("contact_email", "").strip()
+    if email and (len(email) > MAX_CONTACT or not _EMAIL.fullmatch(email)):
+        errors["contact_email"] = "Enter an email address like name@company.com."
+    phone = form.get("contact_phone", "").strip()
+    if phone and (len(phone) > MAX_PHONE or not _PHONE.fullmatch(phone)):
+        errors["contact_phone"] = "Use digits, spaces and + ( ) - only."
+    linkedin = form.get("contact_linkedin", "").strip()
+    if linkedin:
+        link = linkedin_url(linkedin) if len(linkedin) <= MAX_URL else None
+        if link is None:
+            errors["contact_linkedin"] = "Enter a linkedin.com address."
+        else:
+            linkedin = link
+
     if errors:
         return None, errors
     return (
-        RoleEdit(status, resolve_applied_on(status, applied_on, today), contact, comments),
+        RoleEdit(
+            status,
+            resolve_applied_on(status, applied_on, today),
+            contact,
+            comments,
+            follow_up_needed=form.get("follow_up_needed", "") == "1",
+            follow_up_on=follow_up_on,
+            contact_email=email,
+            contact_phone=phone,
+            contact_linkedin=linkedin,
+        ),
         {},
     )
 
@@ -154,6 +210,11 @@ CSV_HEADER = (
     "Possible Duplicate Of",
     "Fit Score",
     "Fit Band",
+    "Follow-up Needed",
+    "Next Follow-up",
+    "Contact Email",
+    "Contact Phone",
+    "Contact LinkedIn",
 )
 
 
@@ -186,6 +247,11 @@ def roles_to_csv(roles: Iterable[Role], scores: Mapping[str, ScoreView] | None =
                     role.possible_duplicate_of or "",
                     "" if view is None else view.final,
                     "" if view is None else view.band,
+                    "Yes" if role.follow_up_needed else "",
+                    role.follow_up_on or "",
+                    role.contact_email,
+                    role.contact_phone,
+                    role.contact_linkedin,
                 )
             ]
         )

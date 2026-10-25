@@ -141,6 +141,13 @@ class DepthStat:
         return self.matched / self.cards if self.cards else 0.0
 
 
+FOLLOW_UP_DUE = "due"
+FOLLOW_UP_UPCOMING = "upcoming"
+FOLLOW_UP_OVERDUE = "overdue"
+FOLLOW_UP_NO_DATE = "nodate"
+FOLLOW_UP_STATES = (FOLLOW_UP_DUE, FOLLOW_UP_UPCOMING, FOLLOW_UP_OVERDUE, FOLLOW_UP_NO_DATE)
+
+
 @dataclass(frozen=True)
 class Role:
     """A stored role, exactly as it appears in the roles table."""
@@ -170,6 +177,11 @@ class Role:
     industries: str | None = None
     job_function: str | None = None
     fit_rating: str | None = None  # the user's own verdict: "good", "bad" or None
+    follow_up_needed: bool = False
+    follow_up_on: str | None = None  # YYYY-MM-DD, the next follow-up
+    contact_email: str = ""
+    contact_phone: str = ""
+    contact_linkedin: str = ""
 
     @property
     def key(self) -> str:
@@ -180,13 +192,32 @@ class Role:
         """ "good", "bad" or None: only the user's own rating counts."""
         return self.fit_rating
 
+    def follow_up_state(self, today: str) -> str | None:
+        """None when no follow-up is needed, else one of the FOLLOW_UP_STATES."""
+        if not self.follow_up_needed:
+            return None
+        if not self.follow_up_on:
+            return FOLLOW_UP_NO_DATE
+        if self.follow_up_on == today:
+            return FOLLOW_UP_DUE
+        return FOLLOW_UP_UPCOMING if self.follow_up_on > today else FOLLOW_UP_OVERDUE
+
 
 @dataclass(frozen=True)
 class RoleFilter:
+    """What the roles list shows. Several values in one field mean any of them.
+
+    `status` and `fetched_on` are one-value shorthands for `statuses` and `fetched_days`.
+    """
+
     query: str = ""
     status: str | None = None
     duplicates_only: bool = False
     fetched_on: str | None = None  # YYYY-MM-DD, the IST day the role was first fetched
+    statuses: tuple[str, ...] = ()
+    fetched_days: tuple[str, ...] = ()
+    follow_ups: tuple[str, ...] = ()  # FOLLOW_UP_STATES; the role needs a follow-up in one of them
+    today: str = ""  # YYYY-MM-DD for the follow-up states; empty means today in IST
 
 
 @dataclass(frozen=True)

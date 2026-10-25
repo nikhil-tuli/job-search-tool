@@ -240,7 +240,14 @@ def test_score_column_shows_band_and_dash(scored: Harness) -> None:
 
 def test_score_filter(scored: Harness) -> None:
     assert listed(scored.client, "score=unscored") == ["3"]
-    assert sorted(listed(scored.client, "score=scored")) == ["1", "2"]
+    assert sorted(listed(scored.client, "score=strong&score=partial&score=weak")) == ["1", "2"]
+    assert sorted(
+        listed(scored.client, "score=unscored&score=strong&score=partial&score=weak")
+    ) == [
+        "1",
+        "2",
+        "3",
+    ]
     assert len(scored.store.get_scores()) == 2
     both = (
         listed(scored.client, "score=strong")

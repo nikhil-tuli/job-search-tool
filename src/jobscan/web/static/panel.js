@@ -193,6 +193,20 @@
     var select = row.querySelector('select[name=status]');
     if (select) { select.value = data.status; }
     row.querySelector('td.applied').textContent = data.applied_on;
+    if (data.fit) {
+      var fitCell = row.querySelector('td.fit');
+      if (fitCell) { fitCell.innerHTML = data.fit.cell; }
+      var fitDetail = body.querySelector('[data-fit-detail]');
+      if (fitDetail) { fitDetail.innerHTML = data.fit.detail; }
+    }
+    var slot = row.querySelector('[data-follow-slot]');
+    if (slot && data.follow_up !== undefined) { slot.innerHTML = data.follow_up; }
+    if (data.links) {
+      Array.prototype.forEach.call(body.querySelectorAll('[data-contact-link]'), function (a) {
+        var href = data.links[a.getAttribute('data-contact-link')] || '';
+        if (href) { a.setAttribute('href', href); a.hidden = false; } else { a.removeAttribute('href'); a.hidden = true; }
+      });
+    }
     var labelNote = body.querySelector('[data-label-note]');
     if (labelNote && data.note) { labelNote.textContent = data.note; }
     saved = snapshot();
