@@ -8,6 +8,11 @@
     Last successful run:
     {% if last_success %}{{ (last_success.finished_on or last_success.started_on) | ist }} IST{% else %}none yet{% endif %}
   </p>
+  <p class="portal-pick">Portal:
+    <a class="chip-link{% if not portal %} on{% endif %}" href="{{ url_for('summary') }}">All</a>
+    {% for p in portals %}<a class="chip-link{% if portal == p %} on{% endif %}" href="{{ url_for('summary', portal=p) }}">{{ p }}</a>{% endfor %}
+  </p>
+  {% if naukri_reminder %}<p class="notice">{{ naukri_reminder }}</p>{% endif %}
   <p class="muted scan-state">
     {% if latest_run and latest_run.status == 'running' %}
       <strong>Scan running:</strong> {{ latest_run.keywords_done }} of {{ latest_run.keywords_total }} keywords done,
@@ -17,7 +22,8 @@
       Latest scan: #{{ latest_run.id }} {{ latest_run.status }}, {{ latest_run.new_roles }} new roles.
     {% endif %}
     {{ schedule_line }}.
-    Descriptions pending: {{ desc_waiting }} (roles from the last {{ desc_days }} days).
+    Descriptions pending: {% if naukri_latest %}LinkedIn {{ desc_waiting }}, Naukri {{ naukri_waiting }}{% else %}{{ desc_waiting }}{% endif %} (roles from the last {{ desc_days }} days).
+    {% if naukri_latest and not portal %}Latest Naukri run: #{{ naukri_latest.id }} {{ naukri_latest.status }}, {{ naukri_latest.new_roles }} new roles.{% endif %}
   </p>
 </div>
 
@@ -27,20 +33,20 @@
   <thead>
     <tr>
       <th>Fetched on</th><th class="num">Fetched</th><th>Scan</th><th class="num">Took</th>
-      {% for s in workflow %}<th class="num">{{ s }}</th>{% endfor %}
+      {% for s in workflow %}<th class="num" title="{{ s }}">{{ s }}</th>{% endfor %}
     </tr>
   </thead>
   <tbody>
   {% for d in days %}
     <tr {% if not d.total %}class="quiet"{% endif %}>
       <td class="nw">{{ d.day }} <span class="muted">{{ d.day | weekday }}</span></td>
-      <td class="num">{% if d.total %}<a href="{{ url_for('roles', fetched=d.day) }}">{{ d.total }}</a>{% else %}<span class="muted">0</span>{% endif %}</td>
+      <td class="num">{% if d.total %}<a href="{{ url_for('roles', fetched=d.day, portal=portal or None) }}">{{ d.total }}</a>{% else %}<span class="muted">0</span>{% endif %}</td>
       {% set scan = scans.get(d.day) %}
       <td>{% if scan %}<span class="status {{ scan.status }}">{{ scan.status }}</span>{% else %}<span class="muted">&ndash;</span>{% endif %}</td>
       <td class="num nw">{% if scan %}{{ scan.took }}{% else %}<span class="muted">&ndash;</span>{% endif %}</td>
       {% for s in workflow %}
         {% set n = d.by_status[s] %}
-        <td class="num">{% if n %}<a href="{{ url_for('roles', fetched=d.day, status=s) }}">{{ n }}</a>{% else %}<span class="muted">&ndash;</span>{% endif %}</td>
+        <td class="num">{% if n %}<a href="{{ url_for('roles', fetched=d.day, status=s, portal=portal or None) }}">{{ n }}</a>{% else %}<span class="muted">&ndash;</span>{% endif %}</td>
       {% endfor %}
     </tr>
   {% endfor %}
@@ -48,10 +54,10 @@
   <tfoot>
     <tr>
       <th>All days</th>
-      <th class="num"><a href="{{ url_for('roles') }}">{{ grand_total }}</a></th>
+      <th class="num"><a href="{{ url_for('roles', portal=portal or None) }}">{{ grand_total }}</a></th>
       <th></th><th></th>
       {% for s in workflow %}
-        <th class="num">{% if totals[s] %}<a href="{{ url_for('roles', status=s) }}">{{ totals[s] }}</a>{% else %}<span class="muted">&ndash;</span>{% endif %}</th>
+        <th class="num">{% if totals[s] %}<a href="{{ url_for('roles', status=s, portal=portal or None) }}">{{ totals[s] }}</a>{% else %}<span class="muted">&ndash;</span>{% endif %}</th>
       {% endfor %}
     </tr>
   </tfoot>
@@ -65,11 +71,12 @@
 {% if run_rows %}
 <div class="scroll-x">
 <table class="runs">
-  <thead><tr><th>Run</th><th>Started (IST)</th><th>Status</th><th>Keywords</th><th>Pages</th><th>Cards</th><th>Matched</th><th>New</th><th>Dups</th><th>Throttled</th><th>Retries</th><th>Skipped pages</th></tr></thead>
+  <thead><tr><th title="Run number">Run</th><th title="Portal">Portal</th><th title="Started (IST)">Started (IST)</th><th title="Status">Status</th><th title="Keywords done of searched">Keywords</th><th title="Pages fetched">Pages</th><th title="Cards seen">Cards</th><th title="Roles whose title matched a phrase">Matched</th><th title="New roles saved">New</th><th title="Possible duplicates">Dups</th><th title="Throttled responses (or captchas on Naukri)">Throttled</th><th title="Retries">Retries</th><th title="Pages skipped after retries">Skipped pages</th></tr></thead>
   <tbody>
   {% for r in run_rows %}
     <tr {% if selected and selected.id == r.id %}class="sel"{% endif %}>
-      <td><a href="{{ url_for('summary', run=r.id, runs='all' if runs_shown_all else None) ~ '#run-detail' }}">#{{ r.id }}</a></td>
+      <td><a href="{{ url_for('summary', run=r.id, runs='all' if runs_shown_all else None, portal=portal or None) ~ '#run-detail' }}">#{{ r.id }}</a></td>
+      <td>{{ r.portal }}</td>
       <td>{{ r.started_on | ist }}</td>
       <td><span class="status {{ r.status }}">{{ r.status }}</span></td>
       <td>{{ r.keywords_done }}/{{ r.keywords_total }}</td>
@@ -85,9 +92,15 @@
 <p class="empty">No runs yet. Run <code>jobscan scan</code> in a terminal.</p>
 {% endif %}
 
+{% if linkedin_latest or naukri_latest %}
+<p class="muted">Latest runs:
+  {% if linkedin_latest %}<a href="{{ url_for('summary', run=linkedin_latest.id, portal=portal or None) }}#run-detail">LinkedIn #{{ linkedin_latest.id }}</a> ({{ linkedin_latest.status }}){% endif %}
+  {% if naukri_latest %}{% if linkedin_latest %}&middot;{% endif %} <a href="{{ url_for('summary', run=naukri_latest.id, portal=portal or None) }}#run-detail">Naukri #{{ naukri_latest.id }}</a> ({{ naukri_latest.status }}){% endif %}
+</p>
+{% endif %}
 {% if selected %}
 <details id="run-detail" class="run-detail"{% if detail_open %} open{% endif %}>
-<summary>Details of run #{{ selected.id }}</summary>
+<summary>Details of run #{{ selected.id }} ({{ selected.portal }})</summary>
 <p>
   <span class="status {{ selected.status }}">{{ selected.status }}</span>
   started {{ selected.started_on | ist }} IST{% if selected.finished_on %}, finished {{ selected.finished_on | ist }} IST{% endif %}.
@@ -137,11 +150,11 @@
 <p class="muted">Did not match any phrase. Kept briefly for review. Each role appears once, newest first.</p>
 {% if skipped %}
 <table>
-  <thead><tr><th>Title</th><th>Company</th><th>Fetched (IST)</th></tr></thead>
-  <tbody>{% for s in skipped %}<tr><td>{{ s.title }}</td><td>{{ s.company }}</td><td>{{ s.fetched_on | ist }}</td></tr>{% endfor %}</tbody>
+  <thead><tr><th>Title</th><th>Company</th><th>Portal</th><th>Fetched (IST)</th></tr></thead>
+  <tbody>{% for s in skipped %}<tr><td>{{ s.title }}</td><td>{{ s.company }}</td><td>{{ s.portal }}</td><td>{{ s.fetched_on | ist }}</td></tr>{% endfor %}</tbody>
 </table>
 {% if not skipped_all and skipped_total > skipped|length %}
-<p class="muted"><a href="{{ url_for('summary', run=selected.id if selected else None, runs='all' if runs_shown_all else None, skipped='all') }}#skipped">Show more</a> ({{ skipped_total - skipped|length }} not shown; up to 200 are listed)</p>
+<p class="muted"><a href="{{ url_for('summary', run=selected.id if selected else None, runs='all' if runs_shown_all else None, skipped='all', portal=portal or None) }}#skipped">Show more</a> ({{ skipped_total - skipped|length }} not shown; up to 200 are listed)</p>
 {% elif skipped_all and skipped_total > skipped|length %}
 <p class="muted">Showing the newest {{ skipped|length }} of {{ skipped_total }}.</p>
 {% elif skipped_all and skipped_total > 10 %}
@@ -157,7 +170,7 @@
 <p class="muted">
   {% if score_latest %}
   Last scored {{ (score_latest.finished_on or score_latest.started_on) | ist }} IST
-  ({{ score_latest.trigger | trigger }}, <span class="status {{ score_latest.status }}">{{ score_latest.status }}</span>, {{ score_latest | duration }}).
+  ({{ score_latest | trigger_run }}, <span class="status {{ score_latest.status }}">{{ score_latest.status }}</span>, {{ score_latest | duration }}).
   {% else %}Nothing scored yet.{% endif %}
   {% if score_waiting %}{{ score_waiting }} roles waiting: run <code>jobscan score</code> or wait for the next scan.{% else %}No roles waiting.{% endif %}
   Embedding use in the last 24 hours: {{ '{:,}'.format(daily_used) }} of {{ '{:,}'.format(daily_limit) }} texts.
@@ -167,7 +180,7 @@
 <table class="pivot scoring">
   <thead>
     <tr>
-      <th>Run</th><th>Started (IST)</th><th>Trigger</th><th>Status</th><th>Took</th>
+      <th>Run</th><th>Started (IST)</th><th title="What started this scoring run, and for scans, which portal's run">Trigger</th><th>Status</th><th>Took</th>
       <th class="num" data-tip="Roles that had no current score, or an out-of-date one." tabindex="0">Considered</th><th class="num" data-tip="Skipped by the Fit rules, so not scored. Hover a number for the reasons." tabindex="0">Excluded</th><th class="num" data-tip="Passed the rules, but no description has been fetched yet." tabindex="0">No description</th>
       <th class="num" data-tip="Roles that got a score in this run." tabindex="0">Scored</th><th class="num" data-tip="Scored roles in the Strong band." tabindex="0">Strong</th><th class="num" data-tip="Scored roles in the Partial band." tabindex="0">Partial</th><th class="num" data-tip="Scored roles in the Weak band." tabindex="0">Weak</th><th class="num" data-tip="Roles that should have been scored but were not, for example the service stopped or a limit was reached. They are tried again next run." tabindex="0">Not scored</th>
       <th class="num" data-tip="Pieces of text sent to Google in this run. These count against the daily limit." tabindex="0">Texts</th><th class="num" data-tip="Pieces of text whose saved vectors were reused. Nothing was sent, so they cost nothing." tabindex="0">Reused</th><th class="num" data-tip="Calls made to Google. Each carries up to 20 texts." tabindex="0">Requests</th><th class="num" data-tip="Size of the text sent. An asterisk means estimated, because the service did not report it." tabindex="0">Tokens</th><th>Note</th>
@@ -176,7 +189,7 @@
   <tbody>
   {% for r in score_runs %}
     <tr>
-      <td>#{{ r.id }}</td><td class="nw">{{ r.started_on | ist }}</td><td class="nw">{{ r.trigger | trigger }}</td>
+      <td>#{{ r.id }}</td><td class="nw">{{ r.started_on | ist }}</td><td class="nw">{{ r | trigger_run }}</td>
       <td><span class="status {{ r.status }}">{{ r.status }}</span></td><td class="nw">{{ r | duration }}</td>
       <td class="num">{{ r.considered }}</td>
       <td class="num"{% if r.excluded_by_reason %} data-tip="{% for reason, n in r.excluded_by_reason.items() | sort %}{{ n }} {{ reason }}{% if not loop.last %}{{ "\n" }}{% endif %}{% endfor %}" tabindex="0"{% endif %}>{{ r.excluded }}</td>

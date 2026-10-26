@@ -14,6 +14,8 @@ from .models import (
     FOLLOW_UP_NO_DATE,
     FOLLOW_UP_OVERDUE,
     FOLLOW_UP_UPCOMING,
+    PORTAL_LINKEDIN,
+    PORTALS,
     STATUSES,
     Cv,
     DepthStat,
@@ -30,6 +32,7 @@ from .models import (
     ScoringRun,
     SkippedTitle,
 )
+from .tailor_store import TailorStoreMixin
 from .timeutil import is_day, now_ist, to_iso
 
 RUN_RUNNING = "running"
@@ -89,6 +92,7 @@ def _scoring_run(row: sqlite3.Row) -> ScoringRun:
         tokens=row["tokens"],
         tokens_reported=bool(row["tokens_reported"]),
         note=row["note"],
+        source=row["source"],
     )
 
 
@@ -170,10 +174,11 @@ def _run(row: sqlite3.Row) -> RunSummary:
         failed_pages=row["failed_pages"],
         malformed_cards=row["malformed_cards"],
         note=row["note"],
+        portal=row["portal"],
     )
 
 
-class Store:
+class Store(TailorStoreMixin):
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
         self._depth = 0
@@ -328,6 +333,12 @@ class Store:
                     raise StoreError(f"unknown status: {status!r}")
             clauses.append(f"status IN ({', '.join('?' * len(statuses))})")
             params.extend(statuses)
+        if flt.portals:
+            for portal in flt.portals:
+                if portal not in PORTALS:
+                    raise StoreError(f"unknown portal: {portal!r}")
+            clauses.append(f"portal IN ({', '.join('?' * len(flt.portals))})")
+            params.extend(flt.portals)
         if flt.duplicates_only:
             clauses.append("possible_duplicate_of IS NOT NULL")
         days = [*flt.fetched_days, *([flt.fetched_on] if flt.fetched_on else [])]
@@ -384,8 +395,10 @@ class Store:
 
     # ---- job descriptions -----------------------------------------------------------------
 
-    def pending_details(self, since: str, limit: int) -> list[tuple[str, str]]:
-        """(portal, job_id) of roles still without a description, newest first.
+    def pending_details(
+        self, since: str, limit: int, portal: str = PORTAL_LINKEDIN
+    ) -> list[tuple[str, str]]:
+        """(portal, job_id) of one portal's roles still without a description, newest first.
 
         Only roles fetched at or after `since` are considered, and a role that has failed
         MAX_DETAIL_ATTEMPTS times is given up on.
@@ -394,9 +407,9 @@ class Store:
             return []
         rows = self._conn.execute(
             "SELECT portal, job_id FROM roles "
-            "WHERE description IS NULL AND detail_attempts < ? AND fetched_on >= ? "
-            "ORDER BY fetched_on DESC, job_id DESC LIMIT ?",
-            (MAX_DETAIL_ATTEMPTS, since, limit),
+            "WHERE portal = ? AND description IS NULL AND detail_attempts < ? "
+            "AND fetched_on >= ? ORDER BY fetched_on DESC, job_id DESC LIMIT ?",
+            (portal, MAX_DETAIL_ATTEMPTS, since, limit),
         ).fetchall()
         return [(r["portal"], r["job_id"]) for r in rows]
 
@@ -416,6 +429,17 @@ class Store:
                 job_id,
             ),
         )
+
+    def close_if_untouched(self, portal: str, job_id: str) -> bool:
+        """Set a role to Closed when its status is still the default. Returns whether it changed.
+
+        A role you have already moved to another status is never overridden.
+        """
+        cursor = self._conn.execute(
+            "UPDATE roles SET status = 'Closed' WHERE portal = ? AND job_id = ? AND status = ?",
+            (portal, job_id, DEFAULT_STATUS),
+        )
+        return cursor.rowcount == 1
 
     def record_detail_failure(self, portal: str, job_id: str) -> None:
         self._conn.execute(
@@ -437,16 +461,19 @@ class Store:
         ).fetchall()
         return [(row["day"], int(row["n"])) for row in rows]
 
-    def fetch_summary(self) -> list[FetchDay]:
+    def fetch_summary(self, portal: str | None = None) -> list[FetchDay]:
         """Roles per IST fetch day and current status, newest day first.
 
         Days between the first and last fetch with no new roles are included with zeros, so a
-        missed scan is visible. Every status in STATUSES has an entry on every day.
+        missed scan is visible. Every status in STATUSES has an entry on every day. Every portal
+        is counted unless `portal` names one.
         """
         counts: dict[str, dict[str, int]] = {}
+        where, params = ("", []) if portal is None else (" WHERE portal = ?", [portal])
         for row in self._conn.execute(
             "SELECT substr(fetched_on, 1, 10) AS day, status, COUNT(*) AS n "
-            "FROM roles GROUP BY day, status"
+            f"FROM roles{where} GROUP BY day, status",
+            params,
         ):
             counts.setdefault(row["day"], {})[row["status"]] = int(row["n"])
         if not counts:
@@ -474,10 +501,16 @@ class Store:
             (rating, portal, job_id),
         )
 
-    def list_labelled_roles(self) -> list[Role]:
-        """Roles the user has rated good or bad."""
+    def list_labelled_roles(self, portals: Sequence[str] = ()) -> list[Role]:
+        """Roles the user has rated good or bad, from the named portals (all when none named)."""
+        for portal in portals:
+            if portal not in PORTALS:
+                raise StoreError(f"unknown portal: {portal!r}")
+        extra = f" AND portal IN ({', '.join('?' * len(portals))})" if portals else ""
         rows = self._conn.execute(
-            "SELECT * FROM roles WHERE fit_rating IS NOT NULL ORDER BY fetched_on DESC, job_id DESC"
+            f"SELECT * FROM roles WHERE fit_rating IS NOT NULL{extra} "
+            "ORDER BY fetched_on DESC, job_id DESC",
+            list(portals),
         ).fetchall()
         return [_role(r) for r in rows]
 
@@ -565,11 +598,15 @@ class Store:
 
     # ---- runs ---------------------------------------------------------------------------
 
-    def start_run(self, *, window_seconds: int, keywords_total: int) -> int:
+    def start_run(
+        self, *, window_seconds: int, keywords_total: int, portal: str = PORTAL_LINKEDIN
+    ) -> int:
+        if portal not in PORTALS:
+            raise StoreError(f"unknown portal: {portal!r}")
         cursor = self._conn.execute(
-            "INSERT INTO runs (started_on, status, window_seconds, keywords_total) "
-            "VALUES (?, ?, ?, ?)",
-            (to_iso(now_ist()), RUN_RUNNING, window_seconds, keywords_total),
+            "INSERT INTO runs (started_on, status, window_seconds, keywords_total, portal) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (to_iso(now_ist()), RUN_RUNNING, window_seconds, keywords_total, portal),
         )
         assert cursor.lastrowid is not None
         return cursor.lastrowid
@@ -632,19 +669,22 @@ class Store:
         row = self._conn.execute("SELECT * FROM run_summary WHERE id = ?", (run_id,)).fetchone()
         return None if row is None else _run(row)
 
-    def list_runs(self, limit: int = 50) -> list[RunSummary]:
+    def list_runs(self, limit: int = 50, portal: str | None = None) -> list[RunSummary]:
+        """Newest first. Every portal's runs unless `portal` names one."""
+        where, params = ("", []) if portal is None else (" WHERE portal = ?", [portal])
         rows = self._conn.execute(
-            "SELECT * FROM run_summary ORDER BY id DESC LIMIT ?", (limit,)
+            f"SELECT * FROM run_summary{where} ORDER BY id DESC LIMIT ?", [*params, limit]
         ).fetchall()
         return [_run(r) for r in rows]
 
-    def latest_run(self) -> RunSummary | None:
-        runs = self.list_runs(1)
+    def latest_run(self, portal: str = PORTAL_LINKEDIN) -> RunSummary | None:
+        runs = self.list_runs(1, portal)
         return runs[0] if runs else None
 
-    def last_successful_run(self) -> RunSummary | None:
+    def last_successful_run(self, portal: str = PORTAL_LINKEDIN) -> RunSummary | None:
         row = self._conn.execute(
-            "SELECT * FROM run_summary WHERE status = ? ORDER BY id DESC LIMIT 1", (RUN_SUCCESS,)
+            "SELECT * FROM run_summary WHERE status = ? AND portal = ? ORDER BY id DESC LIMIT 1",
+            (RUN_SUCCESS, portal),
         ).fetchone()
         return None if row is None else _run(row)
 
@@ -711,21 +751,24 @@ class Store:
             for r in self._conn.execute(sql, params).fetchall()
         ]
 
-    def recent_skipped(self, since: str, limit: int) -> tuple[list[SkippedTitle], int]:
+    def recent_skipped(
+        self, since: str, limit: int, portal: str | None = None
+    ) -> tuple[list[SkippedTitle], int]:
         """Titles skipped since `since` across all runs, each role once, newest first.
 
         Returns the first `limit` of them and how many there are in all.
         """
+        extra, more = ("", []) if portal is None else (" AND portal = ?", [portal])
         rows = self._conn.execute(
             "SELECT run_id, portal, job_id, title, company, MAX(fetched_on) AS fetched_on "
-            "FROM skipped_titles WHERE fetched_on >= ? GROUP BY portal, job_id "
+            f"FROM skipped_titles WHERE fetched_on >= ?{extra} GROUP BY portal, job_id "
             "ORDER BY fetched_on DESC, id DESC LIMIT ?",
-            (since, limit),
+            [since, *more, limit],
         ).fetchall()
         total = self._conn.execute(
-            "SELECT COUNT(*) FROM (SELECT 1 FROM skipped_titles WHERE fetched_on >= ? "
+            f"SELECT COUNT(*) FROM (SELECT 1 FROM skipped_titles WHERE fetched_on >= ?{extra} "
             "GROUP BY portal, job_id)",
-            (since,),
+            [since, *more],
         ).fetchone()[0]
         titles = [
             SkippedTitle(
@@ -817,10 +860,11 @@ class Store:
 
     # ---- scoring runs -------------------------------------------------------------------------
 
-    def start_scoring_run(self, trigger: str, *, when: str) -> int:
+    def start_scoring_run(self, trigger: str, *, when: str, source: str = "") -> int:
         cursor = self._conn.execute(
-            "INSERT INTO scoring_runs (started_on, trigger, status) VALUES (?, ?, 'running')",
-            (when, trigger),
+            "INSERT INTO scoring_runs (started_on, trigger, status, source) "
+            "VALUES (?, ?, 'running', ?)",
+            (when, trigger, source),
         )
         assert cursor.lastrowid is not None
         return cursor.lastrowid

@@ -272,7 +272,9 @@ class Scorer:
 
     # ---- public -------------------------------------------------------------------------
 
-    def run(self, trigger: str, *, only: Sequence[Role] | None = None) -> ScoringRun:
+    def run(
+        self, trigger: str, *, only: Sequence[Role] | None = None, source: str = ""
+    ) -> ScoringRun:
         """Score what needs scoring: every role without a current score, or just `only`.
 
         Raises ScoringUnavailable when there is no CV. Any other problem ends the run with a
@@ -281,7 +283,9 @@ class Scorer:
         cv = self._store.get_cv()
         if cv is None:
             raise ScoringUnavailable("no CV uploaded yet")
-        self._run_id = self._store.start_scoring_run(trigger, when=to_iso(self._clock()))
+        self._run_id = self._store.start_scoring_run(
+            trigger, when=to_iso(self._clock()), source=source
+        )
         status, note = "failed", "Interrupted"
         try:
             status, note = self._run(cv, only)

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TextIO
 
 from .config import Config, ConfigError
+from .models import PORTAL_LINKEDIN
 from .scoring import ScoreModel
 from .store import RUN_FAILED, RUN_PARTIAL, RUN_RUNNING, RUN_SUCCESS, Store
 from .timeutil import format_display, from_iso, now_ist, to_iso
@@ -198,7 +199,7 @@ def ran_today(store: Store, now_iso: str) -> bool:
     today = now_iso[:10]
     return any(
         run.started_on[:10] == today and run.status in (RUN_SUCCESS, RUN_PARTIAL)
-        for run in store.list_runs(10)
+        for run in store.list_runs(10, PORTAL_LINKEDIN)
     )
 
 

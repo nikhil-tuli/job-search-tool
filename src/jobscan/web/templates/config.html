@@ -2,7 +2,18 @@
 {% block title %}Config{% endblock %}
 {% block content %}
 <h1>Config</h1>
+<p class="portal-pick" id="cfg-pick" hidden>Show:
+  <button type="button" class="chip-link on" data-view="all">All</button>
+  <button type="button" class="chip-link" data-view="Common">Common</button>
+  <button type="button" class="chip-link" data-view="LinkedIn">LinkedIn only</button>
+  <button type="button" class="chip-link" data-view="Naukri">Naukri only</button>
+</p>
 <form method="post" action="{{ url_for('config_save') }}" class="config">
+  {% if errors %}<p class="error">Not saved. Fix: {% for key, message in errors.items() %}{{ key }} ({{ message }}){% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+  {% for section, note, groups in sections %}
+  <details class="cfg-section" data-section="{{ section }}" open>
+    <summary><span class="section-title">{{ section }}</span> <span class="muted">{{ note }}</span></summary>
+  {% if section == "Common" %}
   <h2>Title phrases</h2>
   <p class="muted">A phrase is searched when "Search" is on, and keeps a role when "Match" is on. Clear the text to delete a phrase. Titles matching no phrase are dropped.</p>
   {% if errors.get('phrases') %}<p class="error">{{ errors['phrases'] }}</p>{% endif %}
@@ -20,6 +31,7 @@
     </tbody>
   </table>
 
+  {% endif %}
   {% for group, items in groups %}
   <h2>{{ group }}{% if group in group_info %} <span class="info" tabindex="0" role="note" aria-label="{{ group_info[group] }}">i<span class="tip">{{ group_info[group] }}</span></span>{% endif %}</h2>
   <div class="grid">
@@ -43,6 +55,10 @@
   </div>
   {% endfor %}
 
+  </details>
+  {% endfor %}
+
   <button type="submit">Save configuration</button>
 </form>
+<script src="{{ url_for('static', filename='cfgview.js') }}"></script>
 {% endblock %}

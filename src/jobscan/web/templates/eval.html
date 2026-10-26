@@ -2,9 +2,13 @@
 {% block title %}Eval{% endblock %}
 {% block content %}
 <h1>Eval</h1>
+<p class="portal-pick">Portal:
+  <a class="chip-link{% if not portal %} on{% endif %}" href="{{ url_for('eval_page', portal='all') }}">All</a>
+  {% for p in portals %}<a class="chip-link{% if portal == p %} on{% endif %}" href="{{ url_for('eval_page', portal=p) }}">{{ p }}</a>{% endfor %}
+</p>
 <p class="muted">Does the fit score rank the roles you rated Good above the ones you rated Poor? Only roles you rate yourself in the side panel count. Treat the result as a guide, not proof.</p>
 
-<p>{% if rated_count %}<a href="{{ url_for('eval_export') }}">Export rated roles (CSV)</a> <span class="muted">{{ rated_count }} roles, with your comments, scores and descriptions. No contacts or CV.</span>{% else %}<span class="muted">Rate some roles to export them for analysis.</span>{% endif %}</p>
+<p>{% if rated_count %}<a href="{{ url_for('eval_export', portal=portal or None) }}">Export rated roles (CSV)</a> <span class="muted">{{ rated_count }} roles, with your comments, scores and descriptions. No contacts or CV.</span>{% else %}<span class="muted">Rate some roles to export them for analysis.</span>{% endif %}</p>
 
 <dl class="facts">
   <dt>Roles with a current score</dt><dd>{{ bands.total }} ({{ bands.strong }} Strong, {{ bands.partial }} Partial, {{ bands.weak }} Weak)</dd>
@@ -93,4 +97,5 @@
   {% endfor %}
 </ul>
 {% endif %}
+<script src="{{ url_for('static', filename='multi.js') }}"></script>
 {% endblock %}

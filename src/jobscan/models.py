@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 PORTAL_LINKEDIN = "LinkedIn"
+PORTAL_NAUKRI = "Naukri"
+PORTALS = (PORTAL_LINKEDIN, PORTAL_NAUKRI)
 
 STATUSES: tuple[str, ...] = (
     "Not Applied",
@@ -216,6 +218,7 @@ class RoleFilter:
     fetched_on: str | None = None  # YYYY-MM-DD, the IST day the role was first fetched
     statuses: tuple[str, ...] = ()
     fetched_days: tuple[str, ...] = ()
+    portals: tuple[str, ...] = ()  # PORTALS; empty means every portal
     follow_ups: tuple[str, ...] = ()  # FOLLOW_UP_STATES; the role needs a follow-up in one of them
     today: str = ""  # YYYY-MM-DD for the follow-up states; empty means today in IST
 
@@ -248,6 +251,7 @@ class RunSummary:
     failed_pages: int
     malformed_cards: int
     note: str
+    portal: str = PORTAL_LINKEDIN
 
 
 @dataclass(frozen=True)
@@ -311,3 +315,52 @@ class ScoringRun:
     tokens: int
     tokens_reported: bool
     note: str
+    source: str = ""  # the portal whose run triggered this scoring ("" for older runs)
+
+
+# Tailored resume requests. A request is "active" while it is preparing or waiting for review.
+TAILOR_PREPARING = "preparing"
+TAILOR_REVIEW = "review"
+TAILOR_READY = "ready"
+TAILOR_FAILED = "failed"
+TAILOR_DISCARDED = "discarded"
+TAILOR_STALE = "stale"  # the CV was replaced while this request was waiting
+TAILOR_ACTIVE = (TAILOR_PREPARING, TAILOR_REVIEW)
+TAILOR_STATUSES = (
+    TAILOR_PREPARING,
+    TAILOR_REVIEW,
+    TAILOR_READY,
+    TAILOR_FAILED,
+    TAILOR_DISCARDED,
+    TAILOR_STALE,
+)
+
+
+@dataclass(frozen=True)
+class CvFile:
+    """The uploaded Word file itself, kept so a tailored copy can be made from it."""
+
+    filename: str
+    data: bytes
+    sha: str
+    uploaded_on: str
+
+
+@dataclass(frozen=True)
+class TailorRequest:
+    id: int
+    portal: str
+    job_id: str
+    company: str
+    title: str
+    cv_filename: str
+    status: str
+    created_on: str
+    updated_on: str
+    proposed_count: int
+    applied_count: int
+    output_name: str
+    note: str
+    proposal: str = ""  # JSON, empty in list views
+    applied: str = ""  # JSON list of the change ids that were ticked
+    description: str = ""

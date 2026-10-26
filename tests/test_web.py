@@ -800,7 +800,7 @@ def test_summary_lists_every_status_in_workflow_order(client: FlaskClient, store
     run = store.start_run(window_seconds=86400, keywords_total=1)
     _add_on(store, run, "1", "2026-10-15")
     body = text(client.get("/summary"))
-    headers = re.findall(r'<th class="num">([^<]+)</th>', body)
+    headers = re.findall(r'<th class="num"[^>]*>([^<]+)</th>', body)
     assert headers == ["Fetched", "Took", *STATUSES]
     assert 'href="/summary"' in body
 
@@ -1249,3 +1249,55 @@ def test_the_roles_page_marks_the_fit_cell_for_updates(
     add_role(store, run_id, "1", fetched_on=fresh())
     assert '<td class="fit">' in text(client.get("/roles"))
     assert "data-fit-detail" in text(client.get("/roles/LinkedIn/1?partial=1"))
+
+
+def test_config_page_has_common_linkedin_and_naukri_sections(client: FlaskClient) -> None:
+    body = client.get("/config").get_data(as_text=True)
+    positions = [
+        body.index(f'class="section-title">{n}<') for n in ("Common", "LinkedIn", "Naukri")
+    ]
+    assert positions == sorted(positions)
+    common, linkedin, naukri = (
+        body[positions[0] : positions[1]],
+        body[positions[1] : positions[2]],
+        body[positions[2] :],
+    )
+    for key in ("stop_after_empty_pages", "match_mode", "fit_min_years", "score_weight_keyword"):
+        assert f'name="{key}"' in common
+    for key in ("geo_id", "delay_seconds_min", "schedule_time", "detail_max_per_run"):
+        assert f'name="{key}"' in linkedin
+    assert 'name="naukri_max_pages"' in naukri
+    assert "Title phrases" in common
+
+
+def test_every_setting_is_on_the_config_page_so_a_save_cannot_fail_unseen() -> None:
+    from dataclasses import fields
+
+    from jobscan.config import Config
+    from jobscan.web.app import SETTING_GROUPS
+
+    shown = {key for _, items in SETTING_GROUPS for key, _, _ in items}
+    assert {f.name for f in fields(Config)} <= shown
+
+
+def test_saving_the_page_as_shown_works_and_sticks(client: FlaskClient, store: Store) -> None:
+    import re
+
+    store.replace_phrases([("Technical Program Manager", True, True)])
+    html = client.get("/config").get_data(as_text=True)
+    form = {m[0]: m[1] for m in re.findall(r'<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"', html)}
+    form.update(
+        match_mode="contains",
+        phrase_count="1",
+        phrase_0="Technical Program Manager",
+        keyword_0="1",
+        match_0="1",
+        naukri_max_pages="9",
+    )
+    assert client.post("/config", data=form).status_code == 302
+    assert 'name="naukri_max_pages" value="9"' in client.get("/config").get_data(as_text=True)
+
+
+def test_a_rejected_save_says_what_was_wrong_at_the_top(client: FlaskClient) -> None:
+    body = client.post("/config", data={"phrase_count": "0"}).get_data(as_text=True)
+    assert "Not saved. Fix:" in body

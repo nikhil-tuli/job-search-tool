@@ -52,6 +52,14 @@
 <p class="muted">No description saved yet. It is fetched during a scan, for recent roles only. For roles you rated, run jobscan details.</p>
 {% endif %}
 
+<form method="post" class="tailor-form" action="{{ url_for('tailor_start') }}">
+  <input type="hidden" name="portal" value="{{ role.portal }}">
+  <input type="hidden" name="job_id" value="{{ role.job_id }}">
+  <input type="hidden" name="next" value="{{ next }}">
+  <button type="submit" {% if not can_tailor %}disabled{% endif %}>Tailor resume &rarr;</button>
+  {% if not can_tailor %}<span class="muted">Needs a job description first.</span>{% endif %}
+</form>
+
 <form method="post" class="edit" action="{{ url_for('role_save', portal=role.portal, job_id=role.job_id) }}">
   <input type="hidden" name="next" value="{{ next }}">
   <div class="pair">

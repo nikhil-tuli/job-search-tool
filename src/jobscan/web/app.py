@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import os
 import re
@@ -35,12 +37,19 @@ from ..fit_filters import FitResult, FitRules, evaluate
 from ..matching import MATCH_MODES
 from ..models import (
     FOLLOW_UP_STATES,
+    PORTAL_LINKEDIN,
+    PORTAL_NAUKRI,
+    PORTALS,
     SORTED_STATUSES,
     STATUSES,
+    TAILOR_READY,
+    TAILOR_REVIEW,
     Cv,
+    CvFile,
     Role,
     RoleFilter,
 )
+from ..naukri_run import reminder_text
 from ..scoring import (
     DAILY_WINDOW,
     TRIGGER_ROLE,
@@ -52,6 +61,19 @@ from ..scoring import (
     plan_scoring,
 )
 from ..store import Store, StoreError
+from ..tailor import (
+    START_NEW,
+    START_NO_CV,
+    START_NO_DESCRIPTION,
+    ClientFactory,
+    default_client_factory,
+    discard,
+    generate,
+    start_request,
+    thread_launcher,
+)
+from ..tailor_ai import Proposal, TailorError
+from ..tailor_docx import Converter, DocxError, analyse, libreoffice_pdf
 from ..timeutil import (
     format_display,
     from_iso,
@@ -61,6 +83,7 @@ from ..timeutil import (
     to_iso,
     weekday_short,
 )
+from .diffs import moved_items, word_diff
 from .forms import (
     NEW_PHRASE_ROWS,
     parse_config_form,
@@ -74,6 +97,7 @@ from .scores import ScoreView, score_views
 SKIPPED_PREVIEW = 10  # skipped titles shown until someone asks for more
 PAGE_SIZES = (20, 50, 100)
 DEFAULT_PAGE_SIZE = 20
+EVAL_PORTAL_COOKIE = "jobscan_eval_portal"
 PAGE_SIZE_COOKIE = "jobscan_rows"
 RATING_CHOICES = ("good", "bad", "clear")
 # What the Eval page can add to the Fit filters: (setting, allowed value, how to say it).
@@ -92,6 +116,7 @@ SORT_COLUMNS = {
     "title": ("Title", "asc"),
     "company": ("Company", "asc"),
     "location": ("Location", "asc"),
+    "portal": ("Portal", "asc"),
     "posted": ("Posted (IST)", "desc"),
     "fetched": ("Fetched (IST)", "desc"),
     "fit": ("Fit", "asc"),
@@ -129,6 +154,16 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "Title match mode",
                 "contains: phrase anywhere in the title; exact: whole title",
             ),
+            (
+                "stop_after_empty_pages",
+                "Stop after empty pages",
+                "Consecutive pages with no title match. Used by LinkedIn and Naukri",
+            ),
+        ),
+    ),
+    (
+        "LinkedIn search",
+        (
             ("location_name", "Location", "Search location text, for example India"),
             ("geo_id", "Geo ID", "LinkedIn geography ID (India is 102713980)"),
             (
@@ -138,11 +173,6 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "If widened, raise Fit recency days to match",
             ),
             ("max_pages_per_keyword", "Page cap per keyword", "10 results per page"),
-            (
-                "stop_after_empty_pages",
-                "Stop after empty pages",
-                "Consecutive pages with no title match",
-            ),
         ),
     ),
     (
@@ -168,17 +198,71 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
         ),
     ),
     (
-        "Job descriptions",
+        "LinkedIn job descriptions",
         (
             (
                 "detail_max_per_run",
                 "Descriptions to fetch per scan",
                 "One extra request each. 0 turns description fetching off",
             ),
+        ),
+    ),
+    (
+        "Job descriptions",
+        (
             (
                 "detail_max_age_days",
                 "Only for roles fetched in the last (days)",
-                "Older roles without a description are left alone",
+                "Older roles without a description are left alone. Used by LinkedIn and Naukri",
+            ),
+        ),
+    ),
+    (
+        "Naukri",
+        (
+            (
+                "naukri_location",
+                "Location",
+                "Place name as in a Naukri address, for example india or bengaluru",
+            ),
+            ("naukri_max_pages", "Page cap per keyword", "20 results per page"),
+            ("naukri_delay_seconds_min", "Delay between pages, min (s)", ""),
+            ("naukri_delay_seconds_max", "Delay between pages, max (s)", ""),
+            (
+                "naukri_max_job_pages",
+                "Job pages to open per run",
+                "One visit per role that passes the Fit rules. 0 turns it off",
+            ),
+            (
+                "naukri_max_age_hours",
+                "Only roles posted within (hours)",
+                "Older roles are ignored",
+            ),
+            (
+                "naukri_abort_after_captchas",
+                "Stop after captchas",
+                "The run stops once this many captchas appear in one run",
+            ),
+            (
+                "naukri_captcha_wait_seconds",
+                "Wait for you to solve a captcha (s)",
+                "How long the run waits in the browser window before trying again",
+            ),
+        ),
+    ),
+    (
+        "Tailoring",
+        (
+            (
+                "tailor_base_url",
+                "AI service address",
+                "Any OpenAI-compatible service. Change it to switch provider",
+            ),
+            ("tailor_model", "Model", "Model names change. Update here if one is retired"),
+            (
+                "tailor_key_env",
+                "Key variable name",
+                "Name of the terminal variable holding the key. The key itself is never stored",
             ),
         ),
     ),
@@ -315,6 +399,11 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "Numbers kept per vector (768 of 3072). Changing it re-embeds",
             ),
             (
+                "embed_batch_size",
+                "Texts per request",
+                "How many texts go in one embedding request. 1 to 100",
+            ),
+            (
                 "embed_texts_per_minute",
                 "Texts per minute",
                 "Google counts each text as one request. Free tier shows 100 a minute, kept below",
@@ -332,11 +421,12 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
         ),
     ),
     (
-        "Runs and retention",
-        (
-            ("min_gap_between_runs_minutes", "Minimum gap between runs (min)", "--force overrides"),
-            ("skipped_titles_retention_days", "Keep skipped titles (days)", ""),
-        ),
+        "Retention",
+        (("skipped_titles_retention_days", "Keep skipped titles (days)", ""),),
+    ),
+    (
+        "Run spacing",
+        (("min_gap_between_runs_minutes", "Minimum gap between runs (min)", "--force overrides"),),
     ),
     (
         "Scheduled scan",
@@ -358,6 +448,34 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
             ),
         ),
     ),
+)
+
+
+# Which section of the Config page each group above belongs to, and what each section affects.
+GROUP_SECTION = {
+    "Search": "Common",
+    "Job descriptions": "Common",
+    "Fit filters": "Common",
+    "Tailoring": "Common",
+    "Scoring": "Common",
+    "Embeddings (Gemini)": "Common",
+    "Retention": "Common",
+    "LinkedIn search": "LinkedIn",
+    "Pacing": "LinkedIn",
+    "Throttling": "LinkedIn",
+    "LinkedIn job descriptions": "LinkedIn",
+    "Run spacing": "LinkedIn",
+    "Scheduled scan": "LinkedIn",
+    "Naukri": "Naukri",
+}
+SECTION_NOTES = {
+    "Common": "Used by both LinkedIn and Naukri: title phrases, matching, Fit filters, scoring.",
+    "LinkedIn": "Used only by the LinkedIn scan (jobscan scan, and the daily schedule).",
+    "Naukri": "Used only by the Naukri run (jobscan naukri).",
+}
+CONFIG_SECTIONS = tuple(
+    (name, SECTION_NOTES[name], tuple(g for g in SETTING_GROUPS if GROUP_SECTION[g[0]] == name))
+    for name in SECTION_NOTES
 )
 
 
@@ -402,11 +520,15 @@ def create_app(
     secret_key: str | None = None,
     allowed_hosts: Collection[str] = LOOPBACK_HOSTS,
     make_embedder: Callable[[Config], Embedder] = gemini_from_env,
+    make_tailor_client: ClientFactory = default_client_factory,
+    tailor_convert: Converter = libreoffice_pdf,
 ) -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = secret_key or secrets.token_hex(32)
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES + 512 * 1024  # the file plus form fields
     allowed = frozenset(h.lower() for h in allowed_hosts)
+    store.fail_stale_tailor()
+    launch_tailor = thread_launcher(store, make_tailor_client)
 
     # ---- request guards -------------------------------------------------------------------
 
@@ -459,6 +581,13 @@ def create_app(
         seconds = round((from_iso(run.finished_on) - from_iso(run.started_on)).total_seconds())
         return format_seconds(seconds)
 
+    @app.template_filter("trigger_run")
+    def trigger_run(run: Any) -> str:
+        """What started a scoring run, naming the portal when a scan or run did."""
+        if run.trigger == "scan" and run.source:
+            return "After Naukri run" if run.source == "Naukri" else f"After {run.source} scan"
+        return str(TRIGGER_LABELS.get(run.trigger, run.trigger))
+
     @app.template_filter("trigger")
     def trigger(value: str) -> str:
         return TRIGGER_LABELS.get(value, value)
@@ -500,7 +629,11 @@ def create_app(
 
     @app.context_processor
     def inject() -> dict[str, Any]:
-        return {"statuses": SORTED_STATUSES, "endpoint": request.endpoint}
+        return {
+            "statuses": SORTED_STATUSES,
+            "endpoint": request.endpoint,
+            "tailor_review_count": store.count_tailor_review(),
+        }
 
     # ---- roles ----------------------------------------------------------------------------
 
@@ -515,6 +648,7 @@ def create_app(
         statuses = [s for s in STATUSES if s in args.getlist("status")]
         days = sorted({v for v in args.getlist("fetched") if is_day(v)}, reverse=True)
         follow = [s for s in FOLLOW_UP_STATES if s in args.getlist("followup")]
+        portals = [p for p in PORTALS if p in args.getlist("portal")]
         fit = picked("fit", FIT_CHOICES)
         score = [c for c in SCORE_CHOICES if c in args.getlist("score")]
         sort = args.get("sort", "")
@@ -523,6 +657,7 @@ def create_app(
         flt = RoleFilter(
             query=query,
             statuses=tuple(statuses),
+            portals=tuple(portals),
             duplicates_only=dup,
             fetched_days=tuple(days),
             follow_ups=tuple(follow),
@@ -530,6 +665,7 @@ def create_app(
         )
         shown: dict[str, Any] = {
             "q": query,
+            "portal": portals,
             "status": statuses,
             "dup": "1" if dup else "",
             "fetched": days,
@@ -594,6 +730,8 @@ def create_app(
                 return r.company.casefold() or None
             if sort == "location":
                 return r.location.casefold() or None
+            if sort == "portal":
+                return r.portal.casefold()
             if sort == "posted":
                 return r.posted_on or None
             if sort == "fetched":
@@ -695,6 +833,8 @@ def create_app(
                 advanced_open=any(k in active for k in ("fit", "score", "followup", "fetched")),
                 today=today_iso(),
                 status_options=[(v, v) for v in SORTED_STATUSES],
+                portal_options=[(p, p) for p in PORTALS],
+                naukri_reminder=reminder_text(store),
                 fit_options=(("eligible", "Eligible"), ("excluded", "Excluded")),
                 score_options=(
                     ("strong", "Strong fit"),
@@ -780,6 +920,7 @@ def create_app(
             "score": score_views(store, config, cv, [role]).get(role.key),
             "has_cv": cv is not None,
             "label_note": label_note(role),
+            "can_tailor": bool((role.description or "").strip()),
         }
 
     def score_one(role: Role) -> tuple[str, ScoreView | None]:
@@ -905,23 +1046,36 @@ def create_app(
     # ---- eval -----------------------------------------------------------------------------
 
     @app.get("/eval")
-    def eval_page() -> str:
+    def eval_page() -> Response:
         config, cv = current_config(), store.get_cv()
         phrases = [p.phrase for p in store.list_phrases() if p.use_for_match]
-        report = build_report(load_labelled(store, config, cv), config, phrases)
-        return render_template(
-            "eval.html",
-            report=report,
-            bands=score_bands(store, config, cv),
-            rated_count=len(store.list_labelled_roles()),
-            has_cv=cv is not None,
+        chosen = request.args.get("portal")
+        if chosen is None:  # no choice in the address: use the last one made on this tab
+            chosen = request.cookies.get(EVAL_PORTAL_COOKIE, "")
+        portal = chosen if chosen in PORTALS else ""
+        portals = [portal] if portal else []
+        report = build_report(load_labelled(store, config, cv, portals), config, phrases)
+        response = make_response(
+            render_template(
+                "eval.html",
+                report=report,
+                bands=score_bands(store, config, cv, portals),
+                rated_count=len(store.list_labelled_roles(portals)),
+                has_cv=cv is not None,
+                portal=portal,
+                portals=PORTALS,
+            )
         )
+        if request.args.get("portal") is not None:
+            response.set_cookie(EVAL_PORTAL_COOKIE, portal, max_age=365 * 86400, samesite="Lax")
+        return response
 
     @app.get("/eval/rated.csv")
     def eval_export() -> Response:
         """The rated roles with their scores and descriptions, for working out what to change."""
         config = current_config()
-        items = load_labelled(store, config, store.get_cv())
+        portals = [p for p in PORTALS if p in request.args.getlist("portal")]
+        items = load_labelled(store, config, store.get_cv(), portals)
         body = rated_to_csv(
             items, ScoreModel.from_config(config), FitRules.from_config(config), now_ist()
         )
@@ -984,6 +1138,7 @@ def create_app(
                 cv=cv,
                 words=len(cv.text.split()) if cv else 0,
                 chunks=[text for text, _ in store.get_cv_chunks()],
+                word_ok=store.get_cv_file() is not None,
                 pending=len(pending.selected) if pending else 0,
                 key_set=bool(os.environ.get(API_KEY_ENV)),
                 key_name=API_KEY_ENV,
@@ -1003,23 +1158,45 @@ def create_app(
         if upload is None or not upload.filename:
             return render_cv("Choose a file to upload.", 400)
         name = os.path.basename(upload.filename.replace("\\", "/"))[:200]
+        data = upload.read(MAX_UPLOAD_BYTES + 1)
         try:
-            text = extract_text(name, upload.read(MAX_UPLOAD_BYTES + 1))
+            text = extract_text(name, data)
             chunks = cv_chunks(text)
         except CvError as exc:
             return render_cv(str(exc), 400)
         if not chunks:
             return render_cv("No usable text was found in this file.", 400)
+        when = to_iso(now_ist())
+        word_note = ""
+        word_file: CvFile | None = None
+        if name.lower().endswith(".docx"):
+            try:
+                analyse(data)
+                word_file = CvFile(name, data, hashlib.sha256(data).hexdigest(), when)
+            except DocxError as exc:
+                word_note = f" It cannot be used for tailoring: {exc}"
         existing = store.get_cv()
         if existing is not None and existing.sha == sha_of(text):
-            flash("This is the same CV as before, so nothing changed.", "ok")
+            if word_file is not None:
+                saved = store.get_cv_file()
+                if saved is None or saved.sha != word_file.sha:
+                    store.save_cv_file(word_file)
+                    store.mark_tailor_stale()
+                flash("Word file saved. Resume tailoring is now available.", "ok")
+            else:
+                flash("This is the same CV as before, so nothing changed." + word_note, "ok")
             return redirect(url_for("cv_page"))
-        cv = Cv(filename=name, text=text, sha=sha_of(text), uploaded_on=to_iso(now_ist()))
+        cv = Cv(filename=name, text=text, sha=sha_of(text), uploaded_on=when)
         store.save_cv(cv, chunks)
+        store.mark_tailor_stale()
+        if word_file is not None:
+            store.save_cv_file(word_file)
+        else:
+            store.clear_cv_file()
         waiting = len(plan_scoring(store, current_config(), cv, now_ist()).selected)
         flash(
             f"CV saved as {len(chunks)} chunks. {waiting} roles will be scored at the next scan, "
-            "or run jobscan score in a terminal to do it now.",
+            "or run jobscan score in a terminal to do it now." + word_note,
             "ok",
         )
         return redirect(url_for("cv_page"))
@@ -1041,7 +1218,9 @@ def create_app(
 
     @app.get("/summary")
     def summary() -> str:
-        days = store.fetch_summary()
+        portal = request.args.get("portal", "")
+        portal = portal if portal in PORTALS else ""
+        days = store.fetch_summary(portal or None)
         totals = {status: sum(d.by_status[status] for d in days) for status in STATUSES}
         return render_template(
             "summary.html",
@@ -1049,9 +1228,15 @@ def create_app(
             workflow=STATUSES,
             totals=totals,
             grand_total=sum(d.total for d in days),
-            last_success=store.last_successful_run(),
-            scans=scans_by_day(store.list_runs(200)),
-            latest_run=store.latest_run(),
+            last_success=store.last_successful_run(portal or PORTAL_LINKEDIN),
+            portal=portal,
+            portals=PORTALS,
+            naukri_reminder=reminder_text(store),
+            naukri_latest=store.latest_run(PORTAL_NAUKRI),
+            linkedin_latest=store.latest_run(PORTAL_LINKEDIN),
+            naukri_waiting=waiting_for_description(store, current_config(), PORTAL_NAUKRI),
+            scans=scans_by_day(store.list_runs(200, portal or None)),
+            latest_run=store.latest_run(portal or PORTAL_LINKEDIN),
             elapsed=schedule_module.elapsed_text,
             schedule_line=schedule_module.describe_state(schedule_module.schedule_state()),
             **run_context(),
@@ -1072,7 +1257,9 @@ def create_app(
     def run_context() -> dict[str, Any]:
         """The Scans table (last 10 runs, or all 30) and the details of the selected run."""
         shown_all = request.args.get("runs") == "all"
-        run_rows = store.list_runs(30 if shown_all else 10)
+        asked = request.args.get("portal", "")
+        portal = asked if asked in PORTALS else None
+        run_rows = store.list_runs(30 if shown_all else 10, portal)
         selected = None
         raw = request.args.get("run", "")
         if raw.isdigit():
@@ -1093,7 +1280,9 @@ def create_app(
         every = request.args.get("skipped") == "all"
         retention = current_config().skipped_titles_retention_days
         since = to_iso(now_ist() - timedelta(days=retention))
-        skipped, skipped_total = store.recent_skipped(since, 200 if every else SKIPPED_PREVIEW)
+        skipped, skipped_total = store.recent_skipped(
+            since, 200 if every else SKIPPED_PREVIEW, portal
+        )
         return {
             "skipped": skipped,
             "skipped_total": skipped_total,
@@ -1104,7 +1293,7 @@ def create_app(
             "selected": selected,
             "detail_open": raw.isdigit(),
             "runs_shown_all": shown_all,
-            "more_runs": not shown_all and len(store.list_runs(11)) > 10,
+            "more_runs": not shown_all and len(store.list_runs(11, portal)) > 10,
             **detail,
         }
 
@@ -1120,7 +1309,7 @@ def create_app(
         return (
             render_template(
                 "config.html",
-                groups=SETTING_GROUPS,
+                sections=CONFIG_SECTIONS,
                 group_info=GROUP_INFO,
                 list_settings=LIST_SETTINGS,
                 values=raw,
@@ -1154,6 +1343,109 @@ def create_app(
             return render_config(form.raw, form.phrases, {"phrases": str(exc)}, 400)
         flash("Configuration saved. It applies from the next scan.", "ok")
         return redirect(url_for("config_page"))
+
+    # ---- tailored resumes -----------------------------------------------------------------
+
+    @app.post("/tailor/start")
+    def tailor_start() -> WerkzeugResponse:
+        portal, job_id = request.form.get("portal", ""), request.form.get("job_id", "")
+        result = start_request(store, portal, job_id)
+        if result.kind == START_NO_CV:
+            flash("Upload your CV as a Word (.docx) file to tailor a resume.", "error")
+            return redirect(url_for("cv_page"))
+        if result.kind == START_NO_DESCRIPTION:
+            flash("This role has no description yet, so there is nothing to tailor to.", "error")
+            return redirect(safe_next(request.form.get("next"), url_for("roles")))
+        if result.request_id is None:
+            abort(404, "Role not found")
+        if result.kind == START_NEW:
+            launch_tailor(result.request_id)
+        return redirect(url_for("cv_history", _anchor=f"r{result.request_id}"))
+
+    @app.get("/cv/history")
+    def cv_history() -> str:
+        rows = store.list_tailor_requests()
+        return render_template(
+            "history.html",
+            rows=rows,
+            preparing=any(r.status == "preparing" for r in rows),
+        )
+
+    def tailor_view(request_id: int) -> tuple[Any, Proposal]:
+        row = store.get_tailor_request(request_id)
+        if row is None or not row.proposal:
+            abort(404, "Request not found")
+        return row, Proposal.from_json(row.proposal)
+
+    @app.get("/cv/tailor/<int:request_id>")
+    def tailor_page(request_id: int) -> str | WerkzeugResponse:
+        row, proposal = tailor_view(request_id)
+        if row.status not in (TAILOR_REVIEW, TAILOR_READY):
+            return redirect(url_for("cv_history", _anchor=f"r{request_id}"))
+        applied = set(json.loads(row.applied)) if row.applied else set()
+        views = []
+        for change in proposal.changes:
+            view: dict[str, Any] = dict(change)
+            if change["kind"] in ("summary", "bullet"):
+                before, after = word_diff(change["before"], change["after"])
+                view.update(before_html=before, after_html=after)
+                view["lengths"] = (len(change["before"]), len(change["after"]))
+            elif change["kind"] == "competencies":
+                view["moved"] = moved_items(change["before"], change["after"])
+            view["on"] = change["id"] in applied if row.status == TAILOR_READY else True
+            views.append(view)
+        return render_template(
+            "tailor.html",
+            row=row,
+            proposal=proposal,
+            changes=views,
+            ready=row.status == TAILOR_READY,
+        )
+
+    @app.post("/cv/tailor/<int:request_id>/generate")
+    def tailor_generate(request_id: int) -> WerkzeugResponse:
+        selected = set(request.form.getlist("change"))
+        try:
+            count = generate(store, request_id, selected, tailor_convert)
+        except TailorError as exc:
+            flash(str(exc), "error")
+        else:
+            flash(f"Resume ready with {count} change{'s' if count != 1 else ''}.", "ok")
+        return redirect(url_for("tailor_page", request_id=request_id))
+
+    @app.post("/cv/tailor/<int:request_id>/discard")
+    def tailor_discard(request_id: int) -> WerkzeugResponse:
+        discard(store, request_id)
+        return redirect(url_for("cv_history", _anchor=f"r{request_id}"))
+
+    @app.post("/cv/tailor/<int:request_id>/again")
+    def tailor_again(request_id: int) -> WerkzeugResponse:
+        row = store.get_tailor_request(request_id)
+        if row is None:
+            abort(404, "Request not found")
+        result = start_request(store, row.portal, row.job_id)
+        if result.kind == START_NO_CV:
+            flash("Upload your CV as a Word (.docx) file to tailor a resume.", "error")
+            return redirect(url_for("cv_page"))
+        if result.kind == START_NO_DESCRIPTION:
+            flash("This role has no description yet, so there is nothing to tailor to.", "error")
+            return redirect(url_for("cv_history"))
+        if result.kind == START_NEW and result.request_id is not None:
+            launch_tailor(result.request_id)
+        target = result.request_id or request_id
+        return redirect(url_for("cv_history", _anchor=f"r{target}"))
+
+    @app.get("/cv/tailor/<int:request_id>/download")
+    def tailor_download(request_id: int) -> Response:
+        found = store.get_tailor_output(request_id)
+        if found is None:
+            abort(404, "No file for this request")
+        name, data = found
+        return Response(
+            data,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
 
     return app
 

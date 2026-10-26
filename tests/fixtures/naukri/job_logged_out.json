@@ -1,0 +1,141 @@
+{
+ "loggedIn": false,
+ "jobDetails": {
+  "savedJobFlag": 0,
+  "education": {
+   "degreeCombination": "",
+   "bTechPremium": false,
+   "mbaPremium": false,
+   "premiumProcessed": false,
+   "eduPlaceholderText": "",
+   "ug": [
+    "Any Graduate"
+   ],
+   "pg": [
+    "Any Postgraduate"
+   ],
+   "ppg": [],
+   "label": "",
+   "isSchool": false
+  },
+  "hideApplyButton": false,
+  "applyCount": 155,
+  "groupId": 20302,
+  "roleCategory": "Operations, Maintenance & Support",
+  "mode": "crawled",
+  "tagLabels": [],
+  "jobRole": "Production Manager / Supervisor",
+  "companyFollowFlowMetaData": {
+   "companyFollowFlow": false
+  },
+  "isTopGroup": 1,
+  "wfhType": "0",
+  "jobIconType": "",
+  "shortDescription": "Direct impact on product quality and customer experience through your improvement initiatives .",
+  "consent": false,
+  "jobId": "051026504407",
+  "showEducationAsPlaceholder": false,
+  "companyId": 1138730,
+  "brandingTags": [],
+  "functionalArea": "Production, Manufacturing & Engineering",
+  "fatFooter": {},
+  "experienceText": "7-11 Yrs",
+  "referenceCode": "",
+  "vacancy": 1,
+  "template": "",
+  "applyRedirectUrl": "https://careers.se.com/jobs/136441?lang=en-us&previousLocale=en-US",
+  "locationGids": [
+   "65"
+  ],
+  "description": "<div> Join us as a Senior Quality Continuous Improvement Engineer and lead initiatives that transform how we deliver excellence. You'll drive process improvements, resolve quality challenges, and coach teams to embed continuous improvement into everything we do. </div> <br /> <br /> <b> Responsibilities </b> <br /> <ul> <li> Lead cross-functional improvement projects that enhance quality, efficiency, and customer satisfaction </li> <li> Perform root cause analysis to solve complex quality issues and prevent recurrence </li> <li> Coach and guide team members on continuous improvement methodologies and best practices </li> <li> Collaborate with stakeholders to align improvement priorities and deliver measurable results </li> </ul> <br /> <br /> <b> Key Skills </b> <br /> <ul> <li> Analytical Thinking </li> <li> Statistical Analysis </li> <li> Collaboration </li> <li> Continuous Improvement </li> <li> Root Cause Analysis </li> <li> Stakeholder Management </li> <li> Problem Solving </li> <li> Coaching </li> <li> Influencing </li> </ul> <br /> <br /> <b> Qualifications </b> <br /> <ul> <li> Strong coaching ability to develop others and build continuous improvement capability across teams </li> <li> Comfort working independently with minimal oversight while adhering to quality and compliance standards </li> <li> Influencing skills to gain buy-in and drive change across diverse stakeholder groups </li> <li> Practical mindset focused on delivering measurable results that impact customer satisfaction </li> </ul> <br /> <br /> <b> What's in it for me </b> <br /> <ul> <li> Direct impact on product quality and customer experience through your improvement initiatives </li> <li> Opportunity to mentor others while growing your technical and leadership expertise </li> <li> Collaborative culture that encourages innovation and values continuous learning </li> <li> High visibility as you lead projects that shape organizational success </li> <li> Bring your quality expertise to a team that's ready to support your growth. </li> </ul><br><br>Disclaimer: This job posting has been aggregated from external source. Role details, content, and availability are subject to change. Applicants are advised to confirm the latest information directly on the company website before applying.",
+  "staticCompanyName": "schneider-electric-jobs-careers-18252",
+  "industry": "Electrical Equipment",
+  "staticUrl": "https://www.naukri.com/job-listings-sr-manager-tpm-schneider-electric-india-pvt-ltd-vadodara-7-to-11-years-051026504407",
+  "title": "Sr Manager - TPM",
+  "walkIn": false,
+  "maximumExperience": 11,
+  "viewCount": 755,
+  "jobType": "fulltime",
+  "companyPageUrl": "schneider-electric-overview-20302",
+  "minimumExperience": 7,
+  "employmentType": "Full Time, Permanent",
+  "microsite": false,
+  "jobAgentEligible": false,
+  "createdDate": "2026-10-05 18:50:11",
+  "consultant": false,
+  "showRecruiterDetail": false,
+  "locations": [
+   {
+    "localities": [],
+    "label": "Vadodara",
+    "url": "https://www.naukri.com/jobs-in-vadodara-baroda"
+   }
+  ],
+  "companyApplyUrl": "https://www.naukri.com/cloudgateway-apply/apply-services/v0/apply/saveCompanyApply?id=&file=051026504407&logstr=jdrestapi",
+  "keySkills": {
+   "other": [
+    {
+     "clickable": "automation",
+     "label": "automation"
+    },
+    {
+     "clickable": "data analysis",
+     "label": "data analysis"
+    },
+    {
+     "clickable": "customer satisfaction",
+     "label": "customer satisfaction"
+    },
+    {
+     "clickable": "product quality",
+     "label": "product quality"
+    },
+    {
+     "clickable": "stakeholder management",
+     "label": "stakeholder management"
+    },
+    {
+     "clickable": "compliance",
+     "label": "compliance"
+    },
+    {
+     "clickable": "statistical analysis",
+     "label": "statistical analysis"
+    },
+    {
+     "clickable": "",
+     "label": "cybersecurity"
+    },
+    {
+     "clickable": "quality tools",
+     "label": "quality tools"
+    },
+    {
+     "clickable": "root cause analysis",
+     "label": "root cause analysis"
+    },
+    {
+     "clickable": "customer experience",
+     "label": "customer experience"
+    }
+   ],
+   "preferred": []
+  },
+  "salaryDetail": {
+   "minimumSalary": 0,
+   "maximumSalary": 0,
+   "currency": "INR",
+   "hideSalary": true,
+   "variablePercentage": 0.0,
+   "label": "Not Disclosed",
+   "salaryText": "Not Disclosed",
+   "minSalaryPerMonth": 0,
+   "maxSalaryPerMonth": 0,
+   "originalMaxSalary": 0,
+   "originalMinSalary": 0,
+   "salaryBreakup": "",
+   "ctcBreakup": ""
+  },
+  "board": "1"
+ }
+}

@@ -396,6 +396,72 @@ def _migration_9(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE roles ADD COLUMN contact_linkedin TEXT NOT NULL DEFAULT ''")
 
 
+def _migration_10(conn: sqlite3.Connection) -> None:
+    """Which portal a run belongs to, and which portal's run triggered a scoring run."""
+    conn.execute("ALTER TABLE runs ADD COLUMN portal TEXT NOT NULL DEFAULT 'LinkedIn'")
+    conn.execute("ALTER TABLE scoring_runs ADD COLUMN source TEXT NOT NULL DEFAULT ''")
+    conn.execute("DROP VIEW run_summary")
+    conn.execute(
+        """
+        CREATE VIEW run_summary AS
+        SELECT r.id, r.started_on, r.finished_on, r.status, r.window_seconds,
+               r.keywords_total, r.note, r.portal,
+               COALESCE(SUM(k.completed), 0) AS keywords_done,
+               COALESCE(SUM(k.pages), 0) AS pages,
+               COALESCE(SUM(k.cards), 0) AS cards_seen,
+               COALESCE(SUM(k.matched), 0) AS matched,
+               COALESCE(SUM(k.new_roles), 0) AS new_roles,
+               COALESCE(SUM(k.possible_dups), 0) AS possible_dups,
+               COALESCE(SUM(k.throttled), 0) AS throttled,
+               COALESCE(SUM(k.retries), 0) AS retries,
+               COALESCE(SUM(k.failed_pages), 0) AS failed_pages,
+               COALESCE(SUM(k.malformed), 0) AS malformed_cards
+        FROM runs r LEFT JOIN run_keywords k ON k.run_id = r.id
+        GROUP BY r.id
+        """
+    )
+
+
+def _migration_11(conn: sqlite3.Connection) -> None:
+    """The uploaded Word CV itself, and the tailored resume requests made from it."""
+    conn.execute(
+        """
+        CREATE TABLE cv_files (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            filename TEXT NOT NULL,
+            data BLOB NOT NULL,
+            sha TEXT NOT NULL,
+            uploaded_on TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE tailor_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            portal TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            company TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            cv_filename TEXT NOT NULL,
+            cv_sha TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_on TEXT NOT NULL,
+            updated_on TEXT NOT NULL,
+            proposal TEXT NOT NULL DEFAULT '',
+            applied TEXT NOT NULL DEFAULT '',
+            proposed_count INTEGER NOT NULL DEFAULT 0,
+            applied_count INTEGER NOT NULL DEFAULT 0,
+            output_name TEXT NOT NULL DEFAULT '',
+            output BLOB,
+            note TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.execute("CREATE INDEX idx_tailor_role ON tailor_requests (portal, job_id, status)")
+
+
 # Append new migrations to the end; never edit one that has shipped.
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_1,
@@ -407,6 +473,8 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_7,
     _migration_8,
     _migration_9,
+    _migration_10,
+    _migration_11,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 

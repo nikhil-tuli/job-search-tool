@@ -8,6 +8,7 @@ import random
 import sys
 import time
 from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager
 from datetime import timedelta
 from pathlib import Path
 from typing import TextIO
@@ -22,7 +23,9 @@ from .embeddings import Embedder
 from .evaluation import build_report, load_labelled, roles_to_score
 from .fit_filters import listed_salary, rupee_text
 from .lock import AlreadyRunningError, RunLock
-from .models import STATUSES, Role, RoleFilter
+from .models import PORTAL_LINKEDIN, PORTAL_NAUKRI, STATUSES, Role, RoleFilter
+from .naukri_browser import BrowserUnavailable
+from .naukri_run import NaukriRunner, NaukriSource, reminder_text
 from .report import Reporter, eval_summary, log_name, phrase_lines, scoring_summary
 from .scanner import Scanner, ScanSetupError
 from .scoring import (
@@ -63,6 +66,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     scan = sub.add_parser("scan", help="fetch new roles from LinkedIn")
     scan.add_argument("--force", action="store_true", help="ignore the minimum gap between runs")
+
+    sub.add_parser(
+        "naukri",
+        help="fetch new roles from Naukri in a visible browser window (you solve any captcha)",
+    )
+
+    sub.add_parser(
+        "naukri-details",
+        help="fetch missing Naukri job descriptions in a visible browser window",
+    )
 
     serve = sub.add_parser("serve", help="start the local web app")
     serve.add_argument("--host", default="127.0.0.1")
@@ -117,6 +130,16 @@ def cmd_status(store: Store, out: TextIO) -> int:
                 f"{scheduling.elapsed_text(latest.started_on)}",
                 file=out,
             )
+    naukri_latest = store.latest_run(PORTAL_NAUKRI)
+    if naukri_latest:
+        print(
+            f"Naukri latest run: #{naukri_latest.id} {naukri_latest.status} at "
+            f"{format_display(naukri_latest.started_on)} IST",
+            file=out,
+        )
+    reminder = reminder_text(store)
+    if reminder:
+        print(reminder, file=out)
     print(scheduling.describe_state(scheduling.schedule_state()), file=out)
     print(f"Roles: {store.count_roles()}", file=out)
     try:
@@ -155,6 +178,7 @@ def run_scoring(
     make_embedder: EmbedderFactory,
     sleep: Callable[[float], None],
     only: Sequence[Role] | None = None,
+    source: str = "",
 ) -> bool:
     """Score pending roles (or just `only`) and print the summary.
 
@@ -163,7 +187,7 @@ def run_scoring(
     store.fail_stale_scoring_runs(when=to_iso(now_ist()))
     scorer = Scorer(store=store, config=config, make_embedder=make_embedder, emit=emit, sleep=sleep)
     try:
-        run = scorer.run(trigger, only=only)
+        run = scorer.run(trigger, only=only, source=source)
     except ScoringUnavailable:
         emit("Scoring skipped: no CV uploaded. Upload one on the CV page of the app.")
         return False
@@ -179,13 +203,14 @@ def score_after_scan(
     emit: Callable[[str], None],
     make_embedder: EmbedderFactory,
     sleep: Callable[[float], None],
+    source: str = PORTAL_LINKEDIN,
 ) -> bool:
     """Score new roles at the end of a scan. A scoring problem never changes the scan's result.
 
     Returns True when the user interrupted scoring.
     """
     try:
-        run_scoring(store, config, TRIGGER_SCAN, emit, make_embedder, sleep)
+        run_scoring(store, config, TRIGGER_SCAN, emit, make_embedder, sleep, source=source)
     except KeyboardInterrupt:
         return True
     except Exception as exc:  # the scan already succeeded; report the bug and keep that result
@@ -456,6 +481,149 @@ def cmd_scan(
         reporter.close()
 
 
+NaukriSourceFactory = Callable[
+    [Config, Callable[[str], None]], AbstractContextManager[NaukriSource]
+]
+
+
+def default_naukri_source(
+    config: Config, emit: Callable[[str], None]
+) -> AbstractContextManager[NaukriSource]:
+    from .naukri_browser import BrowserSource
+
+    return BrowserSource(config.naukri_location, emit, max_age_hours=config.naukri_max_age_hours)
+
+
+def cmd_naukri(
+    store: Store,
+    db_path: Path,
+    *,
+    out: TextIO,
+    open_source: NaukriSourceFactory,
+    make_embedder: EmbedderFactory,
+    sleep: Callable[[float], None],
+    rng: random.Random | None,
+) -> int:
+    config = load_config(store, out, "nothing was fetched")
+    if config is None:
+        return EXIT_USAGE
+    stale = store.fail_stale_runs()
+    if stale:
+        print(f"Marked {stale} unfinished earlier run(s) as failed", file=out)
+    reporter = Reporter(out, db_path.parent / "runs" / log_name(to_iso(now_ist())))
+    try:
+        last_ok = store.last_successful_run(PORTAL_NAUKRI)
+        reporter.line(
+            "Naukri last successful run: "
+            + (
+                f"{format_display(last_ok.finished_on or last_ok.started_on)} IST"
+                if last_ok
+                else "none"
+            )
+        )
+        reporter.line(
+            f"A private browser window opens now. Solve any captcha there. Roles posted in the "
+            f"last {config.naukri_max_age_hours} hours, up to {config.naukri_max_pages} pages "
+            "per keyword."
+        )
+        try:
+            with open_source(config, reporter.line) as source:
+                runner = NaukriRunner(
+                    store=store,
+                    source=source,
+                    config=config,
+                    emit=reporter.line,
+                    sleep=sleep,
+                    rng=rng,
+                )
+                result = runner.run()
+        except BrowserUnavailable as exc:
+            reporter.line(str(exc))
+            return EXIT_USAGE
+        except ScanSetupError as exc:
+            reporter.line(f"Cannot start: {exc}")
+            return EXIT_USAGE
+        except KeyboardInterrupt:
+            reporter.line("Interrupted. Run marked failed; roles already saved are kept.")
+            return EXIT_INTERRUPTED
+        summary = store.get_run(result.run_id)
+        assert summary is not None
+        reporter.line(
+            f"Run #{result.run_id} {result.status}: {summary.pages} pages, "
+            f"{summary.cards_seen} cards, {summary.matched} matched, {summary.new_roles} new, "
+            f"{summary.possible_dups} possible duplicates"
+        )
+        if result.note:
+            reporter.line(f"Note: {result.note}")
+        if config.score_after_scan and score_after_scan(
+            store, config, reporter.line, make_embedder, sleep, source=PORTAL_NAUKRI
+        ):
+            return EXIT_INTERRUPTED
+        return {RUN_SUCCESS: EXIT_OK, RUN_PARTIAL: EXIT_PARTIAL, RUN_FAILED: EXIT_FAILED}[
+            result.status
+        ]
+    finally:
+        reporter.close()
+
+
+def cmd_naukri_details(
+    store: Store,
+    db_path: Path,
+    *,
+    out: TextIO,
+    open_source: NaukriSourceFactory,
+    make_embedder: EmbedderFactory,
+    sleep: Callable[[float], None],
+    rng: random.Random | None,
+) -> int:
+    config = load_config(store, out, "nothing was fetched")
+    if config is None:
+        return EXIT_USAGE
+    stale = store.fail_stale_runs()
+    if stale:
+        print(f"Marked {stale} unfinished earlier run(s) as failed", file=out)
+    reporter = Reporter(out, db_path.parent / "runs" / log_name(to_iso(now_ist())))
+    try:
+        since = to_iso(now_ist() - timedelta(days=config.detail_max_age_days))
+        waiting = len(store.pending_details(since, 1_000_000, PORTAL_NAUKRI))
+        if not waiting or config.naukri_max_job_pages <= 0:
+            reporter.line("Naukri descriptions: nothing to fetch")
+            return EXIT_OK
+        reporter.line(
+            f"{waiting} Naukri role(s) lack a description. A private browser window opens now; "
+            "solve any captcha there. Only roles that pass the Fit filters are opened, up to "
+            f"{config.naukri_max_job_pages}."
+        )
+        try:
+            with open_source(config, reporter.line) as source:
+                runner = NaukriRunner(
+                    store=store,
+                    source=source,
+                    config=config,
+                    emit=reporter.line,
+                    sleep=sleep,
+                    rng=rng,
+                )
+                read, _closed, _failed = runner.read_pending()
+        except BrowserUnavailable as exc:
+            reporter.line(str(exc))
+            return EXIT_USAGE
+        except KeyboardInterrupt:
+            reporter.line("Interrupted. Descriptions already saved are kept.")
+            return EXIT_INTERRUPTED
+        if (
+            read
+            and config.score_after_scan
+            and score_after_scan(
+                store, config, reporter.line, make_embedder, sleep, source=PORTAL_NAUKRI
+            )
+        ):
+            return EXIT_INTERRUPTED
+        return EXIT_OK
+    finally:
+        reporter.close()
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -465,6 +633,7 @@ def main(
     make_embedder: EmbedderFactory = gemini_from_env,
     sleep: Callable[[float], None] = time.sleep,
     rng: random.Random | None = None,
+    open_source: NaukriSourceFactory = default_naukri_source,
 ) -> int:
     stream = out or sys.stdout
     args = build_parser().parse_args(argv)
@@ -509,6 +678,26 @@ def main(
                         db_path,
                         out=stream,
                         detail_fetcher=detail_fetcher,
+                        sleep=sleep,
+                        rng=rng,
+                    )
+                if args.command == "naukri":
+                    return cmd_naukri(
+                        store,
+                        db_path,
+                        out=stream,
+                        open_source=open_source,
+                        make_embedder=make_embedder,
+                        sleep=sleep,
+                        rng=rng,
+                    )
+                if args.command == "naukri-details":
+                    return cmd_naukri_details(
+                        store,
+                        db_path,
+                        out=stream,
+                        open_source=open_source,
+                        make_embedder=make_embedder,
                         sleep=sleep,
                         rng=rng,
                     )

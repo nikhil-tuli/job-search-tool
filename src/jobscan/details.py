@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 from .client import DetailFetcher, DetailOutcome
 from .config import Config
+from .models import PORTAL_LINKEDIN
 from .store import Store
 from .timeutil import now_ist, to_iso
 
@@ -79,6 +80,6 @@ def recent_since(config: Config) -> str:
     return to_iso(now_ist() - timedelta(days=config.detail_max_age_days))
 
 
-def waiting_for_description(store: Store, config: Config) -> int:
-    """Recent roles still without a description, not counting ones given up on."""
-    return len(store.pending_details(recent_since(config), 1_000_000))
+def waiting_for_description(store: Store, config: Config, portal: str = PORTAL_LINKEDIN) -> int:
+    """One portal's recent roles still without a description, not counting ones given up on."""
+    return len(store.pending_details(recent_since(config), 1_000_000, portal))

@@ -410,3 +410,170 @@ This reverses the earlier "no schedule" goal, so it stays off until switched on.
 - Follow-up filter values: Due, Upcoming, Overdue, No date set.
 - When Due, Upcoming or Overdue is ticked, the list sorts by the earliest follow-up date.
 - Paging, sorting, Export CSV and the Summary page links keep working with several values.
+
+## Round 7: Naukri semi-automatic run (built; the live browser part is not yet tested against Naukri)
+
+### How it gets the data
+- Naukri has no public API. Its own search and job calls (`jobapi/v3/search`, `jobapi/v4/job/<id>`) refuse plain requests: a direct call returns "recaptcha required" (HTTP 406), and from the address bar a 400 asking for App Id and SystemId headers.
+- So the run uses a real, visible Chrome window. It loads Naukri pages the way you would, and reads the JSON that the page itself receives from those calls. It does not call the API directly and it reads no page layout.
+- It never solves or avoids a captcha. If one appears, the run pauses and waits while you solve it in the window, then carries on.
+- The session is logged out. Every run opens a fresh private window (like an incognito window): no sign-in, no saved cookies, nothing kept afterwards. It is separate from your normal Chrome.
+- The browser package is an optional install. LinkedIn-only use is unchanged.
+
+### When it runs
+- Manual only, with `jobscan naukri`. No daily schedule, because it needs the visible window and you at the Mac.
+- Reminder: when the last Naukri run is more than 2 days old, a line shows at the top of the Roles page and in `jobscan status`, for example "Naukri last run: 3 days ago. Run jobscan naukri." Nothing shows otherwise. It is passive: no notification or email.
+- First run covers the last 24 hours only.
+
+### What it does
+1. Searches Naukri for India with the existing title-phrase keywords, one results page at a time. It moves to the next page by opening that page's own address (the same as clicking Next), with a delay between pages.
+2. Keeps roles posted in the run window and applies the existing title rules and Fit filters.
+3. For roles that pass, opens the job's own page to read the full description. The search list gives only a short snippet for most roles when logged out.
+4. Saves each role with Portal = Naukri, keyed by Naukri job ID, so a role is never saved twice.
+5. Marks a role Closed when its job page says it is closed or expired.
+6. Scoring then runs as it does after a LinkedIn scan.
+
+### Data kept per role
+- From the search list: job ID, title, company, link, location, experience range, salary (when shown), posted time, skills.
+- From the job page: full description, exact posted time, industry, job role, functional area, employment type.
+- Salary is shown on only about 15 to 20 percent of roles. Roles without it stay in, as for LinkedIn.
+- Experience range (minimum and maximum years) is saved as numbers. This allows a maximum-years Fit rule later, which is not part of this round.
+- Company rating and review count, vacancies, and apply and view counts are not stored in this round.
+
+### Duplicates
+- A Naukri role with the same company, title and city as an existing role from either portal is flagged "Possible duplicate". Nothing is hidden.
+
+### Limits and failures
+- Pages per run are capped (default 5). A job-page visit is also paced.
+- The run stops after repeated captchas, or when the page data is not in the expected shape. It then fails with a clear message and saves nothing from the broken page.
+- "tpm" also matches unrelated roles (for example Total Productive Maintenance). The existing title phrases and Fit rules filter these out, so many roles will be skipped.
+
+### Changes by tab
+- **Roles:** a Portal column, with the first three columns narrowed so there is no horizontal scroll. A Portal tick-box filter sits before the search box. Existing LinkedIn data is not affected, since roles are already keyed by portal and job ID.
+- **Summary:**
+  - The first two tables get a Portal selector (All, LinkedIn, Naukri) in place of extra columns, to avoid horizontal scroll.
+  - Column headings wrap after a set length and show the full name on hover.
+  - The latest run for each portal is shown side by side. Older runs stay under "show more".
+  - The Skipped titles table gets a Portal column.
+- **Scoring:** the Trigger column says what started the scoring, for example "After LinkedIn scan" or "After Naukri run". Naukri roles share the same daily embedding quota.
+- **Config:** a Naukri section with pages per run, delay between pages, location (default India), the cap on job-page visits, the maximum age of roles to fetch, and the number of captchas before stopping. Keywords reuse the current title phrases. Fit filters and Scoring stay shared.
+- **Eval:** stays combined, with a Portal filter.
+
+### Built notes
+- Start with `pip install playwright` (the `jobscan[naukri]` extra only works after `pip install -e .` is re-run). It drives the Chrome already on the Mac, so there is no separate browser download.
+- Run with `jobscan naukri`. `jobscan status` shows the latest Naukri run and the reminder.
+- Experience and salary from Naukri are written as two plain lines at the top of the saved description, so the existing Fit rules (minimum years, minimum salary) read them.
+- A list description of 1,500 characters or more is taken as the full text and saves a job-page visit. Shorter ones are treated as snippets.
+- The page-data check: if a search reply does not have the expected shape, the run stops as "Naukri data layout changed" and saves nothing from it.
+- Closed detection only trusts clear signals (page not found, or an "expired" notice in the data). Naukri's real closed-job reply has not been seen yet, so it may need adjusting.
+- Scoring after a Naukri run is labelled "After Naukri run". Older scoring runs keep "After a scan".
+- Descriptions pending, the Roles header's last successful run, the minimum gap between runs and the daily schedule still refer to LinkedIn only.
+
+### Still to check on the real site
+- That a fresh private window gets Naukri's search data without a captcha on every page.
+- That the next-page addresses (`<keyword>-jobs-in-<place>-2`) work as built.
+- That the in-page fallback request, which sends the same app id header the site uses, is accepted if the page does not load the data itself.
+- Compare the same search logged in and logged out (first 20 job IDs, description length) to confirm logged out loses nothing that matters.
+
+## Round 8: Config sections and Naukri paging
+
+### Config page (built)
+- Three sections: **Common**, **LinkedIn**, **Naukri**. Every setting is in exactly one. A setting used by both portals is in Common, so no extra label is needed.
+- **Common:** title phrases, title match mode, stop after empty pages, descriptions window (days), Fit filters, Scoring, Embeddings, keep skipped titles (days).
+- **LinkedIn:** location, geo ID, posted within, page cap, pacing, throttling, descriptions per scan, minimum gap between runs, scheduled scan.
+- **Naukri:** the Naukri settings from Round 7.
+
+### Naukri paging (built; needs a live check)
+- Page 1 is opened in the window. Pages 2 and on are asked for through the same search call the page made, with only the page number changed. The next-page address did not give different results.
+- If a page returns only roles already seen on the page before, that keyword stops, the run is marked Partial, and a line says so.
+
+### Sort by date (built; needs a live check)
+- Searches use Naukri's own `sort=f` (Freshness, newest first) and `jobAge=<days>`, taken from the address and request URLs you sent.
+- `jobAge` counts whole days, so the "Only roles posted within (hours)" setting is rounded up to days for Naukri (24 hours is 1 day, 25 to 48 is 2). The exact hour limit is still applied to each role.
+- No new setting.
+
+### `jobscan naukri-details` (built)
+- Opens the same private browser window as `jobscan naukri` but does no searching. It opens job pages only for Naukri roles that lack a description, were fetched within the descriptions window, and pass the Fit filters, up to "Job pages to open per run".
+- `jobscan naukri` still reads job pages at the end of its run. The new command catches up on what was left over.
+- It does not create a run entry, so it does not reset the "Naukri last run" reminder. Progress is printed and kept in the run log file. New descriptions are scored afterwards.
+- With nothing missing it says so and opens no window. No new settings.
+
+### Portal pickers on Eval and Config (built)
+- **Eval:** the Portal tick-box filter is replaced by the same pills as Summary (All, LinkedIn, Naukri), one at a time. The choice is remembered in a cookie until you pick another. The CSV export follows the choice.
+- **Config:** pills All, Common, LinkedIn only, Naukri only show one section at a time. The choice is remembered in the browser. Hidden sections stay in the form, so a save still sends every setting.
+## Round 9: Tailored resume (built)
+
+### Goal
+For a chosen role, propose edits to your Word CV that match the role's description, let you approve them, then produce a Word file that looks exactly like your CV. Cover letter is deferred (a template will be shared later).
+
+### Flow
+1. **Role side panel:** one button, "Tailor resume". It only navigates. No status is kept in the panel.
+   - No Word CV uploaded: opens Manage CV, Upload CV, with a message. Nothing is sent to the AI.
+   - Word CV exists and the role has no earlier request: starts preparing changes, opens Manage CV, History.
+   - The role already has an active request (preparing or waiting for review): opens History at that row. Nothing new starts.
+   - The role has only finished requests (Ready, Failed, Discarded): starts a new request and a new row, keeping the old ones.
+   - The button is disabled, with a one-line hint, only when the role has no description yet.
+2. **History** shows the request move through: Preparing changes, Needs your review, Ready. It can also end as Failed (with the reason) or Discarded.
+3. **Review changes:** each proposed change has a tick box, ticked by default, with before and after and a length check. A "Gaps" list shows what the role asks for that your CV lacks (never added).
+4. **Generate resume with selected changes:** the Word file is made locally from the ticked changes. No AI is used in this step.
+5. **Download** the .docx from History.
+
+### Manage CV (renamed from CV)
+- Two tabs: **Upload CV** and **History**.
+- A red count on the "Manage CV" menu item shows how many requests need your review.
+
+### Upload CV
+- The original uploaded file is now kept on your machine, not only its text.
+- Word (.docx) is the format for tailoring. PDF and text files can still be uploaded for scoring, but tailoring is off for them, with a message saying so.
+- Uploading a new CV replaces the current one. A request still waiting for review that was based on the old CV is marked "CV changed, start again". Finished files are kept.
+
+### History
+- One row per request. A role can have several rows over time, each with its own files. Only one request per role can be active (preparing or waiting for review) at a time.
+- Columns: requested time (IST), company, role (with portal and a link to the role), status, action.
+- Statuses and actions:
+  - Preparing changes: nothing to do. The page refreshes by itself.
+  - Needs your review: Review changes.
+  - Ready: Download .docx, and View changes.
+  - Failed: the reason, and Try again (a new row).
+  - Discarded: Start again (a new row).
+- The role's title, company and description are saved with the row, since roles close.
+
+### What may be changed
+- **Professional summary:** wording only.
+- **Core competencies:** the same items in a new order. No item added or removed.
+- **Experience bullets:** the wording after the bold label, and the order of bullets within one job.
+- **Never changed:** name and contact line, employer lines, job titles, dates, bold labels, every number and percentage, education, certifications, fonts, bullets, spacing.
+- **New skills or experience are never added.** Anything the role wants that the CV lacks goes to the Gaps list only.
+- **Check:** every number in a proposed text must already appear in the original paragraph. A proposal that fails is dropped.
+
+### Format and length (very important)
+- The Word file is edited in place: only text inside existing paragraphs changes, and the existing formatting of each paragraph is kept. Bullets are moved, not rebuilt.
+- **Length rule:** a changed paragraph may never have more characters than the original. Anything longer is rejected before you see it. Reordered competencies keep the same length.
+- **Page check:** if LibreOffice is installed on the computer, the original and the new file are both rendered and their page counts compared. A longer result is blocked.
+- **Honest limit:** equal character count does not guarantee equal line breaks in every font. Open the file in Word once before sending.
+- **Bold inside a sentence** (other than the label) is not carried over and can be fixed by hand.
+- **Tested** on your real Word CV: bullet rewording, summary rewording, bullet reordering and competency reordering all kept the layout identical.
+
+### AI service and privacy
+- Any OpenAI-compatible service. First choice: Cerebras, model gpt-oss-120b. Free limits seen: 5 requests a minute and 1M tokens a day. These may be trial credits that expire, so the address and model are settings.
+- The key is read from a shell variable (default name CEREBRAS_API_KEY). It is never stored by the app.
+- Sent: the role's title, company and description, and your experience text. Not sent: name, phone, email, links.
+- One AI call per request. Reviewing, ticking and generating cost nothing more. Discarding costs nothing more.
+- Runs in the background, so the web app stays usable while it works.
+
+### Failures (each shown in History with a plain reason)
+- The AI service was busy (rate limit), or unreachable, or slow.
+- The key is missing or refused.
+- The reply could not be read, or every proposed change failed the checks.
+- The role has no description, or the CV is not a Word file, or the CV file is missing.
+- No change is made to your CV in any failure.
+
+### Config
+- New group "Tailoring" in Common: AI service address, model, key variable name. No other settings.
+
+### Deferred
+- Cover letter (template to come), chat modifications, PDF output (only the Word file is kept), tone options.
+
+### Open points
+- Whether Cerebras's free tier stays free. Switching provider is a setting change.
+- Page-length check needs LibreOffice. Without it only the character rule applies.

@@ -74,6 +74,17 @@ class Config:
     embed_texts_per_minute: int = 90
     embed_tokens_per_minute: int = 25_000
     embed_daily_limit: int = 1_000
+    naukri_location: str = "india"
+    naukri_max_pages: int = 5
+    naukri_delay_seconds_min: float = 6.0
+    naukri_delay_seconds_max: float = 10.0
+    naukri_max_job_pages: int = 40
+    naukri_max_age_hours: int = 24
+    naukri_abort_after_captchas: int = 3
+    naukri_captcha_wait_seconds: int = 300
+    tailor_base_url: str = "https://api.cerebras.ai/v1"
+    tailor_model: str = "gpt-oss-120b"
+    tailor_key_env: str = "CEREBRAS_API_KEY"
     schedule_time: str = "08:00"
     schedule_timeout_minutes: int = 180
     schedule_notify_finish: int = 0
@@ -166,6 +177,13 @@ _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
     "embed_texts_per_minute": (int, 1, 10_000),
     "embed_tokens_per_minute": (int, 1_000, 10_000_000),
     "embed_daily_limit": (int, 1, 1_000_000),
+    "naukri_max_pages": (int, 1, 50),
+    "naukri_delay_seconds_min": (float, 1, 120),
+    "naukri_delay_seconds_max": (float, 1, 120),
+    "naukri_max_job_pages": (int, 0, 500),
+    "naukri_max_age_hours": (int, 1, 720),
+    "naukri_abort_after_captchas": (int, 1, 20),
+    "naukri_captcha_wait_seconds": (int, 30, 1_800),
     "schedule_timeout_minutes": (int, 5, 240),
     "schedule_notify_finish": (int, 0, 1),
 }
@@ -187,11 +205,17 @@ _ORDERED_PAIRS = (
     ("score_partial_min", "score_strong_min"),
 )
 _CLOCK_TIME = re.compile(r"(?:[01]?\d|2[0-3]):[0-5]\d")
-_MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
+_PLACE = re.compile(r"[a-z][a-z -]{0,59}")
+_MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/:-]{0,79}")
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+_SERVICE_URL = re.compile(
+    r"https://[A-Za-z0-9.-]+(?::\d{1,5})?(?:/[A-Za-z0-9._~/-]*)?|http://(?:localhost|127\.0\.0\.1)(?::\d{1,5})?(?:/[A-Za-z0-9._~/-]*)?"
+)
 _RANGE_PAIRS = (
     ("delay_seconds_min", "delay_seconds_max"),
     ("keyword_pause_min", "keyword_pause_max"),
     ("retry_wait_min", "retry_wait_max"),
+    ("naukri_delay_seconds_min", "naukri_delay_seconds_max"),
 )
 
 
@@ -232,11 +256,35 @@ def _parse_text_fields(
     else:
         errors["geo_id"] = "must be digits only"
 
+    place = " ".join(raw.get("naukri_location", defaults.naukri_location).lower().split())
+    if _PLACE.fullmatch(place):
+        values["naukri_location"] = place
+    else:
+        errors["naukri_location"] = "letters, spaces and dashes only, up to 60 characters"
+
     model = raw.get("embed_model", defaults.embed_model).strip()
     if _MODEL_NAME.fullmatch(model):
         values["embed_model"] = model
     else:
         errors["embed_model"] = "letters, digits, dots, dashes and underscores only"
+
+    url = raw.get("tailor_base_url", defaults.tailor_base_url).strip().rstrip("/")
+    if _SERVICE_URL.fullmatch(url) and len(url) <= 200:
+        values["tailor_base_url"] = url
+    else:
+        errors["tailor_base_url"] = "an https:// address, for example https://api.cerebras.ai/v1"
+
+    tailor_model = raw.get("tailor_model", defaults.tailor_model).strip()
+    if _MODEL_NAME.fullmatch(tailor_model):
+        values["tailor_model"] = tailor_model
+    else:
+        errors["tailor_model"] = "letters, digits, dots, dashes, slashes and underscores only"
+
+    key_env = raw.get("tailor_key_env", defaults.tailor_key_env).strip()
+    if _ENV_NAME.fullmatch(key_env):
+        values["tailor_key_env"] = key_env
+    else:
+        errors["tailor_key_env"] = "a variable name: letters, digits and underscores"
 
     when = raw.get("schedule_time", defaults.schedule_time).strip()
     if _CLOCK_TIME.fullmatch(when):

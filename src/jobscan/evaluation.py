@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 
 from .config import Config, split_list
 from .fit_filters import industry_list
-from .models import LABEL_BAD, LABEL_GOOD, Cv, Role, RoleScore
+from .models import LABEL_BAD, LABEL_GOOD, Cv, Role, RoleFilter, RoleScore
 from .scoring import BAND_PARTIAL, BAND_STRONG, ScoreModel, inputs_fingerprint
 from .store import Store
 
@@ -114,11 +114,16 @@ class EvalReport:
         )
 
 
-def load_labelled(store: Store, config: Config, cv: Cv | None) -> list[Labelled]:
-    """Every labelled role with its current score (a stale or missing one counts as none)."""
+def load_labelled(
+    store: Store, config: Config, cv: Cv | None, portals: Sequence[str] = ()
+) -> list[Labelled]:
+    """Every labelled role with its current score (a stale or missing one counts as none).
+
+    Limited to the named portals when any are given.
+    """
     saved = store.get_scores()
     found: list[Labelled] = []
-    for role in store.list_labelled_roles():
+    for role in store.list_labelled_roles(portals):
         label = role.label
         if label is None:
             continue
@@ -141,14 +146,14 @@ class Bands:
     weak: int
 
 
-def score_bands(store: Store, config: Config, cv: Cv | None) -> Bands:
+def score_bands(store: Store, config: Config, cv: Cv | None, portals: Sequence[str] = ()) -> Bands:
     """Every role with a current score (not stale), counted by Strong, Partial and Weak."""
     if cv is None:
         return Bands(0, 0, 0, 0)
     model = ScoreModel.from_config(config)
     saved = store.get_scores()
     counts = {BAND_STRONG: 0, BAND_PARTIAL: 0, "weak": 0}
-    for role in store.list_roles():
+    for role in store.list_roles(RoleFilter(portals=tuple(portals))):
         score = saved.get(role.key)
         if score is None or score.inputs != inputs_fingerprint(config, cv, role):
             continue

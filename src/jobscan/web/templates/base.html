@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Job Scanner{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+{% block head %}{% endblock %}
 </head>
 <body>
 <header class="top">
@@ -13,7 +14,7 @@
     <a href="{{ url_for('roles') }}" {% if endpoint in ('roles', 'role_page', 'role_save') %}class="on"{% endif %}>Roles</a>
     <a href="{{ url_for('summary') }}" {% if endpoint == 'summary' %}class="on"{% endif %}>Summary</a>
     <a href="{{ url_for('eval_page') }}" {% if endpoint in ('eval_page', 'eval_exclude') %}class="on"{% endif %}>Eval</a>
-    <a href="{{ url_for('cv_page') }}" {% if endpoint in ('cv_page', 'cv_upload') %}class="on"{% endif %}>CV</a>
+    <a href="{{ url_for('cv_page') }}" {% if endpoint in ('cv_page', 'cv_upload', 'cv_history', 'tailor_page') %}class="on"{% endif %}>Manage CV{% if tailor_review_count %} <span class="badge" title="Resumes waiting for your review">{{ tailor_review_count }}</span>{% endif %}</a>
     <a href="{{ url_for('config_page') }}" {% if endpoint in ('config_page', 'config_save') %}class="on"{% endif %}>Config</a>
   </nav>
 </header>

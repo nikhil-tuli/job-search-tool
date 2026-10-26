@@ -1,0 +1,4 @@
+<nav class="tabs" aria-label="Manage CV">
+  <a href="{{ url_for('cv_page') }}" {% if tab == 'upload' %}class="on"{% endif %}>Upload CV</a>
+  <a href="{{ url_for('cv_history') }}" {% if tab == 'history' %}class="on"{% endif %}>History{% if tailor_review_count %} <span class="badge">{{ tailor_review_count }}</span>{% endif %}</a>
+</nav>

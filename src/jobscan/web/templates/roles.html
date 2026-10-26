@@ -13,8 +13,10 @@
 </nav>
 {% endif %}
 {% endmacro %}
+{% if naukri_reminder %}<p class="notice">{{ naukri_reminder }}</p>{% endif %}
 <form id="filterform" class="filters" method="get" action="{{ url_for('roles') }}">
   <h1>Roles <span class="muted">{{ total }}</span></h1>
+  {{ multi.pick('portal', 'Portal', portal_options, filters.get('portal', [])) }}
   <input type="search" name="q" value="{{ filters.get('q', '') }}" placeholder="Search title, company, location, notes, description" aria-label="Search">
   {{ multi.pick('status', 'Status', status_options, filters.get('status', [])) }}
   <label class="check"><input type="checkbox" name="dup" value="1" {% if filters.get('dup') %}checked{% endif %}> Possible duplicates only</label>
@@ -73,6 +75,7 @@
       </td>
       <td>{{ r.company }}</td>
       <td>{{ r.location }}</td>
+      <td class="portal">{{ r.portal }}</td>
       <td class="date">{{ r | posted }}</td>
       <td class="date">{{ r.fetched_on | ist }}</td>
       {% set fit = fits[r.key] %}
