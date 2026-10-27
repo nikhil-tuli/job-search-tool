@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Auto Job Sync{% endblock %}
+{% block title %}Email Sync{% endblock %}
 {% block head %}{% if running %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
 {% block content %}
-<h1>Auto Job Sync <span class="muted">{{ total }} updates</span></h1>
+<h1>Email Sync <span class="muted">{{ total }} updates</span></h1>
 <p class="muted">Reads your Gmail and updates the status of roles you applied to. Anything unclear waits here for your review.</p>
 
 {% if problem %}<p class="notice">{{ problem }}</p>{% endif %}

@@ -1,7 +1,7 @@
-"""Auto Job Sync: read recent mail, work out which roles it is about, update their status.
+"""Email Sync: read recent mail, work out which roles it is about, update their status.
 
 Only moves into Interview Ongoing are applied without asking, and only when the match and the
-wording are both clear. Everything else waits in the Auto Job Sync tab. A role is never moved
+wording are both clear. Everything else waits in the Email Sync tab. A role is never moved
 backwards. See docs/REQUIREMENTS.md, Round 11.
 """
 
@@ -79,7 +79,7 @@ def sync_problem(config: Config, environ: Mapping[str, str] | None = None) -> st
     env = os.environ if environ is None else environ
     if not config.sync_email:
         return (
-            "Not connected yet. Add your Gmail address under Config, Auto Job Sync, and keep "
+            "Not connected yet. Add your Gmail address under Config, Email Sync, and keep "
             f"a Gmail app password in the terminal variable {config.sync_password_env}."
         )
     if not env.get(config.sync_password_env, "").strip():

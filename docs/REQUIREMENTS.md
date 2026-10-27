@@ -588,7 +588,7 @@ For a chosen role, propose edits to your Word CV that match the role's descripti
 - Roles scored before this change got a one-off Fit worked out from their data, ignoring status and age.
 - Eval's "add to Fit filters" therefore affects roles not yet scored and future roles; use Score now on a role to refresh one.
 
-## Round 11: Auto Job Sync (built)
+## Round 11: Email Sync (built)
 
 ### Goal
 Read your Gmail and meeting invites, and update the status of roles you applied to. Anything unclear waits for your review.
@@ -599,7 +599,7 @@ Read your Gmail and meeting invites, and update the status of roles you applied 
 - Meeting invites arrive as email with an .ics attachment and are read the same way.
 
 ### When it runs
-- Automatically every N hours (Config, default 4), and on "Sync now" at the top of the Auto Job Sync tab.
+- Automatically every N hours (Config, default 4), and on "Sync now" at the top of the Email Sync tab.
 - First sync reads the last 30 days (Config). Later syncs read only mail newer than the last one processed.
 - Each email is processed once.
 
@@ -612,7 +612,7 @@ Read your Gmail and meeting invites, and update the status of roles you applied 
 - A role is never moved backwards. No new statuses are added.
 - Emails not matching any tracked role are ignored and counted.
 
-### Auto Job Sync tab
+### Email Sync tab
 - Columns: Portal, Company, Job role, Previous status, Updated status, Reference email subject, Email date and sender, Confidence, Status updated on, Current status.
 - Current status: Review needed, No pending action, Accepted, Discarded.
 - Review needed rows have Accept and Discard. Accept applies the proposed status. Discard leaves it, or restores the previous status if it was already applied.
@@ -624,7 +624,7 @@ Read your Gmail and meeting invites, and update the status of roles you applied 
 ### Round 11: answers to common questions
 - **First sync window:** 30 days. **Rejections:** always reviewed first, never auto-applied.
 - **Interview rounds:** all map to Interview Ongoing. No new statuses.
-- **"Sync now":** a button at the top of the Auto Job Sync tab, with the last synced time beside it.
+- **"Sync now":** a button at the top of the Email Sync tab, with the last synced time beside it.
 - **Shown per row:** email date and sender and confidence. No separate "reason" field for now.
 - **Undo:** auto-applied rows have an Undo button. It restores the previous status, but only if the role still has the status the sync set. If you changed it yourself since, Undo only marks the row Discarded and leaves the role alone.
 - **AI help for unclear emails (Config switch, default on):**
@@ -637,10 +637,10 @@ Read your Gmail and meeting invites, and update the status of roles you applied 
   - **Medium:** the company matches but the role title is not confirmed, or the stage was decided by the AI.
   - **Low:** several open roles could match, the sender does not match the company, or the AI was unsure.
   - Only High confidence moves into Interview Ongoing are applied automatically. Everything else waits for review.
-- **Effect on the Roles tab:** when a status is applied (automatically or on Accept) the role's status in Roles changes at once, so Roles, Summary counts and filters follow. Discarding a proposal changes nothing. Discarding or undoing an applied update restores the previous status under the rule above. The role's side panel notes "Status changed automatically on <date> (Auto Job Sync)".
+- **Effect on the Roles tab:** when a status is applied (automatically or on Accept) the role's status in Roles changes at once, so Roles, Summary counts and filters follow. Discarding a proposal changes nothing. Discarding or undoing an applied update restores the previous status under the rule above. The role's side panel notes "Status changed automatically on <date> (Email Sync)".
 - **Accept after you changed the status yourself:** if the role's status is no longer the "previous status" shown, Accept does not overwrite it; the row is marked Discarded with a note.
 
-## Round 12: Auto Job Sync progress and a higher mail cap (built)
+## Round 12: Email Sync progress and a higher mail cap (built)
 
 1. **Progress counter while a sync runs**
    - A line next to the Sync now button shows how far the run is: "Reading mail: 240 of 480", then "Checking new emails: 30 of 90".
@@ -651,3 +651,40 @@ Read your Gmail and meeting invites, and update the status of roles you applied 
 2. **Higher mail cap**
    - The most emails read in one sync rises from 600 to 1500 (the newest first). It is not a setting.
    - If the window holds more than the cap, the counter says so, for example "1500 of 2100 (cap reached)", so older emails are never skipped silently.
+
+## Round 13: Tailored cover letter (built)
+
+### Goal
+For a chosen role, write a cover letter in the layout and tone of your own Word template, let you review and edit it, then produce a Word file. Same journey as the tailored resume.
+
+### Prerequisites
+- A Word CV and a Word cover letter template, both uploaded. The template is a finished letter of yours (for example the Glean one); the app keeps it as the base, like the CV.
+- The role has a description.
+- Upload CV tab gets a second upload: "Cover letter template (Word)". Replacing it makes waiting cover letter requests "stale", as with the CV.
+
+### Journey
+- The role side panel has two buttons: "Tailor resume" and "Tailor cover letter". They only navigate.
+- Cover letter button: no Word CV or no template -> Manage CV, Upload CV, with a message (nothing is sent to the AI). Otherwise a request is created, preparation starts in the background, and History opens.
+- Only one active (preparing or in review) request per role per type. Finished requests allow a new row. Several rows per role and company are normal.
+- History gets a **Type** column: Resume or Cover letter. All other columns and statuses stay as they are.
+
+### What the AI writes, and what stays
+- **Stays as in the template:** your name and contact line, the sign-off, "Dear Hiring Manager," and all formatting (fonts, bullets, spacing).
+- **Filled automatically (no AI):** the date (today) and the company line.
+- **Written by the AI:** the opening paragraph, the lead-in line, the bullets (bold label plus text) and the closing paragraph.
+- **Bullets:** the AI chooses 5 to 7. New bullets copy the formatting of the template's bullets.
+- **Facts rule:** only facts from the CV (and the template). Every number must appear in the CV or the template. No new employers, titles, dates or skills. What the role asks for that the CV does not show is listed as gaps and never written into the letter.
+- **Length:** at most 2 pages. Checked with LibreOffice when installed; without it, a character cap close to two pages applies. A result longer than 2 pages is not generated.
+- **One AI call per request.** Same AI service and key as the resume (Config, Tailoring). Only the role text, the CV's experience text and the template's wording are sent, never the name, phone, email or links.
+
+### Review screen
+- Each part (opening, lead-in, each bullet, closing) shows the proposed text in an editable box, next to the template's version.
+- Each bullet has a tick (on by default). Unticked bullets are left out.
+- You can edit any text before generating. Editing and ticking use no AI.
+- Buttons: "Generate cover letter" and "Discard all". The checks above run when you generate; a failure keeps your edits and says why.
+- Gaps list and the "Not changed, always" list are shown, as for the resume.
+- Ready page: download the Word file, view the final text, start again (a new row).
+- File name: `<template stem>_<Company>_<Role>.docx`.
+
+### Deferred
+- Hiring manager's name (the salutation stays "Dear Hiring Manager,"), chat modifications, PDF output.

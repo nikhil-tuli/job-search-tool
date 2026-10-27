@@ -1,4 +1,4 @@
-"""Database access for Auto Job Sync."""
+"""Database access for Email Sync."""
 
 from __future__ import annotations
 

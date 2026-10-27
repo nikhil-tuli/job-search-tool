@@ -3,7 +3,7 @@
 <p class="muted">{{ role.company }} &middot; {{ role.location }} &middot; {{ role.portal }} {{ role.job_id }}</p>
 {% set link = role.link | safe_link %}
 <dl class="facts">
-  <dt>Link</dt><dd>{% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer" title="{{ link }}">Open on LinkedIn &#8599;</a>{% endif %}</dd>
+  <dt>Link</dt><dd>{% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer" title="{{ link }}">Open on {{ role.portal }} &#8599;</a>{% endif %}</dd>
   <dt>Posted (IST)</dt><dd>{% if role.raw_relative %}<span data-tip="LinkedIn said &quot;{{ role.raw_relative }}&quot;" tabindex="0">{{ role | posted }}</span>{% else %}{{ role | posted }}{% endif %}</dd>
   <dt>Fetched (IST)</dt><dd>{{ role.fetched_on | ist }}</dd>
   <dt>Matched phrase</dt><dd>{{ role.matched_phrase }}</dd>
@@ -52,12 +52,13 @@
 <p class="muted">No description saved yet. It is fetched during a scan, for recent roles only. For roles you rated, run jobscan details.</p>
 {% endif %}
 
-{% if sync_note %}<p class="muted">Status changed automatically on {{ sync_note.changed_on | ist }} IST, from {{ sync_note.previous_status }} to {{ sync_note.new_status }} (Auto Job Sync){% if sync_note.state == 'accepted' %}, after you accepted it{% endif %}.</p>{% endif %}
+{% if sync_note %}<p class="muted">Status changed automatically on {{ sync_note.changed_on | ist }} IST, from {{ sync_note.previous_status }} to {{ sync_note.new_status }} (Email Sync){% if sync_note.state == 'accepted' %}, after you accepted it{% endif %}.</p>{% endif %}
 <form method="post" class="tailor-form" action="{{ url_for('tailor_start') }}">
   <input type="hidden" name="portal" value="{{ role.portal }}">
   <input type="hidden" name="job_id" value="{{ role.job_id }}">
   <input type="hidden" name="next" value="{{ next }}">
   <button type="submit" {% if not can_tailor %}disabled{% endif %}>Tailor resume &rarr;</button>
+  <button type="submit" name="kind" value="cover" {% if not can_tailor %}disabled{% endif %}>Tailor cover letter &rarr;</button>
   {% if not can_tailor %}<span class="muted">Needs a job description first.</span>{% endif %}
 </form>
 

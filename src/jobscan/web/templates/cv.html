@@ -13,6 +13,17 @@
   <button type="submit">{% if cv %}Replace CV{% else %}Upload CV{% endif %}</button>
 </form>
 
+<h2>Cover letter template</h2>
+<p class="muted">Your finished letter as a Word file. Cover letters keep its layout, name, greeting and sign-off; only the opening, bullets and closing change.</p>
+<form method="post" action="{{ url_for('cv_template_upload') }}" enctype="multipart/form-data" class="upload">
+  <label>{% if template %}Replace the cover letter template{% else %}Cover letter template{% endif %} (Word .docx only)
+    <input type="file" name="template" accept=".docx" required>
+  </label>
+  <button type="submit">{% if template %}Replace template{% else %}Upload template{% endif %}</button>
+</form>
+{% if template %}<p>{{ template.filename }} <span class="muted">uploaded {{ template.uploaded_on | ist }} IST.</span>
+{% if template_problem %}<span class="stale-note">Cannot be used: {{ template_problem }}</span>{% else %}<span class="ok-note">Available.</span>{% endif %}</p>{% endif %}
+
 {% if cv %}
 <dl class="facts">
   <dt>File</dt><dd>{{ cv.filename }}</dd>

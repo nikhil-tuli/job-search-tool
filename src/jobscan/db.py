@@ -529,6 +529,23 @@ def _migration_14(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE sync_state ADD COLUMN available INTEGER NOT NULL DEFAULT 0")
 
 
+def _migration_15(conn: sqlite3.Connection) -> None:
+    """Cover letters: the Word template, and a kind on every tailoring request."""
+    conn.execute(
+        """
+        CREATE TABLE cover_templates (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            filename TEXT NOT NULL,
+            data BLOB NOT NULL,
+            sha TEXT NOT NULL,
+            uploaded_on TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("ALTER TABLE tailor_requests ADD COLUMN kind TEXT NOT NULL DEFAULT 'resume'")
+    conn.execute("ALTER TABLE tailor_requests ADD COLUMN template_sha TEXT NOT NULL DEFAULT ''")
+
+
 # Append new migrations to the end; never edit one that has shipped.
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_1,
@@ -545,6 +562,7 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_12,
     _migration_13,
     _migration_14,
+    _migration_15,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 

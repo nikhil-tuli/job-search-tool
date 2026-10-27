@@ -204,3 +204,4 @@ table.sync td { vertical-align: top; }
 .row-actions { margin-top: 6px; display: flex; gap: 6px; }
 form.bar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 10px 0 14px; }
 button.red { background: transparent; border: 1px solid #b42318; color: #b42318; }
+.diff textarea, .diff input[type=text] { width: 100%; box-sizing: border-box; margin: 4px 0; font: inherit; }

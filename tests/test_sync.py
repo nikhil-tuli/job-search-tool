@@ -522,7 +522,7 @@ def test_sync_now_then_review_then_roles_follow(
     assert "Accepted" in client.get("/sync?state=accepted").get_data(as_text=True)
     panel = client.get("/roles/LinkedIn/1?partial=1").get_data(as_text=True)
     assert "Status changed automatically" in panel
-    assert "(Auto Job Sync)" in panel
+    assert "(Email Sync)" in panel
 
 
 def test_sync_now_without_a_password_explains(client: FlaskClient) -> None:

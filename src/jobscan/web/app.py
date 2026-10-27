@@ -29,6 +29,7 @@ from werkzeug.wrappers import Response as WerkzeugResponse
 
 from .. import schedule as schedule_module
 from ..config import LIST_SETTINGS, Config, ConfigError, split_list
+from ..cover_docx import LIMITS, MAX_BULLETS, analyse_letter
 from ..cv import MAX_UPLOAD_BYTES, CvError, extract_text, sha_of
 from ..details import waiting_for_description
 from ..embeddings import API_KEY_ENV, Embedder
@@ -45,7 +46,9 @@ from ..models import (
     STATUSES,
     SYNC_STATE_LABELS,
     SYNC_STATES,
+    TAILOR_COVER,
     TAILOR_READY,
+    TAILOR_RESUME,
     TAILOR_REVIEW,
     Cv,
     CvFile,
@@ -76,10 +79,13 @@ from ..tailor import (
     START_NEW,
     START_NO_CV,
     START_NO_DESCRIPTION,
+    START_NO_TEMPLATE,
     ClientFactory,
+    CoverEdit,
     default_client_factory,
     discard,
     generate,
+    generate_cover,
     start_request,
     thread_launcher,
 )
@@ -279,12 +285,12 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
         ),
     ),
     (
-        "Auto Job Sync",
+        "Email Sync",
         (
             (
                 "sync_email",
                 "Gmail address",
-                "The mailbox to read. Leave empty to keep Auto Job Sync off",
+                "The mailbox to read. Leave empty to keep Email Sync off",
             ),
             (
                 "sync_password_env",
@@ -495,7 +501,7 @@ GROUP_SECTION = {
     "Job descriptions": "Common",
     "Fit filters": "Common",
     "Tailoring": "Common",
-    "Auto Job Sync": "Common",
+    "Email Sync": "Common",
     "Scoring": "Common",
     "Embeddings (Gemini)": "Common",
     "Retention": "Common",
@@ -1183,6 +1189,16 @@ def create_app(
             return str(exc)
         return ""
 
+    def template_problem() -> str:
+        saved = store.get_cover_template()
+        if saved is None:
+            return ""
+        try:
+            analyse_letter(saved.data)
+        except DocxError as exc:
+            return str(exc)
+        return ""
+
     def render_cv(error: str = "", status: int = 200) -> tuple[str, int]:
         config, cv = current_config(), store.get_cv()
         pending = plan_scoring(store, config, cv, now_ist()) if cv else None
@@ -1194,6 +1210,8 @@ def create_app(
                 chunks=[text for text, _ in store.get_cv_chunks()],
                 word_ok=store.get_cv_file() is not None and not word_problem(),
                 word_problem=word_problem(),
+                template=store.get_cover_template(),
+                template_problem=template_problem(),
                 pending=len(pending.selected) if pending else 0,
                 key_set=bool(os.environ.get(API_KEY_ENV)),
                 key_name=API_KEY_ENV,
@@ -1254,6 +1272,30 @@ def create_app(
             "or run jobscan score in a terminal to do it now." + word_note,
             "ok",
         )
+        return redirect(url_for("cv_page"))
+
+    @app.post("/cv/template")
+    def cv_template_upload() -> tuple[str, int] | WerkzeugResponse:
+        upload = request.files.get("template")
+        if upload is None or not upload.filename:
+            return render_cv("Choose a Word file for the cover letter template.", 400)
+        name = os.path.basename(upload.filename.replace("\\", "/"))[:200]
+        if not name.lower().endswith(".docx"):
+            return render_cv("The cover letter template must be a Word (.docx) file.", 400)
+        data = upload.read(MAX_UPLOAD_BYTES + 1)
+        try:
+            analyse_letter(data)
+        except DocxError as exc:
+            return render_cv(f"This letter cannot be used as a template: {exc}", 400)
+        when = to_iso(now_ist())
+        saved = store.get_cover_template()
+        sha = hashlib.sha256(data).hexdigest()
+        if saved is None or saved.sha != sha:
+            store.save_cover_template(CvFile(name, data, sha, when))
+            store.mark_tailor_stale(
+                TAILOR_COVER, "Your cover letter template was replaced. Start again."
+            )
+        flash("Cover letter template saved. Cover letter tailoring is now available.", "ok")
         return redirect(url_for("cv_page"))
 
     # ---- summary --------------------------------------------------------------------------
@@ -1402,7 +1444,7 @@ def create_app(
         flash("Configuration saved. It applies from the next scan.", "ok")
         return redirect(url_for("config_page"))
 
-    # ---- Auto Job Sync ----------------------------------------------------------------------
+    # ---- Email Sync ----------------------------------------------------------------------
 
     @app.get("/sync")
     def sync_page() -> str:
@@ -1461,25 +1503,34 @@ def create_app(
 
     # ---- tailored resumes -----------------------------------------------------------------
 
-    @app.post("/tailor/start")
-    def tailor_start() -> WerkzeugResponse:
-        portal, job_id = request.form.get("portal", ""), request.form.get("job_id", "")
+    def begin_tailoring(portal: str, job_id: str, kind: str, back: str) -> WerkzeugResponse:
+        noun = "cover letter" if kind == TAILOR_COVER else "resume"
         problem = word_problem()
         if problem:
             flash(f"Your Word CV cannot be tailored: {problem}", "error")
             return redirect(url_for("cv_page"))
-        result = start_request(store, portal, job_id)
+        result = start_request(store, portal, job_id, kind)
         if result.kind == START_NO_CV:
-            flash("Upload your CV as a Word (.docx) file to tailor a resume.", "error")
+            flash(f"Upload your CV as a Word (.docx) file to tailor a {noun}.", "error")
+            return redirect(url_for("cv_page"))
+        if result.kind == START_NO_TEMPLATE:
+            flash("Upload your cover letter template (Word) to tailor a cover letter.", "error")
             return redirect(url_for("cv_page"))
         if result.kind == START_NO_DESCRIPTION:
             flash("This role has no description yet, so there is nothing to tailor to.", "error")
-            return redirect(safe_next(request.form.get("next"), url_for("roles")))
+            return redirect(back)
         if result.request_id is None:
             abort(404, "Role not found")
         if result.kind == START_NEW:
             launch_tailor(result.request_id)
         return redirect(url_for("cv_history", _anchor=f"r{result.request_id}"))
+
+    @app.post("/tailor/start")
+    def tailor_start() -> WerkzeugResponse:
+        portal, job_id = request.form.get("portal", ""), request.form.get("job_id", "")
+        kind = TAILOR_COVER if request.form.get("kind") == TAILOR_COVER else TAILOR_RESUME
+        back = safe_next(request.form.get("next"), url_for("roles"))
+        return begin_tailoring(portal, job_id, kind, back)
 
     @app.get("/cv/history")
     def cv_history() -> str:
@@ -1496,11 +1547,40 @@ def create_app(
             abort(404, "Request not found")
         return row, Proposal.from_json(row.proposal)
 
+    def number_bullets(views: list[dict[str, Any]]) -> None:
+        count = 0
+        for view in views:
+            if view["kind"] == "bullet":
+                count += 1
+                view["number"] = count
+
+    def cover_page(row: Any, proposal: Proposal) -> str:
+        ready = row.status == TAILOR_READY
+        saved = json.loads(row.applied) if ready and row.applied else {}
+        views = []
+        for change in proposal.changes:
+            view: dict[str, Any] = dict(change)
+            view["on"] = True
+            views.append(view)
+        number_bullets(views)
+        return render_template(
+            "cover.html",
+            row=row,
+            proposal=proposal,
+            changes=views,
+            ready=ready,
+            final=saved,
+            limits=LIMITS,
+            max_bullets=MAX_BULLETS,
+        )
+
     @app.get("/cv/tailor/<int:request_id>")
     def tailor_page(request_id: int) -> str | WerkzeugResponse:
         row, proposal = tailor_view(request_id)
         if row.status not in (TAILOR_REVIEW, TAILOR_READY):
             return redirect(url_for("cv_history", _anchor=f"r{request_id}"))
+        if row.kind == TAILOR_COVER:
+            return cover_page(row, proposal)
         applied = set(json.loads(row.applied)) if row.applied else set()
         views = []
         for change in proposal.changes:
@@ -1522,7 +1602,10 @@ def create_app(
         )
 
     @app.post("/cv/tailor/<int:request_id>/generate")
-    def tailor_generate(request_id: int) -> WerkzeugResponse:
+    def tailor_generate(request_id: int) -> WerkzeugResponse | str:
+        row = store.get_tailor_request(request_id)
+        if row is not None and row.kind == TAILOR_COVER:
+            return generate_letter(request_id, row.proposal)
         selected = set(request.form.getlist("change"))
         try:
             count = generate(store, request_id, selected, tailor_convert)
@@ -1531,6 +1614,47 @@ def create_app(
         else:
             flash(f"Resume ready with {count} change{'s' if count != 1 else ''}.", "ok")
         return redirect(url_for("tailor_page", request_id=request_id))
+
+    def generate_letter(request_id: int, proposal_json: str) -> WerkzeugResponse | str:
+        edits: dict[str, CoverEdit] = {}
+        for change in Proposal.from_json(proposal_json).changes:
+            cid = change["id"]
+            edits[cid] = CoverEdit(
+                request.form.get(f"label_{cid}", change.get("after_label", "")),
+                request.form.get(f"text_{cid}", change["after"]),
+                change["kind"] != "bullet" or request.form.get(f"keep_{cid}") == "on",
+            )
+        try:
+            count = generate_cover(store, request_id, edits, tailor_convert)
+        except TailorError as exc:
+            # the person's edits are kept on the page, with the reason shown above them
+            return render_cover_with_edits(request_id, edits, str(exc))
+        flash(f"Cover letter ready with {count} bullet{'s' if count != 1 else ''}.", "ok")
+        return redirect(url_for("tailor_page", request_id=request_id))
+
+    def render_cover_with_edits(request_id: int, edits: dict[str, CoverEdit], problem: str) -> str:
+        row, proposal = tailor_view(request_id)
+        views = []
+        for change in proposal.changes:
+            view: dict[str, Any] = dict(change)
+            edit = edits.get(change["id"])
+            if edit is not None:
+                view["after"], view["on"] = edit.text, edit.on
+                if change["kind"] == "bullet":
+                    view["after_label"] = edit.label
+            views.append(view)
+        number_bullets(views)
+        return render_template(
+            "cover.html",
+            row=row,
+            proposal=proposal,
+            changes=views,
+            ready=False,
+            final={},
+            problem=problem,
+            limits=LIMITS,
+            max_bullets=MAX_BULLETS,
+        )
 
     @app.post("/cv/tailor/<int:request_id>/discard")
     def tailor_discard(request_id: int) -> WerkzeugResponse:
@@ -1542,21 +1666,7 @@ def create_app(
         row = store.get_tailor_request(request_id)
         if row is None:
             abort(404, "Request not found")
-        problem = word_problem()
-        if problem:
-            flash(f"Your Word CV cannot be tailored: {problem}", "error")
-            return redirect(url_for("cv_page"))
-        result = start_request(store, row.portal, row.job_id)
-        if result.kind == START_NO_CV:
-            flash("Upload your CV as a Word (.docx) file to tailor a resume.", "error")
-            return redirect(url_for("cv_page"))
-        if result.kind == START_NO_DESCRIPTION:
-            flash("This role has no description yet, so there is nothing to tailor to.", "error")
-            return redirect(url_for("cv_history"))
-        if result.kind == START_NEW and result.request_id is not None:
-            launch_tailor(result.request_id)
-        target = result.request_id or request_id
-        return redirect(url_for("cv_history", _anchor=f"r{target}"))
+        return begin_tailoring(row.portal, row.job_id, row.kind, url_for("cv_history"))
 
     @app.get("/cv/tailor/<int:request_id>/download")
     def tailor_download(request_id: int) -> Response:

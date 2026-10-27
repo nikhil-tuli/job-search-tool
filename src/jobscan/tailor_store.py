@@ -9,6 +9,7 @@ from .models import (
     TAILOR_FAILED,
     TAILOR_PREPARING,
     TAILOR_READY,
+    TAILOR_RESUME,
     TAILOR_REVIEW,
     TAILOR_STALE,
     CvFile,
@@ -18,7 +19,7 @@ from .timeutil import now_ist, to_iso
 
 _LIST_COLUMNS = (
     "id, portal, job_id, company, title, cv_filename, status, created_on, updated_on, "
-    "proposed_count, applied_count, output_name, note"
+    "proposed_count, applied_count, output_name, note, kind"
 )
 _ACTIVE_SQL = ",".join(f"'{s}'" for s in TAILOR_ACTIVE)
 
@@ -41,6 +42,7 @@ def _request(row: sqlite3.Row, *, full: bool = False) -> TailorRequest:
         proposal=row["proposal"] if full else "",
         applied=row["applied"] if full else "",
         description=row["description"] if full else "",
+        kind=row["kind"],
     )
 
 
@@ -66,6 +68,31 @@ class TailorStoreMixin:
     def clear_cv_file(self) -> None:
         self._conn.execute("DELETE FROM cv_files WHERE id = 1")
 
+    # ---- the cover letter template -------------------------------------------------------
+
+    def get_cover_template(self) -> CvFile | None:
+        row = self._conn.execute("SELECT * FROM cover_templates WHERE id = 1").fetchone()
+        if row is None:
+            return None
+        return CvFile(row["filename"], bytes(row["data"]), row["sha"], row["uploaded_on"])
+
+    def save_cover_template(self, file: CvFile) -> None:
+        self._conn.execute(
+            "INSERT INTO cover_templates (id, filename, data, sha, uploaded_on) "
+            "VALUES (1, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET filename = excluded.filename, "
+            "data = excluded.data, sha = excluded.sha, uploaded_on = excluded.uploaded_on",
+            (file.filename, file.data, file.sha, file.uploaded_on),
+        )
+
+    def clear_cover_template(self) -> None:
+        self._conn.execute("DELETE FROM cover_templates WHERE id = 1")
+
+    def get_tailor_template_sha(self, request_id: int) -> str | None:
+        row = self._conn.execute(
+            "SELECT template_sha FROM tailor_requests WHERE id = ?", (request_id,)
+        ).fetchone()
+        return row["template_sha"] if row else None
+
     # ---- requests -----------------------------------------------------------------------
 
     def create_tailor_request(
@@ -78,11 +105,14 @@ class TailorStoreMixin:
         description: str,
         cv_filename: str,
         cv_sha: str,
+        kind: str = TAILOR_RESUME,
+        template_sha: str = "",
     ) -> int:
         when = to_iso(now_ist())
         cursor = self._conn.execute(
             "INSERT INTO tailor_requests (portal, job_id, company, title, description, "
-            "cv_filename, cv_sha, status, created_on, updated_on) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "cv_filename, cv_sha, status, created_on, updated_on, kind, template_sha) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 portal,
                 job_id,
@@ -94,16 +124,20 @@ class TailorStoreMixin:
                 TAILOR_PREPARING,
                 when,
                 when,
+                kind,
+                template_sha,
             ),
         )
         assert cursor.lastrowid is not None
         return cursor.lastrowid
 
-    def active_tailor_request(self, portal: str, job_id: str) -> TailorRequest | None:
+    def active_tailor_request(
+        self, portal: str, job_id: str, kind: str = TAILOR_RESUME
+    ) -> TailorRequest | None:
         row = self._conn.execute(
             f"SELECT {_LIST_COLUMNS} FROM tailor_requests WHERE portal = ? AND job_id = ? "
-            f"AND status IN ({_ACTIVE_SQL}) ORDER BY id DESC LIMIT 1",
-            (portal, job_id),
+            f"AND kind = ? AND status IN ({_ACTIVE_SQL}) ORDER BY id DESC LIMIT 1",
+            (portal, job_id, kind),
         ).fetchone()
         return _request(row) if row else None
 
@@ -182,18 +216,27 @@ class TailorStoreMixin:
         )
         return cursor.rowcount
 
-    def mark_tailor_stale(self) -> None:
-        """The CV was replaced: requests waiting on the old one can no longer be applied."""
-        self._conn.execute(
-            "UPDATE tailor_requests SET status = ?, note = ?, updated_on = ? "
-            "WHERE status IN (?, ?)",
-            (
+    def mark_tailor_stale(self, kind: str | None = None, note: str = "") -> None:
+        """Requests waiting on a replaced file can no longer be applied.
+
+        A new CV stales both kinds; a new cover letter template stales only cover letters.
+        """
+        where, params = (
+            "status IN (?, ?)",
+            [
                 TAILOR_STALE,
-                "Your CV was replaced. Start again.",
+                note or "Your CV was replaced. Start again.",
                 to_iso(now_ist()),
                 TAILOR_PREPARING,
                 TAILOR_REVIEW,
-            ),
+            ],
+        )
+        if kind is not None:
+            where += " AND kind = ?"
+            params.append(kind)
+        self._conn.execute(
+            f"UPDATE tailor_requests SET status = ?, note = ?, updated_on = ? WHERE {where}",
+            params,
         )
 
     def db_path(self) -> str | None:

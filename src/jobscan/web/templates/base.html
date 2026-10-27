@@ -15,7 +15,7 @@
     <a href="{{ url_for('summary') }}" {% if endpoint == 'summary' %}class="on"{% endif %}>Summary</a>
     <a href="{{ url_for('eval_page') }}" {% if endpoint in ('eval_page', 'eval_exclude') %}class="on"{% endif %}>Eval</a>
     <a href="{{ url_for('cv_page') }}" {% if endpoint in ('cv_page', 'cv_upload', 'cv_history', 'tailor_page') %}class="on"{% endif %}>Manage CV{% if tailor_review_count %} <span class="badge" title="Resumes waiting for your review">{{ tailor_review_count }}</span>{% endif %}</a>
-    <a href="{{ url_for('sync_page') }}" {% if endpoint in ('sync_page',) %}class="on"{% endif %}>Auto Job Sync{% if sync_review_count %} <span class="badge" title="Updates waiting for your review">{{ sync_review_count }}</span>{% endif %}</a>
+    <a href="{{ url_for('sync_page') }}" {% if endpoint in ('sync_page',) %}class="on"{% endif %}>Email Sync{% if sync_review_count %} <span class="badge" title="Updates waiting for your review">{{ sync_review_count }}</span>{% endif %}</a>
     <a href="{{ url_for('config_page') }}" {% if endpoint in ('config_page', 'config_save') %}class="on"{% endif %}>Config</a>
   </nav>
 </header>

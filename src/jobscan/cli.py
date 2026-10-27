@@ -83,7 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=5000)
 
     sub.add_parser("status", help="show last run and role counts")
-    sub.add_parser("sync", help="read Gmail once and update job statuses (Auto Job Sync)")
+    sub.add_parser("sync", help="read Gmail once and update job statuses (Email Sync)")
     sub.add_parser("score", help="score roles against your CV (also runs after each scan)")
     sub.add_parser("eval", help="measure how well the score separates good and bad roles")
     sub.add_parser("details", help="fetch missing descriptions for recent roles")

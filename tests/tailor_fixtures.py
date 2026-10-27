@@ -36,3 +36,43 @@ def make_cv() -> bytes:
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
+
+
+LETTER_OPENING = (
+    "I am excited to apply for the role at your company and bring ten years of delivery."
+)
+LETTER_LEAD = "A quick snapshot of what I would bring:"
+LETTER_BULLETS = [
+    ("Ownership", ": Led work across 6 teams from plan to launch.\n"),
+    ("Planning", ": Ran quarterly planning for 4 squads.\n"),
+    ("Reliability", ": Set up incident reviews.\n"),
+    ("Delivery", ": Cut release time by 30% in a year.\n"),
+]
+LETTER_CLOSING = "Thank you for your time. I would welcome a conversation."
+
+
+def make_letter() -> bytes:
+    from docx.shared import Pt
+
+    doc = Document()
+    doc.add_paragraph("Asha Rao")
+    doc.add_paragraph("asha@example.com | +91 90000 00000")
+    doc.add_paragraph("Jan 11, 2026")
+    doc.add_paragraph("Globex").runs[0].bold = True
+    doc.add_paragraph("Dear Hiring Manager,")
+    doc.add_paragraph(LETTER_OPENING)
+    doc.add_paragraph(LETTER_LEAD)
+    count = len(LETTER_BULLETS)
+    for number, (label, text) in enumerate(LETTER_BULLETS):
+        paragraph = doc.add_paragraph(style="List Bullet")
+        if number == 0:
+            paragraph.paragraph_format.space_before = Pt(12)
+        if number == count - 1:
+            paragraph.paragraph_format.space_after = Pt(12)
+        paragraph.add_run(label + ":" if not label.endswith(":") else label).bold = True
+        paragraph.add_run(text)
+    doc.add_paragraph(LETTER_CLOSING)
+    doc.add_paragraph("Warm regards,\nAsha Rao")
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()

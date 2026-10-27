@@ -175,3 +175,11 @@ def test_config_page_has_the_view_picker(client: FlaskClient) -> None:
         assert f">{label}</button>" in body
     assert 'data-section="Naukri"' in body
     assert "cfgview.js" in body
+
+
+def test_the_panel_link_names_the_role_portal(both: Store, client: FlaskClient) -> None:
+    naukri = client.get("/roles/Naukri/2?partial=1").get_data(as_text=True)
+    linkedin = client.get("/roles/LinkedIn/1?partial=1").get_data(as_text=True)
+    assert "Open on Naukri" in naukri
+    assert "Open on LinkedIn" not in naukri
+    assert "Open on LinkedIn" in linkedin

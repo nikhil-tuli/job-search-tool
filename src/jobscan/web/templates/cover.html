@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Tailor cover letter{% endblock %}
+{% block content %}
+<h1>Manage CV</h1>
+{% set tab = "history" %}{% include "_cvtabs.html" %}
+<p><a href="{{ url_for('cv_history') }}">&larr; Back to History</a></p>
+<h2>Cover letter: {{ row.title }} <span class="muted">at {{ row.company }}</span></h2>
+<p class="muted">Based on your template {{ row.cv_filename }} and your CV.
+{% if ready %}This is the letter that was made.{% else %}Edit any text and tick the bullets you want. Editing and ticking use no AI. Nothing is added that is not in your CV.{% endif %}
+{% if proposal.dropped %} {{ proposal.dropped }} suggestion{{ 's' if proposal.dropped != 1 }} left out because they broke a rule (too long, or a number not in your CV or template).{% endif %}</p>
+{% if problem %}<p class="error" role="alert">Not generated: {{ problem }} Your edits are kept below.</p>{% endif %}
+
+{% if ready %}
+<p><a class="btn" href="{{ url_for('tailor_download', request_id=row.id) }}">Download {{ row.output_name }}</a>
+<span class="muted">Glance through it in Word before sending. The date and company line were filled in automatically.</span></p>
+<section class="change">
+  <p>{{ final.parts.opening }}</p>
+  {% if final.parts.lead_in %}<p>{{ final.parts.lead_in }}</p>{% endif %}
+  <ul>{% for b in final.bullets %}<li><strong>{{ b.label }}:</strong> {{ b.text }}</li>{% endfor %}</ul>
+  <p>{{ final.parts.closing }}</p>
+</section>
+{% else %}
+<form method="post" action="{{ url_for('tailor_generate', request_id=row.id) }}" id="cover-form">
+{% for c in changes %}
+  <section class="change">
+    <label class="change-head">
+      {% if c.kind == 'bullet' %}<input type="checkbox" name="keep_{{ c.id }}" {% if c.on %}checked{% endif %}>{% endif %}
+      <strong>{% if c.kind == 'bullet' %}Bullet {{ c.number }}{% else %}{{ c.label }}{% endif %}</strong>
+    </label>
+    <div class="diff">
+      <div class="before"><span class="muted">Your template</span>
+        {% if c.kind == 'bullet' %}{% if c.before %}<strong>{{ c.before_label }}:</strong> {{ c.before }}{% else %}<span class="muted">(no bullet here in the template)</span>{% endif %}{% else %}{{ c.before }}{% endif %}</div>
+      <div class="after"><span class="muted">Proposed (editable)</span>
+        {% if c.kind == 'bullet' %}<input type="text" name="label_{{ c.id }}" value="{{ c.after_label }}" maxlength="{{ limits.label }}" aria-label="Bullet label">{% endif %}
+        <textarea name="text_{{ c.id }}" rows="{{ 2 if c.kind == 'bullet' else 4 }}" aria-label="{{ c.label }}">{{ c.after }}</textarea></div>
+    </div>
+  </section>
+{% endfor %}
+
+{% if proposal.gaps %}
+<h3>Gaps: what the role asks for that your CV does not show</h3>
+<p class="muted">These are never written into the letter.</p>
+<ul>{% for g in proposal.gaps %}<li>{{ g }}</li>{% endfor %}</ul>
+{% endif %}
+
+<h3>Not changed, always</h3>
+<p class="muted">Your name and contact line, "Dear Hiring Manager,", the sign-off and all formatting. The date and company line are filled in automatically.</p>
+
+<div class="actionbar">
+  <button type="submit" id="gen-btn">Generate cover letter with <span id="n">{{ changes | selectattr('kind', 'equalto', 'bullet') | list | length }}</span> bullets</button>
+  <button type="submit" formaction="{{ url_for('tailor_discard', request_id=row.id) }}" class="secondary">Discard all</button>
+</div>
+</form>
+<script>
+(function () {
+  var f = document.getElementById('cover-form'); if (!f) return;
+  var n = document.getElementById('n');
+  function upd() { n.textContent = f.querySelectorAll('input[type=checkbox]:checked').length; }
+  f.addEventListener('change', upd); upd();
+})();
+</script>
+{% endif %}
+{% endblock %}

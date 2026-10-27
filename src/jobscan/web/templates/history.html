@@ -7,25 +7,26 @@
 <p class="muted">One row per tailoring request. Times are IST. Nothing changes in your CV file; each request makes a separate Word file.</p>
 {% if rows %}
 <table class="roles history">
-  <thead><tr><th>Requested</th><th>Company</th><th>Role</th><th>Status</th><th>Action</th></tr></thead>
+  <thead><tr><th>Requested</th><th>Type</th><th>Company</th><th>Role</th><th>Status</th><th>Action</th></tr></thead>
   <tbody>
   {% for r in rows %}
   <tr id="r{{ r.id }}">
     <td>{{ r.created_on | ist }}</td>
+    <td>{{ 'Cover letter' if r.kind == 'cover' else 'Resume' }}</td>
     <td>{{ r.company }}</td>
     <td>{{ r.title }} <span class="muted">({{ r.portal }})</span> <a href="{{ url_for('role_page', portal=r.portal, job_id=r.job_id) }}">open role</a></td>
     <td>
       {% if r.status == 'preparing' %}<span class="st st-wait">Preparing changes&hellip;</span>
       {% elif r.status == 'review' %}<span class="st st-review">Needs your review</span> <span class="muted">({{ r.proposed_count }} proposed)</span>
-      {% elif r.status == 'ready' %}<span class="st st-ready">Ready</span> <span class="muted">({{ r.applied_count }} changes)</span>
+      {% elif r.status == 'ready' %}<span class="st st-ready">Ready</span> <span class="muted">{% if r.kind == 'cover' %}({{ r.applied_count }} bullet{{ 's' if r.applied_count != 1 }}){% else %}({{ r.applied_count }} changes){% endif %}</span>
       {% elif r.status == 'failed' %}<span class="st st-fail">Failed</span><div class="muted">{{ r.note }}</div>
       {% elif r.status == 'discarded' %}<span class="st">Discarded</span>
-      {% else %}<span class="st">Out of date</span><div class="muted">CV changed, start again.</div>{% endif %}
+      {% else %}<span class="st">Out of date</span><div class="muted">{{ 'Your CV or template changed, start again.' if r.kind == 'cover' else 'CV changed, start again.' }}</div>{% endif %}
     </td>
     <td>
-      {% if r.status == 'review' %}<a class="btn" href="{{ url_for('tailor_page', request_id=r.id) }}">Review changes</a>
+      {% if r.status == 'review' %}<a class="btn" href="{{ url_for('tailor_page', request_id=r.id) }}">{{ 'Review letter' if r.kind == 'cover' else 'Review changes' }}</a>
       {% elif r.status == 'ready' %}<a class="btn" href="{{ url_for('tailor_download', request_id=r.id) }}">Download Word file</a>
-        <a href="{{ url_for('tailor_page', request_id=r.id) }}">View changes</a>
+        <a href="{{ url_for('tailor_page', request_id=r.id) }}">{{ 'View letter' if r.kind == 'cover' else 'View changes' }}</a>
         <form method="post" class="inline" action="{{ url_for('tailor_again', request_id=r.id) }}"><button type="submit" class="link">Start again</button></form>
       {% elif r.status in ('failed', 'discarded', 'stale') %}
         <form method="post" class="inline" action="{{ url_for('tailor_again', request_id=r.id) }}"><button type="submit">{% if r.status == 'failed' %}Try again{% else %}Start again{% endif %}</button></form>
@@ -36,6 +37,6 @@
   </tbody>
 </table>
 {% else %}
-<p class="empty">No tailored resumes yet. Open a role and choose <strong>Tailor resume</strong>.</p>
+<p class="empty">Nothing tailored yet. Open a role and choose <strong>Tailor resume</strong> or <strong>Tailor cover letter</strong>.</p>
 {% endif %}
 {% endblock %}

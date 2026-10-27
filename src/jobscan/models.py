@@ -319,6 +319,8 @@ class ScoringRun:
 
 
 # Tailored resume requests. A request is "active" while it is preparing or waiting for review.
+TAILOR_RESUME = "resume"
+TAILOR_COVER = "cover"
 TAILOR_PREPARING = "preparing"
 TAILOR_REVIEW = "review"
 TAILOR_READY = "ready"
@@ -364,9 +366,10 @@ class TailorRequest:
     proposal: str = ""  # JSON, empty in list views
     applied: str = ""  # JSON list of the change ids that were ticked
     description: str = ""
+    kind: str = TAILOR_RESUME
 
 
-# ---- Auto Job Sync ----------------------------------------------------------------------------
+# ---- Email Sync ----------------------------------------------------------------------------
 
 SYNC_REVIEW = "review"  # waiting for you
 SYNC_APPLIED = "applied"  # applied automatically, nothing to do (can be undone)
