@@ -2,12 +2,15 @@
 {% block title %}Summary{% endblock %}
 {% block content %}
 <div class="head">
-  <h1>Summary <span class="muted">{{ grand_total }} roles</span></h1>
-  <p class="muted">
-    Roles by the day they were first fetched (IST) and their status now. Click a number to see those roles.
-    Last successful run:
-    {% if last_success %}{{ (last_success.finished_on or last_success.started_on) | ist }} IST{% else %}none yet{% endif %}
-  </p>
+  <div class="title-row">
+    <h1>Summary <span class="muted">{{ grand_total }} roles</span></h1>
+    <p class="muted">
+      Roles by the day they were first fetched (IST) and their status now. Click a number to see those roles.
+      Last successful run:
+      {% for name, run in last_successes %}{% if not loop.first %} &middot; {% endif %}{{ name }}
+      {% if run %}{{ (run.finished_on or run.started_on) | ist }} IST{% else %}none yet{% endif %}{% endfor %}
+    </p>
+  </div>
   <p class="portal-pick">Portal:
     <a class="chip-link{% if not portal %} on{% endif %}" href="{{ url_for('summary') }}">All</a>
     {% for p in portals %}<a class="chip-link{% if portal == p %} on{% endif %}" href="{{ url_for('summary', portal=p) }}">{{ p }}</a>{% endfor %}
@@ -22,8 +25,9 @@
       Latest scan: #{{ latest_run.id }} {{ latest_run.status }}, {{ latest_run.new_roles }} new roles.
     {% endif %}
     {{ schedule_line }}.
+  </p>
+  <p class="muted scan-state">
     Descriptions pending: {% if naukri_latest %}LinkedIn {{ desc_waiting }}, Naukri {{ naukri_waiting }}{% else %}{{ desc_waiting }}{% endif %} (roles from the last {{ desc_days }} days).
-    {% if naukri_latest and not portal %}Latest Naukri run: #{{ naukri_latest.id }} {{ naukri_latest.status }}, {{ naukri_latest.new_roles }} new roles.{% endif %}
   </p>
 </div>
 

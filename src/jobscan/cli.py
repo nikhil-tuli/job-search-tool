@@ -37,6 +37,7 @@ from .scoring import (
     gemini_from_env,
 )
 from .store import RUN_FAILED, RUN_PARTIAL, RUN_RUNNING, RUN_SUCCESS, Store
+from .sync import MailSourceFactory, default_source_factory, sync_once, sync_problem
 from .timeutil import format_display, from_iso, now_ist, to_iso
 
 EmbedderFactory = Callable[[Config], Embedder]
@@ -82,6 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=5000)
 
     sub.add_parser("status", help="show last run and role counts")
+    sub.add_parser("sync", help="read Gmail once and update job statuses (Auto Job Sync)")
     sub.add_parser("score", help="score roles against your CV (also runs after each scan)")
     sub.add_parser("eval", help="measure how well the score separates good and bad roles")
     sub.add_parser("details", help="fetch missing descriptions for recent roles")
@@ -624,6 +626,31 @@ def cmd_naukri_details(
         reporter.close()
 
 
+def cmd_sync(store: Store, out: TextIO, make_mail_source: MailSourceFactory) -> int:
+    """Read the mailbox once. Prints what changed and what needs review."""
+    config = Config.from_raw(store.get_config_raw())
+    problem = sync_problem(config)
+    if problem:
+        print(problem, file=out)
+        return EXIT_USAGE
+    result = sync_once(store, config, make_mail_source)
+    if result is None:
+        print("A sync is already running.", file=out)
+        return EXIT_USAGE
+    state = store.get_sync_state()
+    if state.error:
+        print(f"Sync failed: {state.error}", file=out)
+        return EXIT_FAILED
+    print(
+        f"Checked {result.checked} emails: {result.applied} applied, {result.review} to review, "
+        f"{result.ignored} not about a tracked role.",
+        file=out,
+    )
+    for note in result.notes:
+        print(note, file=out)
+    return EXIT_OK
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -634,6 +661,7 @@ def main(
     sleep: Callable[[float], None] = time.sleep,
     rng: random.Random | None = None,
     open_source: NaukriSourceFactory = default_naukri_source,
+    make_mail_source: MailSourceFactory = default_source_factory,
 ) -> int:
     stream = out or sys.stdout
     args = build_parser().parse_args(argv)
@@ -650,6 +678,8 @@ def main(
             return cmd_status(store, stream)
         if args.command == "salary-check":
             return cmd_salary_check(store, stream)
+        if args.command == "sync":
+            return cmd_sync(store, stream, make_mail_source)
         if args.command == "serve":
             from .web import create_app
             from .web.app import LOOPBACK_HOSTS
@@ -659,6 +689,9 @@ def main(
                     f"WARNING: {args.host} is not a loopback address; the app has no login.",
                     file=stream,
                 )
+            from .sync import start_scheduler
+
+            start_scheduler(db_path)
             app = create_app(store, allowed_hosts=LOOPBACK_HOSTS | {args.host})
             app.run(host=args.host, port=args.port, debug=False, threaded=False)
             return EXIT_OK

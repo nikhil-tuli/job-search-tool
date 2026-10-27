@@ -577,3 +577,77 @@ For a chosen role, propose edits to your Word CV that match the role's descripti
 ### Open points
 - Whether Cerebras's free tier stays free. Switching provider is a setting change.
 - Page-length check needs LibreOffice. Without it only the character rule applies.
+
+## Round 10: Fit is saved when a role is scored (built)
+
+- A role's Fit (Eligible or Excluded, with reasons) is saved when the role is considered for scoring, and the Roles tab shows that saved result.
+- It does not change when the status changes, when time passes, or when Fit filter settings are edited later.
+- It is worked out again only when the role is scored again: a new CV, a new or changed description, changed scoring settings, or Score now on the role.
+- Status is no longer a Fit reason (it has its own column). The "Skip roles with these statuses" setting was removed.
+- Roles not yet considered for scoring are still checked live, so changed Fit filters apply to them.
+- Roles scored before this change got a one-off Fit worked out from their data, ignoring status and age.
+- Eval's "add to Fit filters" therefore affects roles not yet scored and future roles; use Score now on a role to refresh one.
+
+## Round 11: Auto Job Sync (built)
+
+### Goal
+Read your Gmail and meeting invites, and update the status of roles you applied to. Anything unclear waits for your review.
+
+### Mailbox access
+- Gmail over IMAP with an app password. Read-only in practice: the tool never sends, deletes or moves mail.
+- The password is kept in macOS Keychain and read from an environment variable, never saved in the app, the database or logs.
+- Meeting invites arrive as email with an .ics attachment and are read the same way.
+
+### When it runs
+- Automatically every N hours (Config, default 4), and on "Sync now" at the top of the Auto Job Sync tab.
+- First sync reads the last 30 days (Config). Later syncs read only mail newer than the last one processed.
+- Each email is processed once.
+
+### Matching and deciding
+- Only roles in an actionable status (Applied, Interview Ongoing) are candidates.
+- Match by company name or sender domain, then role title. Several possible roles at one company means Review needed.
+- Keyword rules decide clear mails. An unclear mail may be sent to the AI model (sender, subject and a short snippet only; switchable in Config).
+- Mapping: interview invite or next round -> Interview Ongoing (auto). Rejection before interviews -> Initial screening rejected (review). Rejection after interviews -> Interview phase rejected (review). Offer or "proceed" after the final round -> Interview cleared (review). Role closed or on hold -> Closed (review).
+- Only moves into Interview Ongoing are applied without review, and only when the match and the mail are both high confidence.
+- A role is never moved backwards. No new statuses are added.
+- Emails not matching any tracked role are ignored and counted.
+
+### Auto Job Sync tab
+- Columns: Portal, Company, Job role, Previous status, Updated status, Reference email subject, Email date and sender, Confidence, Status updated on, Current status.
+- Current status: Review needed, No pending action, Accepted, Discarded.
+- Review needed rows have Accept and Discard. Accept applies the proposed status. Discard leaves it, or restores the previous status if it was already applied.
+- Auto-applied rows have Undo. The tab has a red badge with the number of rows needing review.
+- Filters: current status and portal. The role's side panel notes an automatic change.
+- Plain messages for failures: not connected, sign-in refused, mailbox unreachable.
+- Mock: sync-mock.html.
+
+### Round 11: answers to common questions
+- **First sync window:** 30 days. **Rejections:** always reviewed first, never auto-applied.
+- **Interview rounds:** all map to Interview Ongoing. No new statuses.
+- **"Sync now":** a button at the top of the Auto Job Sync tab, with the last synced time beside it.
+- **Shown per row:** email date and sender and confidence. No separate "reason" field for now.
+- **Undo:** auto-applied rows have an Undo button. It restores the previous status, but only if the role still has the status the sync set. If you changed it yourself since, Undo only marks the row Discarded and leaves the role alone.
+- **AI help for unclear emails (Config switch, default on):**
+  - Sends only the sender, subject and the first few hundred characters of the body. Never the whole mailbox, and it is not saved.
+  - With the switch off, unclear emails go straight to Review needed.
+  - The AI only returns the stage it thinks the email shows and how sure it is. That appears as the row's Updated status (proposed) and Confidence. Current status stays "Review needed" until you act.
+  - Model: the same service as resume tailoring (Cerebras, gpt-oss-120b, same key and Config values). No extra key.
+- **Confidence values: High, Medium, Low.**
+  - **High:** the sender domain or the company name in the email matches exactly one open role, and the email wording is clear (for example an invite, or "we will not be moving forward").
+  - **Medium:** the company matches but the role title is not confirmed, or the stage was decided by the AI.
+  - **Low:** several open roles could match, the sender does not match the company, or the AI was unsure.
+  - Only High confidence moves into Interview Ongoing are applied automatically. Everything else waits for review.
+- **Effect on the Roles tab:** when a status is applied (automatically or on Accept) the role's status in Roles changes at once, so Roles, Summary counts and filters follow. Discarding a proposal changes nothing. Discarding or undoing an applied update restores the previous status under the rule above. The role's side panel notes "Status changed automatically on <date> (Auto Job Sync)".
+- **Accept after you changed the status yourself:** if the role's status is no longer the "previous status" shown, Accept does not overwrite it; the row is marked Discarded with a note.
+
+## Round 12: Auto Job Sync progress and a higher mail cap (built)
+
+1. **Progress counter while a sync runs**
+   - A line next to the Sync now button shows how far the run is: "Reading mail: 240 of 480", then "Checking new emails: 30 of 90".
+   - Reading total: the inbox emails in the date window, known once Gmail's search returns. Checking total: emails not seen in earlier syncs.
+   - Progress is kept in the sync's saved state and updated every few messages. The tab already refreshes every few seconds while a sync runs, so the counter updates by itself.
+   - After the run, the existing summary line stays, for example "0 of 3 emails in the last sync did not match a tracked role".
+   - No new settings.
+2. **Higher mail cap**
+   - The most emails read in one sync rises from 600 to 1500 (the newest first). It is not a setting.
+   - If the window holds more than the cap, the counter says so, for example "1500 of 2100 (cap reached)", so older emails are never skipped silently.

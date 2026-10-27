@@ -462,6 +462,73 @@ def _migration_11(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX idx_tailor_role ON tailor_requests (portal, job_id, status)")
 
 
+def _migration_12(conn: sqlite3.Connection) -> None:
+    """The Fit a role had when it was considered for scoring, kept until it is scored again."""
+    conn.execute(
+        """
+        CREATE TABLE role_fit (
+            portal TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            reasons TEXT NOT NULL,
+            inputs TEXT NOT NULL,
+            decided_on TEXT NOT NULL,
+            PRIMARY KEY (portal, job_id),
+            FOREIGN KEY (portal, job_id) REFERENCES roles(portal, job_id) ON DELETE CASCADE
+        );
+        """
+    )
+
+
+def _migration_13(conn: sqlite3.Connection) -> None:
+    """Auto Job Sync: status changes found in email, mail already read, and the sync's state."""
+    conn.execute(
+        """
+        CREATE TABLE sync_updates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            portal TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            company TEXT NOT NULL,
+            title TEXT NOT NULL,
+            previous_status TEXT NOT NULL,
+            new_status TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            sender TEXT NOT NULL,
+            email_date TEXT NOT NULL,
+            message_id TEXT NOT NULL UNIQUE,
+            confidence TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('review', 'applied', 'accepted', 'discarded')),
+            created_on TEXT NOT NULL,
+            changed_on TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (portal, job_id) REFERENCES roles(portal, job_id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute("CREATE INDEX idx_sync_state ON sync_updates (state, id)")
+    conn.execute("CREATE TABLE sync_seen (message_id TEXT PRIMARY KEY, seen_on TEXT NOT NULL)")
+    conn.execute(
+        """
+        CREATE TABLE sync_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            last_synced_on TEXT NOT NULL DEFAULT '',
+            running_since TEXT NOT NULL DEFAULT '',
+            error TEXT NOT NULL DEFAULT '',
+            checked INTEGER NOT NULL DEFAULT 0,
+            ignored INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute("INSERT INTO sync_state (id) VALUES (1)")
+
+
+def _migration_14(conn: sqlite3.Connection) -> None:
+    """How far a running sync has got."""
+    conn.execute("ALTER TABLE sync_state ADD COLUMN phase TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE sync_state ADD COLUMN done INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE sync_state ADD COLUMN total INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE sync_state ADD COLUMN available INTEGER NOT NULL DEFAULT 0")
+
+
 # Append new migrations to the end; never edit one that has shipped.
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_1,
@@ -475,6 +542,9 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_9,
     _migration_10,
     _migration_11,
+    _migration_12,
+    _migration_13,
+    _migration_14,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 

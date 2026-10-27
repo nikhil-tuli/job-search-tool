@@ -364,3 +364,56 @@ class TailorRequest:
     proposal: str = ""  # JSON, empty in list views
     applied: str = ""  # JSON list of the change ids that were ticked
     description: str = ""
+
+
+# ---- Auto Job Sync ----------------------------------------------------------------------------
+
+SYNC_REVIEW = "review"  # waiting for you
+SYNC_APPLIED = "applied"  # applied automatically, nothing to do (can be undone)
+SYNC_ACCEPTED = "accepted"
+SYNC_DISCARDED = "discarded"
+SYNC_STATES = (SYNC_REVIEW, SYNC_APPLIED, SYNC_ACCEPTED, SYNC_DISCARDED)
+SYNC_STATE_LABELS = {
+    SYNC_REVIEW: "Review needed",
+    SYNC_APPLIED: "No pending action",
+    SYNC_ACCEPTED: "Accepted",
+    SYNC_DISCARDED: "Discarded",
+}
+CONFIDENCE_HIGH, CONFIDENCE_MEDIUM, CONFIDENCE_LOW = "High", "Medium", "Low"
+
+
+@dataclass(frozen=True)
+class SyncUpdate:
+    id: int
+    portal: str
+    job_id: str
+    company: str
+    title: str
+    previous_status: str
+    new_status: str  # empty when the email could not be understood
+    subject: str
+    sender: str
+    email_date: str
+    message_id: str
+    confidence: str
+    state: str
+    created_on: str
+    changed_on: str
+    note: str
+
+    @property
+    def key(self) -> str:
+        return f"{self.portal}|{self.job_id}"
+
+
+@dataclass(frozen=True)
+class SyncState:
+    last_synced_on: str
+    running_since: str
+    error: str
+    checked: int
+    ignored: int
+    phase: str = ""  # "reading" or "checking" while a sync runs
+    done: int = 0
+    total: int = 0
+    available: int = 0  # emails in the window; above total when the cap was reached

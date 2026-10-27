@@ -89,13 +89,10 @@ def test_a_plain_recent_role_is_eligible() -> None:
     assert result.summary == ""
 
 
-@pytest.mark.parametrize("status", ["Applied", "Closed", "Skipped", "Not relevant", "applied"])
-def test_actioned_statuses_are_excluded(status: str) -> None:
-    assert kinds(make_role(status=status)) == ["status"]
-
-
-@pytest.mark.parametrize("status", ["Not Applied", "Interview Ongoing"])
-def test_other_statuses_are_not_excluded(status: str) -> None:
+@pytest.mark.parametrize(
+    "status", ["Applied", "Closed", "Skipped", "Not relevant", "Not Applied", "Interview Ongoing"]
+)
+def test_status_is_never_a_fit_reason(status: str) -> None:
     assert kinds(make_role(status=status)) == []
 
 
@@ -213,15 +210,14 @@ def test_several_failures_are_all_reported_in_a_fixed_order() -> None:
     )
     result = evaluate(role, RULES, NOW)
     assert [r.kind for r in result.reasons] == [
-        "status",
         "recency",
         "company",
         "seniority",
         "title keyword",
         "years",
     ]
-    assert result.label == "Excluded: status"
-    assert result.more == 5
+    assert result.label == "Excluded: recency"
+    assert result.more == 4
 
 
 def test_empty_lists_switch_a_rule_off() -> None:
@@ -231,7 +227,6 @@ def test_empty_lists_switch_a_rule_off() -> None:
                 "fit_junior_words": "",
                 "fit_junior_levels": "",
                 "fit_excluded_companies": "",
-                "fit_skip_statuses": "",
                 "fit_deny_keywords": "",
                 "fit_min_years": "0",
                 "fit_recency_days": "365",
@@ -256,7 +251,6 @@ def test_defaults_match_the_requirements() -> None:
     assert config.fit_recency_days == 1
     assert config.fit_min_years == 3
     assert split_list(config.fit_excluded_companies) == ("Amazon", "Intuit")
-    assert split_list(config.fit_skip_statuses) == ("Applied", "Closed", "Skipped", "Not relevant")
     assert split_list(config.fit_deny_keywords) == ("sales", "warehouse", "SAP functional")
 
 
@@ -265,17 +259,6 @@ def test_lists_are_stored_tidy() -> None:
         {"fit_deny_keywords": " Sales ,,warehouse\nSAP   functional, sales ", "geo_id": "1"}
     )
     assert config.fit_deny_keywords == "Sales, warehouse, SAP functional"
-
-
-def test_status_names_are_fixed_to_their_proper_case() -> None:
-    config = Config.from_raw({"fit_skip_statuses": "applied, NOT relevant"})
-    assert config.fit_skip_statuses == "Applied, Not relevant"
-
-
-def test_unknown_status_is_rejected() -> None:
-    with pytest.raises(ConfigError) as caught:
-        Config.from_raw({"fit_skip_statuses": "Applied, Banana"})
-    assert caught.value.errors == {"fit_skip_statuses": "not a status: Banana"}
 
 
 @pytest.mark.parametrize(

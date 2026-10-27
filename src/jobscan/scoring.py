@@ -41,7 +41,7 @@ from .embeddings import (
     pack,
     unpack,
 )
-from .fit_filters import FitRules, evaluate
+from .fit_filters import FitResult, FitRules, evaluate
 from .keywords import Corpus, CvTerms, coverage
 from .models import Cv, Role, RoleScore, ScoringRun
 from .store import Store
@@ -192,6 +192,8 @@ class ScoringPlan:
     no_description: int = 0
     selected: list[Role] = field(default_factory=list)
     all_roles: list[Role] = field(default_factory=list)
+    # Fit worked out in this plan: (role, result, scoring inputs). A run saves these.
+    new_fits: list[tuple[Role, FitResult, str]] = field(default_factory=list)
 
     @property
     def excluded_total(self) -> int:
@@ -217,21 +219,31 @@ def plan_scoring(
             plan.considered += 1
             if role.description:
                 plan.selected.append(role)
+                fit = evaluate(role, FitRules.from_config(config), now)
+                plan.new_fits.append((role, fit, inputs_fingerprint(config, cv, role)))
             else:
                 plan.no_description += 1
         return plan
     scores = store.get_scores()
+    saved = store.get_fits()
     rules = FitRules.from_config(config)
     for role in plan.all_roles:  # newest first, so a partial run covers the freshest
         current = scores.get(role.key)
-        if current and current.inputs == inputs_fingerprint(config, cv, role):
+        fingerprint = inputs_fingerprint(config, cv, role)
+        if current and current.inputs == fingerprint:
             continue
         plan.considered += 1
-        if current is None:
+        # A role keeps the Fit it was given until its scoring inputs change (a new CV, a new
+        # description, other scoring settings). Then it is checked again, now.
+        kept = saved.get(role.key)
+        if kept is not None and kept[1] == fingerprint:
+            fit = kept[0]
+        else:
             fit = evaluate(role, rules, now)
-            if not fit.eligible:
-                plan.excluded[fit.reasons[0].kind] += 1
-                continue
+            plan.new_fits.append((role, fit, fingerprint))
+        if current is None and not fit.eligible:
+            plan.excluded[fit.reasons[0].kind] += 1
+            continue
         if role.description:
             plan.selected.append(role)
         else:
@@ -316,6 +328,11 @@ class Scorer:
         self._store.update_scoring_run(
             self._run_id, dict(self._counters), excluded_by_reason=plan.excluded
         )
+        with self._store.transaction():
+            self._store.save_fits(
+                [(r.portal, r.job_id, fit, inputs) for r, fit, inputs in plan.new_fits],
+                when=to_iso(self._clock()),
+            )
         self._emit(
             f"Scoring: {plan.considered} roles lacking a current score, "
             f"{plan.excluded_total} excluded by rule, {plan.no_description} without a "

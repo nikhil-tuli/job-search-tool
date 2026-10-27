@@ -18,7 +18,7 @@
   <dt>File</dt><dd>{{ cv.filename }}</dd>
   <dt>Uploaded (IST)</dt><dd>{{ cv.uploaded_on | ist }}</dd>
   <dt>Length</dt><dd>{{ words }} words, split into {{ chunks | length }} chunks</dd>
-  <dt>Resume tailoring</dt><dd>{% if word_ok %}<span class="ok-note">Available.</span> <span class="muted">Your Word file is kept so tailored resumes keep its layout.</span>{% else %}<span class="stale-note">Not available.</span> <span class="muted">Upload your CV as a Word (.docx) file to tailor resumes. PDF and text files are used for scoring only.</span>{% endif %}</dd>
+  <dt>Resume tailoring</dt><dd>{% if word_ok %}<span class="ok-note">Available.</span> <span class="muted">Your Word file is kept so tailored resumes keep its layout.</span>{% elif word_problem %}<span class="stale-note">Not available.</span> <span class="muted">Your Word file was kept but cannot be used: {{ word_problem }}</span>{% else %}<span class="stale-note">Not available.</span> <span class="muted">Upload your CV as a Word (.docx) file to tailor resumes. PDF and text files are used for scoring only.</span>{% endif %}</dd>
   <dt>Roles waiting</dt><dd>{{ pending }} to score or re-score{% if pending %} <span class="muted">at the next scan, or run <code>jobscan score</code> now</span>{% endif %}</dd>
   <dt>Gemini key</dt><dd>{% if key_set %}found in this app's environment{% else %}<span class="stale-note">not set.</span> <span class="muted">Set {{ key_name }} in the terminal before running <code>jobscan serve</code> and <code>jobscan scan</code>.</span>{% endif %}</dd>
 </dl>

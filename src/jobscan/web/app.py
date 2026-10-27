@@ -33,7 +33,8 @@ from ..cv import MAX_UPLOAD_BYTES, CvError, extract_text, sha_of
 from ..details import waiting_for_description
 from ..embeddings import API_KEY_ENV, Embedder
 from ..evaluation import build_report, load_labelled, score_bands
-from ..fit_filters import FitResult, FitRules, evaluate
+from ..fit_book import FitBook
+from ..fit_filters import FitResult, FitRules
 from ..matching import MATCH_MODES
 from ..models import (
     FOLLOW_UP_STATES,
@@ -42,6 +43,8 @@ from ..models import (
     PORTALS,
     SORTED_STATUSES,
     STATUSES,
+    SYNC_STATE_LABELS,
+    SYNC_STATES,
     TAILOR_READY,
     TAILOR_REVIEW,
     Cv,
@@ -61,6 +64,14 @@ from ..scoring import (
     plan_scoring,
 )
 from ..store import Store, StoreError
+from ..sync import (
+    MailSourceFactory,
+    accept_update,
+    default_source_factory,
+    discard_update,
+    start_in_background,
+    sync_problem,
+)
 from ..tailor import (
     START_NEW,
     START_NO_CV,
@@ -139,8 +150,9 @@ GROUP_INFO = {
         "next scan or jobscan score, using stored embeddings (no new API calls)."
     ),
     "Fit filters": (
-        "Fit filters apply immediately. Save, then refresh the Roles tab and every role is "
-        "re-checked against these values. No scan is needed, and nothing is stored or hidden. "
+        "Fit filters apply to roles that have not been scored yet. A role keeps the Fit it had "
+        "when it was scored until it is scored again (a new CV, a new description, or Score now "
+        "on the role). Status is never part of Fit. Nothing is deleted or hidden. "
         "Search and pacing settings still apply from the next scan."
     ),
 }
@@ -267,6 +279,37 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
         ),
     ),
     (
+        "Auto Job Sync",
+        (
+            (
+                "sync_email",
+                "Gmail address",
+                "The mailbox to read. Leave empty to keep Auto Job Sync off",
+            ),
+            (
+                "sync_password_env",
+                "App password variable name",
+                "Name of the terminal variable holding the Gmail app password. Never stored here",
+            ),
+            (
+                "sync_every_hours",
+                "Sync every (hours)",
+                "Runs while jobscan serve is open. Sync now works any time",
+            ),
+            (
+                "sync_first_days",
+                "First sync reads the last (days)",
+                "Later syncs read only newer mail",
+            ),
+            (
+                "sync_use_ai",
+                "Let the AI read unclear emails",
+                "1 sends an unclear email's sender, subject and short snippet to the AI service "
+                "above. 0 sends them straight to review",
+            ),
+        ),
+    ),
+    (
         "Fit filters",
         (
             (
@@ -299,11 +342,6 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "fit_excluded_companies",
                 "Excluded companies",
                 "Comma separated. Amazon also catches Amazon Development Centre",
-            ),
-            (
-                "fit_skip_statuses",
-                "Skip roles with these statuses",
-                "Comma separated, from the status list",
             ),
             (
                 "fit_deny_keywords",
@@ -457,6 +495,7 @@ GROUP_SECTION = {
     "Job descriptions": "Common",
     "Fit filters": "Common",
     "Tailoring": "Common",
+    "Auto Job Sync": "Common",
     "Scoring": "Common",
     "Embeddings (Gemini)": "Common",
     "Retention": "Common",
@@ -522,6 +561,7 @@ def create_app(
     make_embedder: Callable[[Config], Embedder] = gemini_from_env,
     make_tailor_client: ClientFactory = default_client_factory,
     tailor_convert: Converter = libreoffice_pdf,
+    make_mail_source: MailSourceFactory = default_source_factory,
 ) -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = secret_key or secrets.token_hex(32)
@@ -633,6 +673,7 @@ def create_app(
             "statuses": SORTED_STATUSES,
             "endpoint": request.endpoint,
             "tailor_review_count": store.count_tailor_review(),
+            "sync_review_count": store.count_sync_review(),
         }
 
     # ---- roles ----------------------------------------------------------------------------
@@ -688,12 +729,14 @@ def create_app(
         except ConfigError:
             return Config()
 
+    def fit_book() -> FitBook:
+        return FitBook(store, FitRules.from_config(current_config()), now_ist())
+
     def fit_filtered(
         rows: list[Role], fit: Iterable[str]
     ) -> tuple[list[Role], dict[str, FitResult]]:
         """Fit result for every row, and only the rows matching the ticked Fit choices."""
-        rules, now = FitRules.from_config(current_config()), now_ist()
-        results = {r.key: evaluate(r, rules, now) for r in rows}
+        results = fit_book().for_roles(rows)
         wanted = {c for c in fit if c in FIT_CHOICES}
         if wanted and len(wanted) < len(FIT_CHOICES):
             rows = [r for r in rows if (results[r.key].eligible) == ("eligible" in wanted)]
@@ -891,7 +934,7 @@ def create_app(
 
     def fit_fragments(role: Role) -> dict[str, str]:
         """The Fit cell and the panel's Fit line as they read now, for a background save."""
-        fit = evaluate(role, FitRules.from_config(current_config()), now_ist())
+        fit = fit_book().for_roles([role])[role.key]
         macros = app.jinja_env.get_template("_fit.html").module
         return {
             "cell": str(getattr(macros, "cell")(fit)),  # noqa: B009
@@ -916,11 +959,12 @@ def create_app(
         config, cv = current_config(), store.get_cv()
         return {
             "role": role,
-            "fit": evaluate(role, FitRules.from_config(config), now_ist()),
+            "fit": fit_book().for_roles([role])[role.key],
             "score": score_views(store, config, cv, [role]).get(role.key),
             "has_cv": cv is not None,
             "label_note": label_note(role),
             "can_tailor": bool((role.description or "").strip()),
+            "sync_note": store.latest_sync_change(role.portal, role.job_id),
         }
 
     def score_one(role: Role) -> tuple[str, ScoreView | None]:
@@ -1076,9 +1120,8 @@ def create_app(
         config = current_config()
         portals = [p for p in PORTALS if p in request.args.getlist("portal")]
         items = load_labelled(store, config, store.get_cv(), portals)
-        body = rated_to_csv(
-            items, ScoreModel.from_config(config), FitRules.from_config(config), now_ist()
-        )
+        book = fit_book()
+        body = rated_to_csv(items, ScoreModel.from_config(config), book.get)
         stamp = now_ist().strftime("%Y-%m-%d_%H%M")
         return Response(
             body,
@@ -1129,6 +1172,17 @@ def create_app(
 
     # ---- CV -------------------------------------------------------------------------------
 
+    def word_problem() -> str:
+        """Why the stored Word file cannot be tailored, or an empty string."""
+        saved = store.get_cv_file()
+        if saved is None:
+            return ""
+        try:
+            analyse(saved.data)
+        except DocxError as exc:
+            return str(exc)
+        return ""
+
     def render_cv(error: str = "", status: int = 200) -> tuple[str, int]:
         config, cv = current_config(), store.get_cv()
         pending = plan_scoring(store, config, cv, now_ist()) if cv else None
@@ -1138,7 +1192,8 @@ def create_app(
                 cv=cv,
                 words=len(cv.text.split()) if cv else 0,
                 chunks=[text for text, _ in store.get_cv_chunks()],
-                word_ok=store.get_cv_file() is not None,
+                word_ok=store.get_cv_file() is not None and not word_problem(),
+                word_problem=word_problem(),
                 pending=len(pending.selected) if pending else 0,
                 key_set=bool(os.environ.get(API_KEY_ENV)),
                 key_name=API_KEY_ENV,
@@ -1170,9 +1225,9 @@ def create_app(
         word_note = ""
         word_file: CvFile | None = None
         if name.lower().endswith(".docx"):
+            word_file = CvFile(name, data, hashlib.sha256(data).hexdigest(), when)
             try:
                 analyse(data)
-                word_file = CvFile(name, data, hashlib.sha256(data).hexdigest(), when)
             except DocxError as exc:
                 word_note = f" It cannot be used for tailoring: {exc}"
         existing = store.get_cv()
@@ -1228,7 +1283,10 @@ def create_app(
             workflow=STATUSES,
             totals=totals,
             grand_total=sum(d.total for d in days),
-            last_success=store.last_successful_run(portal or PORTAL_LINKEDIN),
+            last_successes=[
+                (name, store.last_successful_run(name))
+                for name in ([portal] if portal else PORTALS)
+            ],
             portal=portal,
             portals=PORTALS,
             naukri_reminder=reminder_text(store),
@@ -1344,11 +1402,72 @@ def create_app(
         flash("Configuration saved. It applies from the next scan.", "ok")
         return redirect(url_for("config_page"))
 
+    # ---- Auto Job Sync ----------------------------------------------------------------------
+
+    @app.get("/sync")
+    def sync_page() -> str:
+        state_filter = request.args.get("state", "")
+        state_filter = state_filter if state_filter in SYNC_STATES else ""
+        portal = request.args.get("portal", "")
+        portal = portal if portal in PORTALS else ""
+        config = current_config()
+        state = store.get_sync_state()
+        problem = sync_problem(config)
+        counts = store.count_sync_by_state()
+        every = timedelta(hours=config.sync_every_hours)
+        next_run = (
+            format_display(to_iso(from_iso(state.last_synced_on) + every))
+            if state.last_synced_on
+            else ""
+        )
+        return render_template(
+            "sync.html",
+            rows=store.list_sync_updates(state_filter, portal),
+            counts=counts,
+            total=sum(counts.values()),
+            state_filter=state_filter,
+            portal=portal,
+            portals=PORTALS,
+            states=SYNC_STATES,
+            labels=SYNC_STATE_LABELS,
+            sync_state=state,
+            problem=problem,
+            email=config.sync_email,
+            next_run=next_run,
+            running=bool(state.running_since),
+        )
+
+    @app.post("/sync/run")
+    def sync_run() -> WerkzeugResponse:
+        problem = sync_problem(current_config())
+        if problem:
+            flash(problem, "error")
+        else:
+            start_in_background(store, make_mail_source, make_tailor_client)
+        return redirect(url_for("sync_page"))
+
+    def back_to_sync() -> WerkzeugResponse:
+        return redirect(safe_next(request.form.get("next"), url_for("sync_page")))
+
+    @app.post("/sync/<int:update_id>/accept")
+    def sync_accept(update_id: int) -> WerkzeugResponse:
+        flash(accept_update(store, update_id), "ok")
+        return back_to_sync()
+
+    @app.post("/sync/<int:update_id>/discard")
+    def sync_discard(update_id: int) -> WerkzeugResponse:
+        flash(discard_update(store, update_id), "ok")
+        return back_to_sync()
+
     # ---- tailored resumes -----------------------------------------------------------------
 
     @app.post("/tailor/start")
     def tailor_start() -> WerkzeugResponse:
         portal, job_id = request.form.get("portal", ""), request.form.get("job_id", "")
+        problem = word_problem()
+        if problem:
+            flash(f"Your Word CV cannot be tailored: {problem}", "error")
+            return redirect(url_for("cv_page"))
         result = start_request(store, portal, job_id)
         if result.kind == START_NO_CV:
             flash("Upload your CV as a Word (.docx) file to tailor a resume.", "error")
@@ -1423,6 +1542,10 @@ def create_app(
         row = store.get_tailor_request(request_id)
         if row is None:
             abort(404, "Request not found")
+        problem = word_problem()
+        if problem:
+            flash(f"Your Word CV cannot be tailored: {problem}", "error")
+            return redirect(url_for("cv_page"))
         result = start_request(store, row.portal, row.job_id)
         if result.kind == START_NO_CV:
             flash("Upload your CV as a Word (.docx) file to tailor a resume.", "error")

@@ -12,7 +12,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, fields
 
 from .matching import MATCH_MODES
-from .models import STATUSES
 
 VERIFIED_WINDOW_SECONDS = 86_400  # Only this value has been confirmed against LinkedIn.
 
@@ -51,7 +50,6 @@ class Config:
     fit_junior_words: str = "intern, internship, junior, jr, trainee, associate"
     fit_junior_levels: str = "Internship, Entry level"
     fit_excluded_companies: str = "Amazon, Intuit"
-    fit_skip_statuses: str = "Applied, Closed, Skipped, Not relevant"
     fit_deny_keywords: str = "sales, warehouse, SAP functional"
     fit_excluded_industries: str = ""
     score_after_scan: int = 1
@@ -85,6 +83,11 @@ class Config:
     tailor_base_url: str = "https://api.cerebras.ai/v1"
     tailor_model: str = "gpt-oss-120b"
     tailor_key_env: str = "CEREBRAS_API_KEY"
+    sync_email: str = ""
+    sync_password_env: str = "JOBSYNC_APP_PASSWORD"
+    sync_every_hours: int = 4
+    sync_first_days: int = 30
+    sync_use_ai: int = 1
     schedule_time: str = "08:00"
     schedule_timeout_minutes: int = 180
     schedule_notify_finish: int = 0
@@ -159,6 +162,9 @@ _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
     "fit_min_years": (int, 0, 30),
     "fit_min_salary": (int, 0, 1_000_000_000),
     "score_after_scan": (int, 0, 1),
+    "sync_every_hours": (int, 1, 24),
+    "sync_first_days": (int, 1, 90),
+    "sync_use_ai": (int, 0, 1),
     "score_weight_keyword": (int, 0, 100),
     "score_weight_requirement": (float, 0, 10),
     "score_weight_responsibility": (float, 0, 10),
@@ -192,7 +198,6 @@ LIST_SETTINGS = (
     "fit_junior_words",
     "fit_junior_levels",
     "fit_excluded_companies",
-    "fit_skip_statuses",
     "fit_deny_keywords",
     "fit_excluded_industries",
 )
@@ -207,6 +212,7 @@ _ORDERED_PAIRS = (
 _CLOCK_TIME = re.compile(r"(?:[01]?\d|2[0-3]):[0-5]\d")
 _PLACE = re.compile(r"[a-z][a-z -]{0,59}")
 _MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/:-]{0,79}")
+_EMAIL = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,120}\.[A-Za-z]{2,}")
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 _SERVICE_URL = re.compile(
     r"https://[A-Za-z0-9.-]+(?::\d{1,5})?(?:/[A-Za-z0-9._~/-]*)?|http://(?:localhost|127\.0\.0\.1)(?::\d{1,5})?(?:/[A-Za-z0-9._~/-]*)?"
@@ -286,6 +292,18 @@ def _parse_text_fields(
     else:
         errors["tailor_key_env"] = "a variable name: letters, digits and underscores"
 
+    email = raw.get("sync_email", defaults.sync_email).strip()
+    if not email or _EMAIL.fullmatch(email):
+        values["sync_email"] = email
+    else:
+        errors["sync_email"] = "an email address like name@gmail.com, or empty to keep sync off"
+
+    password_env = raw.get("sync_password_env", defaults.sync_password_env).strip()
+    if _ENV_NAME.fullmatch(password_env):
+        values["sync_password_env"] = password_env
+    else:
+        errors["sync_password_env"] = "a variable name: letters, digits and underscores"
+
     when = raw.get("schedule_time", defaults.schedule_time).strip()
     if _CLOCK_TIME.fullmatch(when):
         hour, minute = when.split(":")
@@ -296,8 +314,6 @@ def _parse_text_fields(
     for key in LIST_SETTINGS:
         try:
             items = split_list(raw.get(key, getattr(defaults, key)))
-            if key == "fit_skip_statuses":
-                items = _canonical_statuses(items)
             _check_list(items)
         except ValueError as exc:
             errors[key] = str(exc)
@@ -320,11 +336,3 @@ def _check_list(items: tuple[str, ...]) -> None:
         raise ValueError(f"at most {MAX_LIST_ITEMS} items")
     if any(len(item) > MAX_LIST_ITEM_CHARS for item in items):
         raise ValueError(f"each item must be at most {MAX_LIST_ITEM_CHARS} characters")
-
-
-def _canonical_statuses(items: tuple[str, ...]) -> tuple[str, ...]:
-    by_name = {status.casefold(): status for status in STATUSES}
-    unknown = [item for item in items if item.casefold() not in by_name]
-    if unknown:
-        raise ValueError(f"not a status: {', '.join(unknown)}")
-    return tuple(by_name[item.casefold()] for item in items)

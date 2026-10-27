@@ -446,3 +446,20 @@ def test_unknown_requests_are_404(client: FlaskClient) -> None:
     assert (
         client.post("/tailor/start", data={"portal": "LinkedIn", "job_id": "zz"}).status_code == 404
     )
+
+
+def test_unreadable_word_file_shows_its_reason(
+    client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jobscan.web.app as web
+
+    def broken(data: bytes) -> None:
+        raise DocxError("The python-docx package is missing: pip install python-docx")
+
+    monkeypatch.setattr(web, "analyse", broken)
+    page = post_cv(client, "cv.docx", make_cv())
+    assert "python-docx package is missing" in page
+    start = client.post(
+        "/tailor/start", data={"portal": "LinkedIn", "job_id": "1"}, follow_redirects=True
+    )
+    assert "cannot be tailored" in start.get_data(as_text=True)

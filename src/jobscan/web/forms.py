@@ -5,14 +5,14 @@ from __future__ import annotations
 import csv
 import io
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, fields
 from datetime import date, datetime
 from urllib.parse import urlparse
 
 from ..config import Config, ConfigError
 from ..evaluation import Labelled
-from ..fit_filters import FitRules, evaluate
+from ..fit_filters import FitResult
 from ..models import DEFAULT_STATUS, STATUSES, Role
 from ..scoring import ScoreModel
 from ..timeutil import IST, format_display, has_time_of_day, to_iso
@@ -283,7 +283,7 @@ RATED_HEADER = (
 
 
 def rated_to_csv(
-    items: Iterable[Labelled], model: ScoreModel, rules: FitRules, now: datetime
+    items: Iterable[Labelled], model: ScoreModel, fit_of: Callable[[Role], FitResult]
 ) -> str:
     """The roles you rated, with what the scorer saw, for working out why it got some wrong.
 
@@ -295,7 +295,7 @@ def rated_to_csv(
     writer.writerow(RATED_HEADER)
     for item in items:
         role, score = item.role, item.score
-        fit = evaluate(role, rules, now)
+        fit = fit_of(role)
         final = "" if score is None else model.final(score)
         writer.writerow(
             [

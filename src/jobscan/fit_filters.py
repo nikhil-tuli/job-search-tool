@@ -28,7 +28,6 @@ _YEARS = re.compile(
 _SENIOR_AFTER = r"(?!\s+(?:director|vice|vp|principal|partner|head)\b)"
 _JUNIOR_EXCEPTIONS = {"associate": _SENIOR_AFTER}
 
-REASON_STATUS = "status"
 REASON_RECENCY = "recency"
 REASON_COMPANY = "company"
 REASON_SENIORITY = "seniority"
@@ -71,7 +70,6 @@ class FitRules:
     junior_words: tuple[str, ...]
     junior_levels: tuple[str, ...]
     excluded_companies: tuple[str, ...]
-    skip_statuses: tuple[str, ...]
     deny_keywords: tuple[str, ...]
     excluded_industries: tuple[str, ...]
 
@@ -84,7 +82,6 @@ class FitRules:
             junior_words=split_list(config.fit_junior_words),
             junior_levels=split_list(config.fit_junior_levels),
             excluded_companies=split_list(config.fit_excluded_companies),
-            skip_statuses=split_list(config.fit_skip_statuses),
             deny_keywords=split_list(config.fit_deny_keywords),
             excluded_industries=split_list(config.fit_excluded_industries),
         )
@@ -208,13 +205,17 @@ def rupee_text(amount: int) -> str:
     return f"\u20b9{amount:,}"
 
 
-def evaluate(role: Role, rules: FitRules, now: datetime) -> FitResult:
-    """Every rule the role fails, in a fixed order (the first is the one shown in the tag)."""
+def evaluate(
+    role: Role, rules: FitRules, now: datetime, *, ignore_recency: bool = False
+) -> FitResult:
+    """Every rule the role fails, in a fixed order (the first is the one shown in the tag).
+
+    The role's status is never a reason: it has its own column. `ignore_recency` is for the
+    one-off snapshot of roles scored before Fit was saved, whose age then is not known.
+    """
     reasons: list[Reason] = []
-    if role.status.casefold() in {s.casefold() for s in rules.skip_statuses}:
-        reasons.append(Reason(REASON_STATUS, f"status is {role.status}"))
     age = now - from_iso(role.fetched_on)
-    if age > timedelta(days=rules.recency_days):
+    if not ignore_recency and age > timedelta(days=rules.recency_days):
         reasons.append(Reason(REASON_RECENCY, f"fetched more than {_days(rules.recency_days)} ago"))
     company = _first_hit(rules.excluded_companies, role.company)
     if company:

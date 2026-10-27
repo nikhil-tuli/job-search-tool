@@ -52,6 +52,7 @@
 <p class="muted">No description saved yet. It is fetched during a scan, for recent roles only. For roles you rated, run jobscan details.</p>
 {% endif %}
 
+{% if sync_note %}<p class="muted">Status changed automatically on {{ sync_note.changed_on | ist }} IST, from {{ sync_note.previous_status }} to {{ sync_note.new_status }} (Auto Job Sync){% if sync_note.state == 'accepted' %}, after you accepted it{% endif %}.</p>{% endif %}
 <form method="post" class="tailor-form" action="{{ url_for('tailor_start') }}">
   <input type="hidden" name="portal" value="{{ role.portal }}">
   <input type="hidden" name="job_id" value="{{ role.job_id }}">

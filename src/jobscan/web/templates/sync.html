@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Auto Job Sync{% endblock %}
+{% block head %}{% if running %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
+{% block content %}
+<h1>Auto Job Sync <span class="muted">{{ total }} updates</span></h1>
+<p class="muted">Reads your Gmail and updates the status of roles you applied to. Anything unclear waits here for your review.</p>
+
+{% if problem %}<p class="notice">{{ problem }}</p>{% endif %}
+{% if sync_state.error %}<p class="error" role="alert">Last sync failed: {{ sync_state.error }}</p>{% endif %}
+
+<form method="post" action="{{ url_for('sync_run') }}" class="bar">
+  <button type="submit" {% if running or problem %}disabled{% endif %}>{% if running %}Syncing&hellip;{% else %}Sync now{% endif %}</button>
+  <span class="muted">
+    {% if running and sync_state.phase == 'reading' %}<strong>Reading mail:</strong> {{ sync_state.done }} of {{ sync_state.total }}{% if sync_state.available > sync_state.total %} (cap reached: the newest {{ sync_state.total }} of {{ sync_state.available }}){% endif %} &middot;
+    {% elif running and sync_state.phase == 'checking' %}<strong>Checking new emails:</strong> {{ sync_state.done }} of {{ sync_state.total }} &middot;{% endif %}
+    Last synced: {% if sync_state.last_synced_on %}{{ sync_state.last_synced_on | ist }} IST{% else %}never{% endif %}
+    {% if next_run and email %}&middot; Next: about {{ next_run }} IST{% endif %}
+    {% if email %}&middot; Mailbox: {{ email }}{% endif %}
+    {% if sync_state.last_synced_on %}&middot; {{ sync_state.ignored }} of {{ sync_state.checked }} emails in the last sync did not match a tracked role{% endif %}
+  </span>
+</form>
+
+<p class="portal-pick">Show:
+  <a class="chip-link{% if not state_filter %} on{% endif %}" href="{{ url_for('sync_page', portal=portal or None) }}">All</a>
+  {% for s in states %}<a class="chip-link{% if state_filter == s %} on{% endif %}" href="{{ url_for('sync_page', state=s, portal=portal or None) }}">{{ labels[s] }}{% if s == 'review' and counts.get('review') %} ({{ counts['review'] }}){% endif %}</a>{% endfor %}
+  &nbsp; Portal:
+  <a class="chip-link{% if not portal %} on{% endif %}" href="{{ url_for('sync_page', state=state_filter or None) }}">All</a>
+  {% for p in portals %}<a class="chip-link{% if portal == p %} on{% endif %}" href="{{ url_for('sync_page', state=state_filter or None, portal=p) }}">{{ p }}</a>{% endfor %}
+</p>
+
+{% if rows %}
+<div class="scroll-x">
+<table class="roles sync">
+  <thead><tr><th>Portal</th><th>Company</th><th>Job role</th><th>Previous status</th><th>Updated status</th><th>Reference email</th><th>Email date / sender</th><th>Confidence</th><th>Status updated on</th><th>Current status</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.portal }}</td>
+    <td>{{ r.company }}</td>
+    <td><a href="{{ url_for('role_page', portal=r.portal, job_id=r.job_id) }}">{{ r.title }}</a></td>
+    <td>{{ r.previous_status }}</td>
+    <td>{% if r.new_status %}&rarr; <span class="st">{{ r.new_status }}</span>{% if r.state == 'review' %}<div class="muted">proposed, not applied yet</div>{% endif %}{% else %}<span class="muted">Unclear</span>{% endif %}{% if r.note %}<div class="muted">{{ r.note }}</div>{% endif %}</td>
+    <td>{% if email and not r.message_id.startswith('synthetic-') %}<a href="https://mail.google.com/mail/u/{{ email | urlencode }}/#search/{{ ('rfc822msgid:' ~ r.message_id.strip('<>')) | urlencode }}" target="_blank" rel="noopener noreferrer" title="Open this email in Gmail">{{ r.subject }}</a>{% else %}{{ r.subject }}{% endif %}</td>
+    <td>{{ r.email_date | ist }}<br><span class="muted">{{ r.sender }}</span></td>
+    <td><span class="conf conf-{{ r.confidence | lower }}">{{ r.confidence }}</span></td>
+    <td>{% if r.state in ('applied', 'accepted') %}{{ r.changed_on | ist }}{% else %}&ndash;{% endif %}</td>
+    <td>
+      {% if r.state == 'review' %}<span class="st-review">Review needed</span>
+        <div class="row-actions">
+        {% if r.new_status %}<form method="post" class="inline" action="{{ url_for('sync_accept', update_id=r.id) }}"><input type="hidden" name="next" value="{{ request.full_path | trim('?') }}"><button type="submit">Accept</button></form>{% endif %}
+        <form method="post" class="inline" action="{{ url_for('sync_discard', update_id=r.id) }}"><input type="hidden" name="next" value="{{ request.full_path | trim('?') }}"><button type="submit" class="red">Discard</button></form></div>
+      {% elif r.state == 'applied' %}<span class="st-ok">No pending action</span>
+        <div class="row-actions"><form method="post" class="inline" action="{{ url_for('sync_discard', update_id=r.id) }}"><input type="hidden" name="next" value="{{ request.full_path | trim('?') }}"><button type="submit" class="secondary">Undo</button></form></div>
+      {% elif r.state == 'accepted' %}<span class="st-acc">Accepted</span>
+      {% else %}<span class="muted">Discarded</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty">No updates yet.{% if not problem %} Use Sync now to read your mail.{% endif %}</p>
+{% endif %}
+
+<div class="notice">
+  <strong>How it behaves</strong>
+  <ul>
+    <li>Only moves into <b>Interview Ongoing</b> are applied without asking, and only when the match and the wording are both clear.</li>
+    <li>Every rejection, offer or closure, and every unclear match, waits here until you Accept it.</li>
+    <li>A role is never moved backwards. Discard or Undo restores the previous status, unless you have changed it yourself since.</li>
+  </ul>
+</div>
+{% endblock %}

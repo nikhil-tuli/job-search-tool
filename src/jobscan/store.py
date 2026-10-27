@@ -8,6 +8,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 
+from .fit_store import FitStoreMixin
 from .models import (
     DEFAULT_STATUS,
     FOLLOW_UP_DUE,
@@ -32,6 +33,7 @@ from .models import (
     ScoringRun,
     SkippedTitle,
 )
+from .sync_store import SyncStoreMixin
 from .tailor_store import TailorStoreMixin
 from .timeutil import is_day, now_ist, to_iso
 
@@ -178,7 +180,7 @@ def _run(row: sqlite3.Row) -> RunSummary:
     )
 
 
-class Store(TailorStoreMixin):
+class Store(TailorStoreMixin, FitStoreMixin, SyncStoreMixin):
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
         self._depth = 0

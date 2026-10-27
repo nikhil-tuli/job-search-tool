@@ -644,3 +644,26 @@ def test_scoring_runs_list_newest_first(store: Store) -> None:
     second = store.start_scoring_run("manual", when=to_iso(NOW))
     assert [r.id for r in store.list_scoring_runs()] == [second, first]
     assert [r.id for r in store.list_scoring_runs(limit=1)] == [second]
+
+
+def test_a_run_saves_the_fit_each_role_had_when_it_was_considered(
+    store: Store, config: Config
+) -> None:
+    upload_cv(store)
+    add_role(store, "1", PAYMENTS_JD)
+    add_role(store, "2", PAYMENTS_JD, company="Amazon")
+    make_scorer(store, config, BagEmbedder()).run(TRIGGER_SCAN)
+    fits = store.get_fits()
+    assert fits["LinkedIn|1"][0].eligible
+    assert [r.kind for r in fits["LinkedIn|2"][0].reasons] == ["company"]
+    assert "LinkedIn|2" not in store.get_scores()
+
+
+def test_scoring_again_replaces_the_saved_fit(store: Store, config: Config) -> None:
+    upload_cv(store)
+    role = add_role(store, "1", PAYMENTS_JD, company="Amazon")
+    make_scorer(store, config, BagEmbedder()).run(TRIGGER_SCAN)
+    assert not store.get_fits()["LinkedIn|1"][0].eligible
+    freed = replace(config, fit_excluded_companies="")
+    make_scorer(store, freed, BagEmbedder()).run(TRIGGER_ROLE, only=[role])
+    assert store.get_fits()["LinkedIn|1"][0].eligible

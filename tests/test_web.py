@@ -1042,8 +1042,7 @@ def test_panel_shows_why_a_role_is_excluded(client: FlaskClient, store: Store, r
     store.update_status(["LinkedIn|1"], "Skipped")
     body = text(client.get("/roles/LinkedIn/1?partial=1"))
     assert "Fit filter" in body
-    assert "Excluded: status" in body
-    assert "<li>status is Skipped</li>" in body
+    assert "Excluded: company" in body
     assert "<li>company matches Intuit</li>" in body
 
 
@@ -1083,34 +1082,25 @@ def test_config_page_has_the_fit_group(client: FlaskClient) -> None:
     assert 'name="fit_min_years" value="3"' in body
     assert 'name="fit_excluded_companies" value="Amazon, Intuit"' in body
     assert 'name="fit_deny_keywords" value="sales, warehouse, SAP functional"' in body
-    assert 'name="fit_skip_statuses" value="Applied, Closed, Skipped, Not relevant"' in body
+    assert 'name="fit_skip_statuses"' not in body
 
 
 def test_config_save_stores_fit_settings_tidily(client: FlaskClient, store: Store) -> None:
     form = config_post(
         fit_excluded_companies=" Foo ,Bar,, foo ",
-        fit_skip_statuses="applied, closed",
         fit_min_years="5",
     )
     response = client.post("/config", data=form, follow_redirects=True)
     assert "Configuration saved" in text(response)
     config = Config.from_raw(store.get_config_raw())
     assert config.fit_excluded_companies == "Foo, Bar"
-    assert config.fit_skip_statuses == "Applied, Closed"
     assert config.fit_min_years == 5
-
-
-def test_config_save_rejects_an_unknown_status(client: FlaskClient, store: Store) -> None:
-    response = client.post("/config", data=config_post(fit_skip_statuses="Applied, Banana"))
-    assert response.status_code == 400
-    assert "not a status: Banana" in text(response)
-    assert store.get_config_raw() == {}
 
 
 def test_config_fit_group_has_info_icon(client: FlaskClient) -> None:
     html = client.get("/config").get_data(as_text=True)
     assert html.count('class="info"') == len(GROUP_INFO)
-    assert "apply immediately" in html
+    assert "Status is never part of Fit" in html
 
 
 def order(page: str, ids: list[str]) -> list[str]:
@@ -1208,39 +1198,20 @@ def test_skipped_titles_are_not_part_of_the_run_details(
     assert "Matches by phrase" in detail
 
 
-def test_a_background_status_save_returns_the_new_fit(
-    client: FlaskClient, store: Store, run_id: int
-) -> None:
-    add_role(store, run_id, "1", fetched_on=fresh())
-    assert 'muted">Eligible<' in text(client.get("/roles"))
-    response = client.post(
-        "/roles/status",
-        data={"ids": "LinkedIn|1", "status": "Not relevant"},
-        headers={"X-Panel": "1"},
-    )
-    cell = response.get_json()["fit"]["LinkedIn|1"]
-    assert "Excluded: status" in cell
-    assert "Eligible" not in cell
-    back = client.post(
-        "/roles/status",
-        data={"ids": "LinkedIn|1", "status": "Not Applied"},
-        headers={"X-Panel": "1"},
-    )
-    assert "Eligible" in back.get_json()["fit"]["LinkedIn|1"]
-
-
-def test_a_panel_save_returns_the_new_fit_cell_and_detail(
-    client: FlaskClient, store: Store, run_id: int
-) -> None:
+def test_a_status_change_never_changes_fit(client: FlaskClient, store: Store, run_id: int) -> None:
     add_role(store, run_id, "1", fetched_on=fresh())
     response = client.post(
+        "/roles/status",
+        data={"ids": "LinkedIn|1", "status": "Closed"},
+        headers={"X-Panel": "1"},
+    )
+    assert "Eligible" in response.get_json()["fit"]["LinkedIn|1"]
+    saved = client.post(
         "/roles/LinkedIn/1",
         data={"status": "Skipped", "applied_on": "", "contact_person": "", "comments": ""},
         headers={"X-Panel": "1"},
     )
-    fit = response.get_json()["fit"]
-    assert "Excluded: status" in fit["cell"]
-    assert "status is Skipped" in fit["detail"]
+    assert "Eligible" in saved.get_json()["fit"]["cell"]
 
 
 def test_the_roles_page_marks_the_fit_cell_for_updates(
@@ -1301,3 +1272,24 @@ def test_saving_the_page_as_shown_works_and_sticks(client: FlaskClient, store: S
 def test_a_rejected_save_says_what_was_wrong_at_the_top(client: FlaskClient) -> None:
     body = client.post("/config", data={"phrase_count": "0"}).get_data(as_text=True)
     assert "Not saved. Fix:" in body
+
+
+def test_summary_shows_the_last_successful_run_of_each_portal(
+    client: FlaskClient, store: Store
+) -> None:
+    body = text(client.get("/summary"))
+    assert "Last successful run: LinkedIn none yet &middot; Naukri none yet" in " ".join(
+        body.split()
+    )
+    only = " ".join(text(client.get("/summary?portal=Naukri")).split())
+    assert "Last successful run: Naukri none yet" in only
+    assert "LinkedIn none yet" not in only
+
+
+def test_summary_scan_info_is_on_two_lines_without_the_naukri_run_line(
+    client: FlaskClient, store: Store
+) -> None:
+    body = text(client.get("/summary"))
+    assert body.count('class="muted scan-state"') == 2
+    assert "Descriptions pending" in body
+    assert "Latest Naukri run" not in body
