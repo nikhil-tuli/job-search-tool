@@ -688,3 +688,97 @@ For a chosen role, write a cover letter in the layout and tone of your own Word 
 
 ### Deferred
 - Hiring manager's name (the salutation stays "Dear Hiring Manager,"), chat modifications, PDF output.
+
+## Round 14: Company sites (built)
+
+Fetch relevant roles straight from the career pages of chosen companies (product companies and GCCs hiring aggressively), next to LinkedIn and Naukri.
+
+### Summary
+- New portal value **Company sites**. Roles from company career pages appear in the Roles tab like any other role.
+- Companies and their career links are managed in Config. The list is expected to grow large.
+- Fetched daily (automatic) and on demand (terminal command only, no button in the app).
+- Uses the role keywords and filters you already have. Everything else (Fit, Score, Summary, Eval, resume, cover letter, Email Sync, follow-ups) works as it does today.
+
+### How company career pages work
+- Most companies host jobs on a hiring system (Greenhouse, Lever, Workday, Ashby, Jobvite and others). Many publish a public job list for it, so reading it is simple and gentle.
+- You paste the company's career link. The app works out the hiring system from the link and shows it.
+- Companies with a fully custom career page cannot be read reliably. They are listed as **Not supported yet**, never skipped silently.
+- Whether each public job list can be read can only be proven from your Mac, so every company row has a **Test** button that shows how many roles it found.
+
+### Your first 7 companies (checked from public pages)
+| Company | What I found | Plan |
+|---|---|---|
+| Mythic | Lever board, 29 open roles, 8 in Bangalore | Supported first |
+| Arctic Wolf | Workday board (`arcticwolf.wd1.myworkdayjobs.com/External`) | Supported first |
+| Target | Career site by Radancy; applications go to Workday (`target.wd5.myworkdayjobs.com/targetcareers`) | Treat as Workday, confirm with Test |
+| Imagine Learning | Jobvite (`jobs.jobvite.com/imagine-learning`) | Supported in the first release |
+| DoorDash | Own WordPress job site (`careersatdoordash.com/job-search/`, about 800 roles, 25 per page, no public job feed, no location filter). The `doordashusa` Greenhouse board is US only | Custom page, handled separately |
+| Syneos Health | Own career site (`syneoshealth.com/clinical-corporate-careers/search/jobs/`); hiring system not visible | Custom page, handled separately |
+| Tazapay | Zoho Recruit (`tazapay.zohorecruit.in/jobs/Careers`); the job list loads with scripts | Custom page, handled separately |
+
+### Config: Company sites
+**Company list**
+- Columns: Company, Career link, Hiring system (detected, can be changed), On/Off, Last result, Roles found, Test, Remove.
+- Shows **10 companies by default**. "Show all N companies" expands the list. When there are more than 10, a search box and filter chips appear: All, Working, Needs attention, Paused, Not supported yet.
+- Companies needing attention are pinned to the top so they are never hidden by the 10-row limit. The rest are sorted by name.
+- **Add company:** name + link (adding an existing name updates its link and tag). **Add many:** paste one `Name, link` per line.
+- Optional **Tag** per company (for example GCC, Product, Services). Filter chips use it. Free text, never required.
+- Pausing a company keeps its link but stops fetching.
+
+**Settings (Company sites only)**
+- **Daily fetch:** on/off. Runs with the LinkedIn scan at the scheduled time (08:00), LinkedIn first, then company sites.
+- **Locations to keep:** words matched against the job's location. Default: India, Bengaluru, Bangalore, Hyderabad, Pune, Chennai, Mumbai, Gurugram, Gurgaon, Noida, Delhi. Editable. (A per-company override is not built.)
+- **Ignore roles older than:** days, default 60. Only where the company's list gives a posting date.
+- **Pause between companies:** seconds, default 3.
+- **Fetch descriptions:** on/off. Most lists include the description; where one does not, it is fetched per role, as for Naukri.
+- **Roles per company per run:** safety cap, default 500.
+- **Not repeated here:** role keywords, junior and deny words, years filter. The existing ones apply.
+
+### What gets saved
+- Only roles whose title matches your keywords **and** whose location matches the location words. Keywords only; no company-wide "all roles" mode.
+- Same fields as other roles: title, company, location, description, link, fetched date. Portal = Company sites.
+- A role's identity is company + the company's own job number, so a role is never stored twice.
+- **"New":** if the company's list gives a posting date, that date is used. If not, a role counts as new on the day the app first sees it. The first fetch for a company therefore shows its current matches as new; after that, only genuinely new ones.
+- **Possible duplicate:** the existing rule (same company, title and city) also works across portals. A role on LinkedIn and on the company site is shown twice, with the flag on both.
+- Roles that disappear from a company's list are not deleted. They stay with their status. (Auto-closing is a later option.)
+
+### Roles tab
+- Portal dropdown gets **Company sites**. The Company column shows the company.
+- Side panel link reads "Open on {Company} careers" (not "Open on LinkedIn").
+
+### Summary, Eval and Config
+- **Summary:** a Company sites pill beside LinkedIn and Naukri. The same tables, filtered. "Last successful run" includes it. One fetch across all companies is one run: Keywords column = companies done of total, Cards = jobs seen, Matched = keyword and location matches, New = new roles. A **Needs attention** line lists failed companies with the reason.
+- **Eval:** a Company sites pill. Scores and your ratings for these roles are measured on their own and together under All.
+- **Config:** a Company sites pill shows only this block and its settings.
+
+### Needs attention
+Shown in three places: next to the company in Config ("Failed: link not found, 28 Oct"), on the Summary pill ("2 companies need attention"), and at the end of the terminal run. Reasons in plain words:
+- Link not found or changed.
+- Hiring system not recognised.
+- Blocked or too many requests (retried on the next run).
+- Not supported yet.
+A company with no matching roles is a normal result, not a failure.
+
+### Running it
+- `jobscan sites` fetches all companies now. `jobscan sites --company "Mythic"` fetches one.
+- `jobscan schedule on` (Mac) runs LinkedIn first, then company sites. Naukri stays manual.
+- Same safety rules as other scans: never saves bad data on a failure, partial runs are marked partial, same exit codes.
+- Scoring runs afterwards for new Eligible roles, as for LinkedIn.
+
+### Privacy and safety
+- Only public career pages are read. No sign-in and no personal data are sent to companies.
+- Requests are slow and spaced out. Companies that block or throttle are skipped for the run and shown under Needs attention.
+
+### Build order
+1. Release 1: Greenhouse, Lever, Workday and Jobvite readers, Config list with Test, `jobscan sites`, Roles tab value, Summary, Eval and Config pills, Needs attention, scheduling.
+2. Later, separately: Ashby, then custom pages (DoorDash, Syneos, Tazapay and others). Until then these companies sit in the list as "Not supported yet".
+
+### Decisions
+- Ignore roles older than 60 days where a posting date is shown.
+- Daily schedule runs LinkedIn and company sites together at 08:00. Naukri stays manual.
+- Tag is a free-text label you type per company. It is used only for list filters (and optionally a Roles filter). It never affects fetching.
+- Custom pages are handled separately from this release.
+
+### Deferred
+- Custom career pages (DoorDash, Syneos, Tazapay), Ashby, Zoho Recruit, Roles tab filter by Tag.
+- Auto-closing roles that vanish from a company's list, per-company keywords, a "new companies" suggestions feed.

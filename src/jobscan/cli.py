@@ -23,7 +23,7 @@ from .embeddings import Embedder
 from .evaluation import build_report, load_labelled, roles_to_score
 from .fit_filters import listed_salary, rupee_text
 from .lock import AlreadyRunningError, RunLock
-from .models import PORTAL_LINKEDIN, PORTAL_NAUKRI, STATUSES, Role, RoleFilter
+from .models import PORTAL_LINKEDIN, PORTAL_NAUKRI, PORTAL_SITES, STATUSES, Role, RoleFilter
 from .naukri_browser import BrowserUnavailable
 from .naukri_run import NaukriRunner, NaukriSource, reminder_text
 from .report import Reporter, eval_summary, log_name, phrase_lines, scoring_summary
@@ -36,6 +36,8 @@ from .scoring import (
     ScoringUnavailable,
     gemini_from_env,
 )
+from .sites_readers import Http
+from .sites_run import ReaderFactory, SitesRunner, default_reader_factory
 from .store import RUN_FAILED, RUN_PARTIAL, RUN_RUNNING, RUN_SUCCESS, Store
 from .sync import MailSourceFactory, default_source_factory, sync_once, sync_problem
 from .timeutil import format_display, from_iso, now_ist, to_iso
@@ -72,6 +74,9 @@ def build_parser() -> argparse.ArgumentParser:
         "naukri",
         help="fetch new roles from Naukri in a visible browser window (you solve any captcha)",
     )
+
+    sites = sub.add_parser("sites", help="fetch new roles from the company career pages in Config")
+    sites.add_argument("--company", help="fetch only this company (as named in Config)")
 
     sub.add_parser(
         "naukri-details",
@@ -137,6 +142,13 @@ def cmd_status(store: Store, out: TextIO) -> int:
         print(
             f"Naukri latest run: #{naukri_latest.id} {naukri_latest.status} at "
             f"{format_display(naukri_latest.started_on)} IST",
+            file=out,
+        )
+    sites_latest = store.latest_run(PORTAL_SITES)
+    if sites_latest:
+        print(
+            f"Company sites latest run: #{sites_latest.id} {sites_latest.status} at "
+            f"{format_display(sites_latest.started_on)} IST",
             file=out,
         )
     reminder = reminder_text(store)
@@ -568,6 +580,72 @@ def cmd_naukri(
         reporter.close()
 
 
+def cmd_sites(
+    store: Store,
+    db_path: Path,
+    *,
+    out: TextIO,
+    http: Http | None,
+    reader_factory: ReaderFactory,
+    make_embedder: EmbedderFactory,
+    sleep: Callable[[float], None],
+    company: str | None,
+) -> int:
+    config = load_config(store, out, "nothing was fetched")
+    if config is None:
+        return EXIT_USAGE
+    stale = store.fail_stale_runs()
+    if stale:
+        print(f"Marked {stale} unfinished earlier run(s) as failed", file=out)
+    reporter = Reporter(out, db_path.parent / "runs" / log_name(to_iso(now_ist())))
+    try:
+        runner = SitesRunner(
+            store=store,
+            config=config,
+            http=http,
+            reader_factory=reader_factory,
+            emit=reporter.line,
+            sleep=sleep,
+            only=company,
+        )
+        try:
+            result = runner.run()
+        except ScanSetupError as exc:
+            reporter.line(f"Cannot start: {exc}")
+            return EXIT_USAGE
+        except KeyboardInterrupt:
+            reporter.line("Interrupted. Run marked failed; roles already saved are kept.")
+            return EXIT_INTERRUPTED
+        for site in runner.unsupported:
+            reporter.line(f"{site.name}: skipped, not supported yet")
+        summary = store.get_run(result.run_id)
+        assert summary is not None
+        reporter.line(
+            f"Run #{result.run_id} {result.status}: {summary.cards_seen} jobs seen, "
+            f"{summary.matched} matched, {summary.new_roles} new, "
+            f"{summary.possible_dups} possible duplicates"
+        )
+        attention = len(runner.failures)
+        if attention or runner.unsupported:
+            reporter.line(
+                f"{attention} company site(s) need attention, "
+                f"{len(runner.unsupported)} not supported yet."
+            )
+        if result.note:
+            reporter.line(f"Note: {result.note}")
+        if (
+            config.score_after_scan
+            and summary.new_roles
+            and score_after_scan(store, config, reporter.line, make_embedder, sleep, PORTAL_SITES)
+        ):
+            return EXIT_INTERRUPTED
+        return {RUN_SUCCESS: EXIT_OK, RUN_PARTIAL: EXIT_PARTIAL, RUN_FAILED: EXIT_FAILED}[
+            result.status
+        ]
+    finally:
+        reporter.close()
+
+
 def cmd_naukri_details(
     store: Store,
     db_path: Path,
@@ -662,6 +740,8 @@ def main(
     rng: random.Random | None = None,
     open_source: NaukriSourceFactory = default_naukri_source,
     make_mail_source: MailSourceFactory = default_source_factory,
+    sites_http: Http | None = None,
+    sites_reader_factory: ReaderFactory = default_reader_factory,
 ) -> int:
     stream = out or sys.stdout
     args = build_parser().parse_args(argv)
@@ -723,6 +803,17 @@ def main(
                         make_embedder=make_embedder,
                         sleep=sleep,
                         rng=rng,
+                    )
+                if args.command == "sites":
+                    return cmd_sites(
+                        store,
+                        db_path,
+                        out=stream,
+                        http=sites_http,
+                        reader_factory=sites_reader_factory,
+                        make_embedder=make_embedder,
+                        sleep=sleep,
+                        company=args.company,
                     )
                 if args.command == "naukri-details":
                     return cmd_naukri_details(

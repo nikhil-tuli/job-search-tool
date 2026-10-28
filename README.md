@@ -6,7 +6,7 @@ your own computer.
 
 ## What it does
 
-- **Finds roles:** scans LinkedIn and Naukri for the job titles you choose.
+- **Finds roles:** scans LinkedIn, Naukri and the career pages of companies you list, for the job titles you choose.
 - **Removes noise:** skips repeats and flags roles that don't fit (too junior, wrong company, etc.).
 - **Ranks by fit:** scores each role 0 to 100 against your CV (Strong, Partial, Weak).
 - **Tailors documents:** suggests resume and cover-letter changes for a role. You review and
@@ -24,7 +24,7 @@ your own computer.
 - **Eval:** checks how well the score matches your own ratings.
 - **Manage CV:** upload your CV and cover letter template; History lists tailored documents.
 - **Email Sync:** status changes found in your mail, waiting for review or applied.
-- **Config:** titles, filters, scan speed and other settings.
+- **Config:** titles, filters, scan speed, the company list for Company sites and other settings.
 
 ## Get started
 
@@ -51,6 +51,7 @@ for everything except the daily scheduler, but it has not been tested. On Window
 
    - **LinkedIn** can run daily on its own on a Mac (`jobscan schedule on`).
    - **Naukri** is manual only: run the command whenever you want fresh roles.
+   - **Company sites:** add companies and their career links on the Config page (Test checks each link), then run `.venv/bin/jobscan sites`. It also runs daily with the LinkedIn scan.
 4. **Upload your CV** on Manage CV. Use a Word (.docx) file if you want tailoring.
 
 ## Optional features and their keys
@@ -85,6 +86,7 @@ export GEMINI_API_KEY=your-key
 - Fit scores and AI suggestions are aids, not decisions. Check them before you rely on them.
 - Tailored documents never add skills, employers, dates or numbers that are not in your CV.
 - Free-tier limits cap how many roles can be scored per day; leftovers are scored next time.
+- Company career pages on custom or unsupported systems are listed as "Not supported yet".
 - If LinkedIn or Naukri changes its page layout, the scan stops safely and the parser needs an update.
 
 ## More detail
@@ -94,10 +96,11 @@ export GEMINI_API_KEY=your-key
   - `serve`: open the app
   - `scan`: fetch LinkedIn roles
   - `naukri`: fetch Naukri roles
+  - `sites`: fetch roles from the company career pages in Config
   - `naukri-details`, `details`: fetch missing job descriptions (Naukri, LinkedIn)
   - `score`: score roles against your CV
   - `sync`: read Gmail once and propose status changes
   - `status`: show the last run and counts
   - `eval`: check how well scores match your ratings
-  - `schedule on|off|status`: daily LinkedIn scan (Mac only)
+  - `schedule on|off|status`: daily LinkedIn scan and company sites fetch (Mac only)
 - Back up your data by copying `~/.jobscan/` while the app is closed.

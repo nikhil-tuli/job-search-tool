@@ -550,7 +550,7 @@ def test_the_reference_email_links_to_that_message_in_gmail(
     applied(store, run_id, "1", company="Acme")
     client.post("/sync/run")
     page = client.get("/sync").get_data(as_text=True)
-    assert "https://mail.google.com/mail/u/a%40gmail.com/#search/rfc822msgid%3Am1" in page
+    assert "https://mail.google.com/mail/?authuser=a%40gmail.com#search/rfc822msgid:m1" in page
     assert 'target="_blank"' in page
 
 

@@ -31,7 +31,7 @@
 {% if rows %}
 <div class="scroll-x">
 <table class="roles sync">
-  <thead><tr><th>Portal</th><th>Company</th><th>Job role</th><th>Previous status</th><th>Updated status</th><th>Reference email</th><th>Email date / sender</th><th>Confidence</th><th>Status updated on</th><th>Current status</th></tr></thead>
+  <thead><tr><th>Portal</th><th>Company</th><th>Job role</th><th>Previous role status</th><th>Updated role status</th><th>Reference email</th><th>Email date / sender</th><th title="High: the email clearly matches exactly one role. Medium: likely match, check it. Low: weak match, needs your review. Only High moves to Interview Ongoing are applied automatically.">Confidence <span class="muted" aria-hidden="true">&#9432;</span></th><th>Status updated on</th><th>Current status</th></tr></thead>
   <tbody>
   {% for r in rows %}
   <tr>
@@ -40,7 +40,7 @@
     <td><a href="{{ url_for('role_page', portal=r.portal, job_id=r.job_id) }}">{{ r.title }}</a></td>
     <td>{{ r.previous_status }}</td>
     <td>{% if r.new_status %}&rarr; <span class="st">{{ r.new_status }}</span>{% if r.state == 'review' %}<div class="muted">proposed, not applied yet</div>{% endif %}{% else %}<span class="muted">Unclear</span>{% endif %}{% if r.note %}<div class="muted">{{ r.note }}</div>{% endif %}</td>
-    <td>{% if email and not r.message_id.startswith('synthetic-') %}<a href="https://mail.google.com/mail/u/{{ email | urlencode }}/#search/{{ ('rfc822msgid:' ~ r.message_id.strip('<>')) | urlencode }}" target="_blank" rel="noopener noreferrer" title="Open this email in Gmail">{{ r.subject }}</a>{% else %}{{ r.subject }}{% endif %}</td>
+    <td>{% if email and not r.message_id.startswith('synthetic-') %}<a href="https://mail.google.com/mail/?authuser={{ email | urlencode }}#search/rfc822msgid:{{ r.message_id.strip('<>') | urlencode }}" target="_blank" rel="noopener noreferrer" title="Open this email in Gmail">{{ r.subject }}</a>{% else %}{{ r.subject }}{% endif %}</td>
     <td>{{ r.email_date | ist }}<br><span class="muted">{{ r.sender }}</span></td>
     <td><span class="conf conf-{{ r.confidence | lower }}">{{ r.confidence }}</span></td>
     <td>{% if r.state in ('applied', 'accepted') %}{{ r.changed_on | ist }}{% else %}&ndash;{% endif %}</td>

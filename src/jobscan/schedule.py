@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TextIO
 
 from .config import Config, ConfigError
-from .models import PORTAL_LINKEDIN
+from .models import PORTAL_LINKEDIN, PORTAL_SITES
 from .scoring import ScoreModel
 from .store import RUN_FAILED, RUN_PARTIAL, RUN_RUNNING, RUN_SUCCESS, Store
 from .timeutil import format_display, from_iso, now_ist, to_iso
@@ -194,12 +194,12 @@ def uninstall(
 # ---- the scheduled run --------------------------------------------------------------------
 
 
-def ran_today(store: Store, now_iso: str) -> bool:
+def ran_today(store: Store, now_iso: str, portal: str = PORTAL_LINKEDIN) -> bool:
     """True when a scan already ended well today (IST), so another is not needed."""
     today = now_iso[:10]
     return any(
         run.started_on[:10] == today and run.status in (RUN_SUCCESS, RUN_PARTIAL)
-        for run in store.list_runs(10, PORTAL_LINKEDIN)
+        for run in store.list_runs(10, portal)
     )
 
 
@@ -235,6 +235,58 @@ def spawn_with_timeout(
 
 
 def run_scheduled(
+    store: Store,
+    db_path: Path,
+    out: TextIO,
+    *,
+    env: Mapping[str, str] | None = None,
+    runner: Runner = _run,
+    spawner: Spawner = spawn_with_timeout,
+    notifier: Notifier | None = None,
+    python: str | None = None,
+) -> int:
+    """The daily job: the LinkedIn scan, then the company sites fetch when it is switched on."""
+    code = run_linkedin_scheduled(
+        store,
+        db_path,
+        out,
+        env=env,
+        runner=runner,
+        spawner=spawner,
+        notifier=notifier,
+        python=python,
+    )
+    try:
+        config = Config.from_raw(store.get_config_raw())
+    except ConfigError:
+        return code
+    if not config.sites_daily or not store.list_sites():
+        return code
+    now = to_iso(now_ist())
+    if ran_today(store, now, PORTAL_SITES):
+        print("Company sites: a fetch already finished today, nothing to do.", file=out)
+        return code
+    send: Notifier = notifier or (lambda title, message: notify(title, message, runner))
+    environment = dict(os.environ if env is None else env)
+    if not environment.get(KEY_ENV):
+        key = keychain_key(runner)
+        if key:
+            environment[KEY_ENV] = key
+    command = [python or sys.executable, "-m", "jobscan", "--db", str(db_path), "sites"]
+    print(f"{format_display(now)} IST: starting the company sites fetch", file=out)
+    out.flush()
+    sites_code = spawner(command, environment, config.schedule_timeout_minutes * 60)
+    if sites_code is None:
+        send("Job scanner", "Company sites fetch was stopped after the time limit.")
+        return 1
+    if sites_code not in (0, EXIT_DECLINED):
+        latest = store.latest_run(PORTAL_SITES)
+        note = latest.note if latest and latest.note else f"exit code {sites_code}"
+        send("Job scanner", f"Company sites: {note[:120]}")
+    return code
+
+
+def run_linkedin_scheduled(
     store: Store,
     db_path: Path,
     out: TextIO,

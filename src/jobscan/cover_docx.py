@@ -16,8 +16,6 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from docx.text.paragraph import Paragraph
-
 from .tailor_docx import DocxError, _is_bullet, _open, _split_ends, numbers_in
 
 MAX_BULLETS = 7
@@ -189,6 +187,8 @@ def format_date(day: date) -> str:
 
 def build_letter(data: bytes, plan: LetterPlan) -> bytes:
     """A copy of the template with the plan written into it. The input is never changed."""
+    from docx.text.paragraph import Paragraph  # after _open, which explains a missing package
+
     document = _open(data)
     parts = _find_parts(document)
     templates = list(parts.bullets or [])

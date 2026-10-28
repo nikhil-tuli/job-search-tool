@@ -546,6 +546,28 @@ def _migration_15(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE tailor_requests ADD COLUMN template_sha TEXT NOT NULL DEFAULT ''")
 
 
+def _migration_16(conn: sqlite3.Connection) -> None:
+    """Company sites: the companies whose career pages are read."""
+    conn.execute(
+        """
+        CREATE TABLE sites_companies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            url TEXT NOT NULL,
+            system TEXT NOT NULL DEFAULT '',
+            board TEXT NOT NULL DEFAULT '',
+            tag TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+            last_run_on TEXT NOT NULL DEFAULT '',
+            last_status TEXT NOT NULL DEFAULT '',
+            last_note TEXT NOT NULL DEFAULT '',
+            last_found INTEGER NOT NULL DEFAULT 0,
+            created_on TEXT NOT NULL
+        )
+        """
+    )
+
+
 # Append new migrations to the end; never edit one that has shipped.
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_1,
@@ -563,6 +585,7 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_13,
     _migration_14,
     _migration_15,
+    _migration_16,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 

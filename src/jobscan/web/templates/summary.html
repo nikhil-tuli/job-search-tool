@@ -16,6 +16,7 @@
     {% for p in portals %}<a class="chip-link{% if portal == p %} on{% endif %}" href="{{ url_for('summary', portal=p) }}">{{ p }}</a>{% endfor %}
   </p>
   {% if naukri_reminder %}<p class="notice">{{ naukri_reminder }}</p>{% endif %}
+  {% if site_attention and (not portal or portal == 'Company sites') %}<p class="notice"><strong>Needs attention ({{ site_attention | length }}):</strong> {% for name, note in site_attention %}{{ name }}: {{ note }}{% if not loop.last %}; {% endif %}{% endfor %}. Fix the link under Config, Company sites, then run <code>jobscan sites</code>.</p>{% endif %}
   <p class="muted scan-state">
     {% if latest_run and latest_run.status == 'running' %}
       <strong>Scan running:</strong> {{ latest_run.keywords_done }} of {{ latest_run.keywords_total }} keywords done,
@@ -75,7 +76,7 @@
 {% if run_rows %}
 <div class="scroll-x">
 <table class="runs">
-  <thead><tr><th title="Run number">Run</th><th title="Portal">Portal</th><th title="Started (IST)">Started (IST)</th><th title="Status">Status</th><th title="Keywords done of searched">Keywords</th><th title="Pages fetched">Pages</th><th title="Cards seen">Cards</th><th title="Roles whose title matched a phrase">Matched</th><th title="New roles saved">New</th><th title="Possible duplicates">Dups</th><th title="Throttled responses (or captchas on Naukri)">Throttled</th><th title="Retries">Retries</th><th title="Pages skipped after retries">Skipped pages</th></tr></thead>
+  <thead><tr><th title="Run number">Run</th><th title="Portal">Portal</th><th title="Started (IST)">Started (IST)</th><th title="Status">Status</th><th title="Keywords done of searched (companies done, for Company sites)">Keywords</th><th title="Pages fetched">Pages</th><th title="Cards seen">Cards</th><th title="Roles whose title matched a phrase">Matched</th><th title="New roles saved">New</th><th title="Possible duplicates">Dups</th><th title="Throttled responses (or captchas on Naukri)">Throttled</th><th title="Retries">Retries</th><th title="Pages skipped after retries">Skipped pages</th></tr></thead>
   <tbody>
   {% for r in run_rows %}
     <tr {% if selected and selected.id == r.id %}class="sel"{% endif %}>
@@ -96,10 +97,11 @@
 <p class="empty">No runs yet. Run <code>jobscan scan</code> in a terminal.</p>
 {% endif %}
 
-{% if linkedin_latest or naukri_latest %}
+{% if linkedin_latest or naukri_latest or sites_latest %}
 <p class="muted">Latest runs:
   {% if linkedin_latest %}<a href="{{ url_for('summary', run=linkedin_latest.id, portal=portal or None) }}#run-detail">LinkedIn #{{ linkedin_latest.id }}</a> ({{ linkedin_latest.status }}){% endif %}
   {% if naukri_latest %}{% if linkedin_latest %}&middot;{% endif %} <a href="{{ url_for('summary', run=naukri_latest.id, portal=portal or None) }}#run-detail">Naukri #{{ naukri_latest.id }}</a> ({{ naukri_latest.status }}){% endif %}
+  {% if sites_latest %}{% if linkedin_latest or naukri_latest %}&middot;{% endif %} <a href="{{ url_for('summary', run=sites_latest.id, portal=portal or None) }}#run-detail">Company sites #{{ sites_latest.id }}</a> ({{ sites_latest.status }}){% endif %}
 </p>
 {% endif %}
 {% if selected %}

@@ -3,7 +3,7 @@
 <p class="muted">{{ role.company }} &middot; {{ role.location }} &middot; {{ role.portal }} {{ role.job_id }}</p>
 {% set link = role.link | safe_link %}
 <dl class="facts">
-  <dt>Link</dt><dd>{% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer" title="{{ link }}">Open on {{ role.portal }} &#8599;</a>{% endif %}</dd>
+  <dt>Link</dt><dd>{% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer" title="{{ link }}">Open on {% if role.portal == 'Company sites' %}{{ role.company }} careers{% else %}{{ role.portal }}{% endif %} &#8599;</a>{% endif %}</dd>
   <dt>Posted (IST)</dt><dd>{% if role.raw_relative %}<span data-tip="LinkedIn said &quot;{{ role.raw_relative }}&quot;" tabindex="0">{{ role | posted }}</span>{% else %}{{ role | posted }}{% endif %}</dd>
   <dt>Fetched (IST)</dt><dd>{{ role.fetched_on | ist }}</dd>
   <dt>Matched phrase</dt><dd>{{ role.matched_phrase }}</dd>

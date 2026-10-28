@@ -6,7 +6,8 @@ from dataclasses import dataclass
 
 PORTAL_LINKEDIN = "LinkedIn"
 PORTAL_NAUKRI = "Naukri"
-PORTALS = (PORTAL_LINKEDIN, PORTAL_NAUKRI)
+PORTAL_SITES = "Company sites"
+PORTALS = (PORTAL_LINKEDIN, PORTAL_NAUKRI, PORTAL_SITES)
 
 STATUSES: tuple[str, ...] = (
     "Not Applied",
@@ -420,3 +421,28 @@ class SyncState:
     done: int = 0
     total: int = 0
     available: int = 0  # emails in the window; above total when the cap was reached
+
+
+# ---- Company sites ----------------------------------------------------------------------------
+
+SITE_OK = "ok"  # the last fetch worked
+SITE_FAILED = "failed"  # the last fetch failed; the note says why
+SITE_UNSUPPORTED = "unsupported"  # the hiring system is not recognised or not built yet
+SITE_NEW = ""  # never fetched
+
+
+@dataclass(frozen=True)
+class SitesCompany:
+    """One company whose career page is read."""
+
+    id: int
+    name: str
+    url: str
+    system: str  # "greenhouse", "lever", ... or "" when not recognised
+    board: str  # what the system needs to find the company's jobs
+    tag: str
+    enabled: bool
+    last_run_on: str
+    last_status: str
+    last_note: str
+    last_found: int

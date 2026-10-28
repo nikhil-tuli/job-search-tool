@@ -88,6 +88,15 @@ class Config:
     sync_every_hours: int = 4
     sync_first_days: int = 30
     sync_use_ai: int = 1
+    sites_location_words: str = (
+        "India, Bengaluru, Bangalore, Hyderabad, Pune, Chennai, Mumbai, Gurugram, Gurgaon, "
+        "Noida, Delhi"
+    )
+    sites_max_age_days: int = 60
+    sites_delay_seconds: float = 3.0
+    sites_fetch_descriptions: int = 1
+    sites_max_roles_per_company: int = 500
+    sites_daily: int = 1
     schedule_time: str = "08:00"
     schedule_timeout_minutes: int = 180
     schedule_notify_finish: int = 0
@@ -190,6 +199,11 @@ _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
     "naukri_max_age_hours": (int, 1, 720),
     "naukri_abort_after_captchas": (int, 1, 20),
     "naukri_captcha_wait_seconds": (int, 30, 1_800),
+    "sites_max_age_days": (int, 1, 365),
+    "sites_delay_seconds": (float, 0, 60),
+    "sites_fetch_descriptions": (int, 0, 1),
+    "sites_max_roles_per_company": (int, 1, 5_000),
+    "sites_daily": (int, 0, 1),
     "schedule_timeout_minutes": (int, 5, 240),
     "schedule_notify_finish": (int, 0, 1),
 }
@@ -200,6 +214,7 @@ LIST_SETTINGS = (
     "fit_excluded_companies",
     "fit_deny_keywords",
     "fit_excluded_industries",
+    "sites_location_words",
 )
 MAX_LIST_ITEMS = 100
 MAX_LIST_ITEM_CHARS = 80

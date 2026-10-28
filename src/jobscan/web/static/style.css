@@ -205,3 +205,10 @@ table.sync td { vertical-align: top; }
 form.bar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 10px 0 14px; }
 button.red { background: transparent; border: 1px solid #b42318; color: #b42318; }
 .diff textarea, .diff input[type=text] { width: 100%; box-sizing: border-box; margin: 4px 0; font: inherit; }
+.companies td.nowrap { white-space: nowrap; }
+.companies .tag { font-size: .8rem; padding: 1px 8px; border-radius: 8px; background: rgba(127, 127, 127, .18); }
+.site-working { color: #1a7f37; }
+.site-attention { color: #b42318; font-weight: 600; }
+.site-unsupported { color: #9a6700; }
+.site-paused { color: #666; }
+textarea.wide { width: 100%; box-sizing: border-box; }

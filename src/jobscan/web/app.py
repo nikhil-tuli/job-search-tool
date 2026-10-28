@@ -41,6 +41,7 @@ from ..models import (
     FOLLOW_UP_STATES,
     PORTAL_LINKEDIN,
     PORTAL_NAUKRI,
+    PORTAL_SITES,
     PORTALS,
     SORTED_STATUSES,
     STATUSES,
@@ -66,6 +67,8 @@ from ..scoring import (
     gemini_from_env,
     plan_scoring,
 )
+from ..sites_readers import SYSTEM_LABELS, Http, HttpClient, SiteError, detect, detect_from_page
+from ..sites_run import ReaderFactory, default_reader_factory, try_company
 from ..store import Store, StoreError
 from ..sync import (
     MailSourceFactory,
@@ -265,6 +268,39 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "naukri_captcha_wait_seconds",
                 "Wait for you to solve a captcha (s)",
                 "How long the run waits in the browser window before trying again",
+            ),
+        ),
+    ),
+    (
+        "Company sites",
+        (
+            (
+                "sites_daily",
+                "Fetch company sites with the daily schedule",
+                "1 runs it after the LinkedIn scan at the scheduled time. 0 leaves it to "
+                "jobscan sites",
+            ),
+            (
+                "sites_location_words",
+                "Locations to keep",
+                "Comma separated. A role is kept when its location contains one of these words. "
+                "Add Remote to keep remote roles",
+            ),
+            (
+                "sites_max_age_days",
+                "Ignore roles older than (days)",
+                "Only where the company shows a posting date",
+            ),
+            ("sites_delay_seconds", "Pause between requests (s)", "Be gentle with company sites"),
+            (
+                "sites_fetch_descriptions",
+                "Fetch descriptions",
+                "1 reads each new role's description where the list does not include it. 0 skips",
+            ),
+            (
+                "sites_max_roles_per_company",
+                "Most roles read per company per run",
+                "A safety cap",
             ),
         ),
     ),
@@ -512,11 +548,13 @@ GROUP_SECTION = {
     "Run spacing": "LinkedIn",
     "Scheduled scan": "LinkedIn",
     "Naukri": "Naukri",
+    "Company sites": "Company sites",
 }
 SECTION_NOTES = {
-    "Common": "Used by both LinkedIn and Naukri: title phrases, matching, Fit filters, scoring.",
+    "Common": "Used by every portal: title phrases, matching, Fit filters, scoring.",
     "LinkedIn": "Used only by the LinkedIn scan (jobscan scan, and the daily schedule).",
     "Naukri": "Used only by the Naukri run (jobscan naukri).",
+    "Company sites": "Used only by the company sites run (jobscan sites, and the daily schedule).",
 }
 CONFIG_SECTIONS = tuple(
     (name, SECTION_NOTES[name], tuple(g for g in SETTING_GROUPS if GROUP_SECTION[g[0]] == name))
@@ -566,6 +604,8 @@ def create_app(
     allowed_hosts: Collection[str] = LOOPBACK_HOSTS,
     make_embedder: Callable[[Config], Embedder] = gemini_from_env,
     make_tailor_client: ClientFactory = default_client_factory,
+    sites_http: Http | None = None,
+    sites_reader_factory: ReaderFactory = default_reader_factory,
     tailor_convert: Converter = libreoffice_pdf,
     make_mail_source: MailSourceFactory = default_source_factory,
 ) -> Flask:
@@ -1334,6 +1374,12 @@ def create_app(
             naukri_reminder=reminder_text(store),
             naukri_latest=store.latest_run(PORTAL_NAUKRI),
             linkedin_latest=store.latest_run(PORTAL_LINKEDIN),
+            sites_latest=store.latest_run(PORTAL_SITES),
+            site_attention=[
+                (c.name, c.last_note)
+                for c in store.list_sites()
+                if c.enabled and c.last_status == "failed"
+            ],
             naukri_waiting=waiting_for_description(store, current_config(), PORTAL_NAUKRI),
             scans=scans_by_day(store.list_runs(200, portal or None)),
             latest_run=store.latest_run(portal or PORTAL_LINKEDIN),
@@ -1399,6 +1445,167 @@ def create_app(
 
     # ---- config ---------------------------------------------------------------------------
 
+    SITES_SHOWN = 10
+    SITE_FILTERS = ("working", "attention", "paused", "unsupported")
+
+    def site_state(company: Any) -> str:
+        if not company.enabled:
+            return "paused"
+        if not company.system:
+            return "unsupported"
+        return "attention" if company.last_status == "failed" else "working"
+
+    def site_text(company: Any) -> str:
+        when = format_display(company.last_run_on, with_time=False) if company.last_run_on else ""
+        state = site_state(company)
+        if state == "paused":
+            return "Paused"
+        if state == "unsupported":
+            return "Not supported yet"
+        if state == "attention":
+            return f"Failed: {company.last_note}" + (f" ({when})" if when else "")
+        if not company.last_run_on:
+            return "Not fetched yet"
+        return f"Working, {company.last_found} roles, {when}"
+
+    def sites_context() -> dict[str, Any]:
+        everything = store.list_sites()
+        wanted = request.args.get("co", "")
+        wanted = wanted if wanted in SITE_FILTERS else ""
+        query = request.args.get("q", "").strip().casefold()
+        tag = request.args.get("tag", "").strip()
+        counts = dict.fromkeys(SITE_FILTERS, 0)
+        for company in everything:
+            counts[site_state(company)] += 1
+        picked = [
+            c
+            for c in everything
+            if (not wanted or site_state(c) == wanted)
+            and (not query or query in c.name.casefold())
+            and (not tag or c.tag.casefold() == tag.casefold())
+        ]
+        picked.sort(key=lambda c: (site_state(c) != "attention", c.name.casefold()))
+        show_all = request.args.get("all") == "1"
+        shown = picked if show_all else picked[:SITES_SHOWN]
+        return {
+            "companies": [
+                {
+                    "c": c,
+                    "state": site_state(c),
+                    "text": site_text(c),
+                    "system": SYSTEM_LABELS[c.system],
+                }
+                for c in shown
+            ],
+            "sites_total": len(everything),
+            "sites_matching": len(picked),
+            "sites_hidden": len(picked) - len(shown),
+            "site_counts": counts,
+            "site_tags": sorted({c.tag for c in everything if c.tag}, key=str.casefold),
+            "site_filter": wanted,
+            "site_query": request.args.get("q", ""),
+            "site_tag": tag,
+        }
+
+    def back_to_sites() -> WerkzeugResponse:
+        return redirect(url_for("config_page") + "#company-sites")
+
+    def add_site(name: str, link: str, tag: str) -> str:
+        """Add or update one company. Returns a message, or raises SiteError."""
+        name, tag = " ".join(name.split())[:80], " ".join(tag.split())[:30]
+        if not name:
+            raise SiteError("Enter the company name.")
+        found = detect(link)
+        if not found.system:  # a company's own page may link to its hiring system
+            found = detect_from_page(link.strip(), sites_http or HttpClient())
+        new = store.upsert_site(name, link.strip(), found.system, found.board, tag)
+        label = SYSTEM_LABELS[found.system]
+        status = "added" if new else "updated"
+        tail = f"{label}" if found.system else "hiring system not recognised, so not supported yet"
+        return f"{name} {status} ({tail})."
+
+    @app.post("/config/sites/add")
+    def sites_add() -> WerkzeugResponse:
+        try:
+            flash(
+                add_site(
+                    request.form.get("name", ""),
+                    request.form.get("url", ""),
+                    request.form.get("tag", ""),
+                ),
+                "ok",
+            )
+        except SiteError as exc:
+            flash(str(exc), "error")
+        return back_to_sites()
+
+    @app.post("/config/sites/add-many")
+    def sites_add_many() -> WerkzeugResponse:
+        added, bad = 0, []
+        for line in request.form.get("lines", "").splitlines():
+            if not line.strip():
+                continue
+            parts = [p.strip() for p in line.split(",")]
+            at = next((i for i, p in enumerate(parts) if p.lower().startswith("http")), -1)
+            if at < 1:
+                bad.append(line.strip()[:40])
+                continue
+            try:
+                add_site(", ".join(parts[:at]), parts[at], ", ".join(parts[at + 1 :]))
+                added += 1
+            except SiteError:
+                bad.append(line.strip()[:40])
+        flash(f"{added} compan{'y' if added == 1 else 'ies'} added or updated.", "ok")
+        if bad:
+            flash("Skipped (use: name, link, optional tag): " + "; ".join(bad[:5]), "error")
+        return back_to_sites()
+
+    @app.post("/config/sites/act")
+    def sites_act() -> WerkzeugResponse:
+        action, _, raw = request.form.get("act", "").partition(":")
+        company = store.get_site(int(raw)) if raw.isdigit() else None
+        if company is None:
+            flash("That company no longer exists.", "error")
+            return back_to_sites()
+        if action == "remove":
+            store.delete_site(company.id)
+            flash(f"{company.name} removed. Roles already fetched are kept.", "ok")
+        elif action == "toggle":
+            store.set_site_enabled(company.id, not company.enabled)
+            flash(f"{company.name} {'paused' if company.enabled else 'switched on'}.", "ok")
+        elif action == "test":
+            config = current_config()
+            phrases = store.list_phrases()
+            if not company.system:
+                found = detect_from_page(company.url, sites_http or HttpClient())
+                if found.system:
+                    store.set_site_system(company.id, found.system, found.board)
+                    company = store.get_site(company.id) or company
+                    flash(
+                        f"{company.name}: found its hiring system ({SYSTEM_LABELS[found.system]}).",
+                        "ok",
+                    )
+            result = try_company(
+                company,
+                config,
+                [p.phrase for p in phrases if p.use_as_keyword],
+                [p.phrase for p in phrases if p.use_for_match],
+                sites_http or HttpClient(),
+                sites_reader_factory,
+            )
+            if result.ok:
+                store.record_site_result(company.id, "ok", "", result.matched)
+                flash(
+                    f"{company.name}: {result.total} jobs found, {result.matched} look relevant "
+                    "(title and place). Nothing was saved.",
+                    "ok",
+                )
+            else:
+                if company.system:
+                    store.record_site_result(company.id, "failed", result.note, 0)
+                flash(f"{company.name}: {result.note}", "error")
+        return back_to_sites()
+
     def render_config(
         raw: Mapping[str, str],
         phrases: list[tuple[str, bool, bool]],
@@ -1416,6 +1623,7 @@ def create_app(
                 phrases=rows,
                 errors=errors,
                 match_modes=MATCH_MODES,
+                **sites_context(),
             ),
             status,
         )

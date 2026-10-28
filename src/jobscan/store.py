@@ -33,6 +33,7 @@ from .models import (
     ScoringRun,
     SkippedTitle,
 )
+from .sites_store import SitesStoreMixin
 from .sync_store import SyncStoreMixin
 from .tailor_store import TailorStoreMixin
 from .timeutil import is_day, now_ist, to_iso
@@ -180,7 +181,7 @@ def _run(row: sqlite3.Row) -> RunSummary:
     )
 
 
-class Store(TailorStoreMixin, FitStoreMixin, SyncStoreMixin):
+class Store(TailorStoreMixin, FitStoreMixin, SyncStoreMixin, SitesStoreMixin):
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
         self._depth = 0
