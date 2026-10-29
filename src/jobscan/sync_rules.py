@@ -27,6 +27,11 @@ STAGES = (STAGE_INTERVIEW, STAGE_REJECTED, STAGE_OFFER, STAGE_CLOSED)
 _REJECT = (
     "we will not be moving forward",
     "not moving forward",
+    "not to move forward",
+    "unable to move forward",
+    "not able to move forward",
+    "won't be moving forward",
+    "decided not to continue",
     "will not be proceeding",
     "not be proceeding",
     "regret to inform",

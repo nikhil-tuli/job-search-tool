@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Manage CV: Cover letter{% endblock %}
+{% block content %}
+<h1>Manage CV</h1>
+{% set tab = "cover" %}{% include "_cvtabs.html" %}
+<p class="muted">Your finished letter as a Word file. Cover letters keep its layout, name, greeting and sign-off; only the opening, bullets and closing change.</p>
+
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="{{ url_for('cv_template_upload') }}" enctype="multipart/form-data" class="upload">
+  <label>{% if template %}Replace the cover letter template{% else %}Upload your cover letter template{% endif %} (Word .docx only, up to {{ max_mb }} MB)
+    <input type="file" name="template" accept=".docx" required>
+  </label>
+  <button type="submit">{% if template %}Replace template{% else %}Upload template{% endif %}</button>
+</form>
+{% if template %}
+<dl class="facts">
+  <dt>File</dt><dd>{{ template.filename }}</dd>
+  <dt>Uploaded (IST)</dt><dd>{{ template.uploaded_on | ist }}</dd>
+  <dt>Cover letters</dt><dd>{% if template_problem %}<span class="stale-note">Not available.</span> <span class="muted">This file cannot be used: {{ template_problem }}</span>{% else %}<span class="ok-note">Available.</span>{% endif %}</dd>
+</dl>
+{% else %}
+<p class="empty">No template yet. Upload a finished cover letter (Word .docx) to tailor cover letters from it.</p>
+{% endif %}
+{% endblock %}

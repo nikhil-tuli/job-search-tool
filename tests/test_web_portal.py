@@ -183,3 +183,64 @@ def test_the_panel_link_names_the_role_portal(both: Store, client: FlaskClient) 
     assert "Open on Naukri" in naukri
     assert "Open on LinkedIn" not in naukri
     assert "Open on LinkedIn" in linkedin
+
+
+def test_job_title_filter_contains_multi_other_and_follows_config(
+    store: Store, client: FlaskClient
+) -> None:
+    store.replace_phrases([("Program Manager", True, True), ("Delivery Lead", True, True)])
+    run = store.start_run(window_seconds=86400, keywords_total=1)
+    for job_id, title in (
+        ("1", "Senior Technical Program Manager"),
+        ("2", "Delivery Lead - Payments"),
+        ("3", "Product Owner"),
+    ):
+        add_role(store, run, job_id, title=title)
+    page = client.get("/roles").get_data(as_text=True)
+    assert 'value="Program Manager"' in page
+    assert 'value="Delivery Lead"' in page
+    assert 'value="__other__"' in page
+
+    def titles(query: str) -> str:
+        return client.get(f"/roles?{query}").get_data(as_text=True)
+
+    one = titles("title=program%20manager")  # not an option (case differs): ignored
+    assert "Product Owner" in one
+    contains = titles("title=Program+Manager")
+    assert "Senior Technical Program Manager" in contains
+    assert "Delivery Lead - Payments" not in contains
+    both = titles("title=Program+Manager&title=Delivery+Lead")
+    assert "Delivery Lead - Payments" in both
+    assert "Product Owner" not in both
+    other = titles("title=__other__")
+    assert "Product Owner" in other
+    assert "Senior Technical Program Manager" not in other
+    mixed = titles("title=__other__&title=Delivery+Lead")
+    assert "Product Owner" in mixed
+    assert "Delivery Lead - Payments" in mixed
+    store.replace_phrases([("Delivery Lead", True, True)])
+    after = client.get("/roles?title=Program+Manager").get_data(as_text=True)
+    assert 'value="Program Manager"' not in after
+    assert "Product Owner" in after  # the removed phrase drops out, so no filter applies
+
+
+def test_roles_and_config_wording(client: FlaskClient, store: Store) -> None:
+    roles_page = client.get("/roles").get_data(as_text=True)
+    assert "Bulk Update:" in roles_page
+    assert "Selected:" not in roles_page
+    store.upsert_site("A", "https://jobs.lever.co/a", "lever", "x|y", "")
+    config_page = client.get("/config").get_data(as_text=True)
+    assert "Paste a company" not in config_page
+    assert "Companies" in config_page
+
+
+def test_cover_letter_template_has_its_own_tab(client: FlaskClient) -> None:
+    cv = client.get("/cv").get_data(as_text=True)
+    assert "Cover letter template" not in cv
+    assert 'href="/cv/cover-letter"' in cv
+    cover = client.get("/cv/cover-letter").get_data(as_text=True)
+    assert "No template yet" in cover
+    assert 'name="template"' in cover
+    bad = client.post("/cv/template", data={}, follow_redirects=True)
+    assert bad.status_code == 400
+    assert "Choose a Word file" in bad.get_data(as_text=True)

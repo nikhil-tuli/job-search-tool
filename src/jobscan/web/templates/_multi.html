@@ -1,9 +1,9 @@
 {# Tick-box dropdown. Nothing ticked means all. options: (value, label) pairs. #}
-{% macro pick(name, title, options, picked) -%}
+{% macro pick(name, title, options, picked, form='') -%}
 <details class="multi">
   <summary>{{ title }}{% if picked %} <span class="tag chip">{{ picked | length }}</span>{% else %} <span class="muted">All</span>{% endif %}</summary>
   <div class="multi-body">
-    {% for value, label in options %}<label class="check"><input type="checkbox" name="{{ name }}" value="{{ value }}" {% if value in picked %}checked{% endif %}> {{ label }}</label>
+    {% for value, label in options %}<label class="check"><input type="checkbox" name="{{ name }}" value="{{ value }}"{% if form %} form="{{ form }}"{% endif %} {% if value in picked %}checked{% endif %}> {{ label }}</label>
     {% endfor %}
   </div>
 </details>

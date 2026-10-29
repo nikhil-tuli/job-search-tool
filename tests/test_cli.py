@@ -201,7 +201,7 @@ def test_lock_is_released_after_a_scan(db_path: Path) -> None:
 def test_status_on_empty_database(db_path: Path) -> None:
     code, text = run(db_path, "status")
     assert code == EXIT_OK
-    assert "Last successful run: none" in text
+    assert "Last successful LinkedIn run: none" in text
     assert "Roles: 0" in text
     assert "Not Applied: 0" in text
 
@@ -209,8 +209,8 @@ def test_status_on_empty_database(db_path: Path) -> None:
 def test_status_after_a_scan(db_path: Path) -> None:
     run(db_path, "scan", script=SCRIPT_OK)
     _, text = run(db_path, "status")
-    assert "Last successful run: 20" in text
-    assert "Latest run: #1 success" in text
+    assert "Last successful LinkedIn run: 20" in text
+    assert "LinkedIn: #1 success" in text
     assert "Roles: 1" in text
     assert "Not Applied: 1" in text
 

@@ -1146,10 +1146,14 @@ def test_bad_sort_values_are_ignored(client: FlaskClient, store: Store, run_id: 
     assert client.get("/roles?sort=bogus&dir=sideways").status_code == 200
 
 
-def test_summary_shows_descriptions_pending(client: FlaskClient, store: Store, run_id: int) -> None:
+def test_summary_has_no_descriptions_or_schedule_lines(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
     add_role(store, run_id, "1", fetched_on=fresh())
-    add_role(store, run_id, "2", fetched_on=fresh())
-    assert "Descriptions pending: 2 (roles from the last 3 days)" in text(client.get("/summary"))
+    body = text(client.get("/summary"))
+    assert "Descriptions pending" not in body
+    assert "Latest scan:" not in body
+    assert "Click a number" not in body
 
 
 def skip_rows(store: Store, run: int, ids: range, fetched_on: str) -> None:
@@ -1286,10 +1290,6 @@ def test_summary_shows_the_last_successful_run_of_each_portal(
     assert "LinkedIn none yet" not in only
 
 
-def test_summary_scan_info_is_on_two_lines_without_the_naukri_run_line(
-    client: FlaskClient, store: Store
-) -> None:
+def test_summary_has_no_naukri_run_line(client: FlaskClient, store: Store) -> None:
     body = text(client.get("/summary"))
-    assert body.count('class="muted scan-state"') == 2
-    assert "Descriptions pending" in body
     assert "Latest Naukri run" not in body

@@ -22,8 +22,16 @@ from .details import fetch_descriptions, waiting_for_description
 from .embeddings import Embedder
 from .evaluation import build_report, load_labelled, roles_to_score
 from .fit_filters import listed_salary, rupee_text
-from .lock import AlreadyRunningError, RunLock
-from .models import PORTAL_LINKEDIN, PORTAL_NAUKRI, PORTAL_SITES, STATUSES, Role, RoleFilter
+from .lock import AlreadyRunningError, RunLock, holder
+from .models import (
+    PORTAL_LINKEDIN,
+    PORTAL_NAUKRI,
+    PORTAL_SITES,
+    PORTALS,
+    STATUSES,
+    Role,
+    RoleFilter,
+)
 from .naukri_browser import BrowserUnavailable
 from .naukri_run import NaukriRunner, NaukriSource, reminder_text
 from .report import Reporter, eval_summary, log_name, phrase_lines, scoring_summary
@@ -88,7 +96,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=5000)
 
     sub.add_parser("status", help="show last run and role counts")
-    sub.add_parser("sync", help="read Gmail once and update job statuses (Email Sync)")
+    sync = sub.add_parser("sync", help="read Gmail once and update job statuses (Email Sync)")
+    sync.add_argument(
+        "--reread",
+        action="store_true",
+        help="look at all mail of the last 30 days again, including mail already read",
+    )
     sub.add_parser("score", help="score roles against your CV (also runs after each scan)")
     sub.add_parser("eval", help="measure how well the score separates good and bad roles")
     sub.add_parser("details", help="fetch missing descriptions for recent roles")
@@ -113,11 +126,37 @@ def _minutes_since(iso: str) -> float:
     return (now_ist() - from_iso(iso)).total_seconds() / 60
 
 
-def cmd_status(store: Store, out: TextIO) -> int:
+def run_line(store: Store, portal: str, label: str, unit: str) -> str | None:
+    """One line for a portal's latest run; None when it has never run."""
+    run = store.latest_run(portal)
+    if run is None:
+        return None
+    if run.status == RUN_RUNNING:
+        return (
+            f"  {label}: #{run.id} running for {scheduling.elapsed_text(run.started_on)}: "
+            f"{run.keywords_done} of {run.keywords_total} {unit} done, {run.new_roles} new roles"
+        )
+    return f"  {label}: #{run.id} {run.status}, {format_display(run.started_on)} IST"
+
+
+def sites_note(store: Store) -> str:
+    companies = store.list_sites()
+    if not companies:
+        return ""
+    attention = sum(1 for c in companies if c.enabled and c.system and c.last_status == "failed")
+    unsupported = sum(1 for c in companies if c.enabled and not c.system)
+    bits = [f"{len(companies)} companies"]
+    if attention:
+        bits.append(f"{attention} need attention")
+    if unsupported:
+        bits.append(f"{unsupported} not supported yet")
+    return " (" + ", ".join(bits) + ")"
+
+
+def cmd_status(store: Store, out: TextIO, lock_path: Path | None = None) -> int:
     last_ok = store.last_successful_run()
-    latest = store.latest_run()
     print(
-        "Last successful run: "
+        "Last successful LinkedIn run: "
         + (
             f"{format_display(last_ok.finished_on or last_ok.started_on)} IST"
             if last_ok
@@ -125,41 +164,44 @@ def cmd_status(store: Store, out: TextIO) -> int:
         ),
         file=out,
     )
-    if latest:
-        print(
-            f"Latest run: #{latest.id} {latest.status} at {format_display(latest.started_on)} IST",
-            file=out,
-        )
-        if latest.status == RUN_RUNNING:
-            print(
-                f"  in progress: {latest.keywords_done} of {latest.keywords_total} keywords done, "
-                f"{latest.new_roles} new roles so far, running for "
-                f"{scheduling.elapsed_text(latest.started_on)}",
-                file=out,
-            )
-    naukri_latest = store.latest_run(PORTAL_NAUKRI)
-    if naukri_latest:
-        print(
-            f"Naukri latest run: #{naukri_latest.id} {naukri_latest.status} at "
-            f"{format_display(naukri_latest.started_on)} IST",
-            file=out,
-        )
-    sites_latest = store.latest_run(PORTAL_SITES)
-    if sites_latest:
-        print(
-            f"Company sites latest run: #{sites_latest.id} {sites_latest.status} at "
-            f"{format_display(sites_latest.started_on)} IST",
-            file=out,
-        )
+    lines = [
+        run_line(store, PORTAL_LINKEDIN, "LinkedIn", "keywords"),
+        run_line(store, PORTAL_NAUKRI, "Naukri", "keywords"),
+        run_line(store, PORTAL_SITES, "Company sites", "companies"),
+    ]
+    sites_extra = sites_note(store)
+    print("Latest runs:", file=out)
+    for line in lines:
+        if line:
+            print(line + (sites_extra if line.startswith("  Company sites") else ""), file=out)
+    running = any(line and " running for " in line for line in lines)
+    busy = holder(lock_path) if lock_path is not None else None
+    if busy and not running:
+        label = f"jobscan {busy[0]}" if busy[0] else "another command"
+        since = f", started {format_display(busy[1])} IST" if busy[1] else ""
+        print(f"Busy now: {label}{since}", file=out)
     reminder = reminder_text(store)
     if reminder:
         print(reminder, file=out)
     print(scheduling.describe_state(scheduling.schedule_state()), file=out)
-    print(f"Roles: {store.count_roles()}", file=out)
     try:
         config = Config.from_raw(store.get_config_raw())
     except ConfigError:
         config = Config()
+    if store.list_sites():
+        if not config.sites_daily:
+            print("Company sites daily fetch: off", file=out)
+        elif not scheduling.ran_today(store, to_iso(now_ist()), PORTAL_SITES):
+            print("Company sites daily fetch: on, not run yet today", file=out)
+    by_portal = [
+        f"{portal} {count}"
+        for portal in PORTALS
+        if (count := store.count_roles(RoleFilter(portals=(portal,))))
+    ]
+    print(
+        f"Roles: {store.count_roles()}" + (f" ({', '.join(by_portal)})" if by_portal else ""),
+        file=out,
+    )
     print(
         f"Descriptions pending: {waiting_for_description(store, config)} "
         f"(roles from the last {config.detail_max_age_days} days)",
@@ -704,14 +746,16 @@ def cmd_naukri_details(
         reporter.close()
 
 
-def cmd_sync(store: Store, out: TextIO, make_mail_source: MailSourceFactory) -> int:
+def cmd_sync(
+    store: Store, out: TextIO, make_mail_source: MailSourceFactory, reread: bool = False
+) -> int:
     """Read the mailbox once. Prints what changed and what needs review."""
     config = Config.from_raw(store.get_config_raw())
     problem = sync_problem(config)
     if problem:
         print(problem, file=out)
         return EXIT_USAGE
-    result = sync_once(store, config, make_mail_source)
+    result = sync_once(store, config, make_mail_source, reread_days=30 if reread else 0)
     if result is None:
         print("A sync is already running.", file=out)
         return EXIT_USAGE
@@ -755,11 +799,11 @@ def main(
 
     try:
         if args.command == "status":
-            return cmd_status(store, stream)
+            return cmd_status(store, stream, db_path.parent / "scan.lock")
         if args.command == "salary-check":
             return cmd_salary_check(store, stream)
         if args.command == "sync":
-            return cmd_sync(store, stream, make_mail_source)
+            return cmd_sync(store, stream, make_mail_source, bool(args.reread))
         if args.command == "serve":
             from .web import create_app
             from .web.app import LOOPBACK_HOSTS
@@ -780,7 +824,7 @@ def main(
         if args.command == "schedule":
             return cmd_schedule(store, db_path, args.action, stream)
         try:
-            with RunLock(db_path.parent / "scan.lock"):
+            with RunLock(db_path.parent / "scan.lock", args.command):
                 if args.command == "eval":
                     return cmd_eval(
                         store, db_path, out=stream, make_embedder=make_embedder, sleep=sleep

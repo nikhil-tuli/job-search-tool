@@ -144,6 +144,11 @@ class SyncStoreMixin:
             [(i, when) for i in ids],
         )
 
+    def forget_seen_since(self, since: str) -> int:
+        """Treat mail read at or after `since` as unread, so a sync looks at it again."""
+        cursor = self._conn.execute("DELETE FROM sync_seen WHERE seen_on >= ?", (since,))
+        return cursor.rowcount
+
     # ---- the sync itself ---------------------------------------------------------------------
 
     def get_sync_state(self) -> SyncState:

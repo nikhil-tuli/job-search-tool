@@ -4,9 +4,9 @@
 {% import "_followup.html" as follow_html %}
 {% import "_multi.html" as multi %}
 {% block content %}
-{% macro pager() %}
+{% macro pager(bottom=false) %}
 {% if pages > 1 %}
-<nav class="pager">
+<nav class="pager{% if bottom %} pager-bottom{% endif %}">
   {% if page > 1 %}<a href="{{ url_for('roles', page=page - 1, per=per, **filters) }}">Previous</a>{% endif %}
   <span>Page {{ page }} of {{ pages }}</span>
   {% if page < pages %}<a href="{{ url_for('roles', page=page + 1, per=per, **filters) }}">Next</a>{% endif %}
@@ -28,6 +28,7 @@
   <details class="advanced"{% if advanced_open %} open{% endif %}>
     <summary>Advanced filters{% if advanced_open %} <span class="tag chip">on</span>{% endif %}</summary>
     <div class="advanced-body">
+      {{ multi.pick('title', 'Job title', title_options, filters.get('title', [])) }}
       {{ multi.pick('fit', 'Fit', fit_options, filters.get('fit', [])) }}
       {{ multi.pick('score', 'Score', score_options, filters.get('score', [])) }}
       {{ multi.pick('followup', 'Follow-up', follow_options, filters.get('followup', [])) }}
@@ -38,7 +39,7 @@
 
 <form id="bulk" class="bulk" method="post" action="{{ url_for('set_status') }}">
   <input type="hidden" name="next" value="{{ here }}">
-  <span>Selected:</span>
+  <span>Bulk Update:</span>
   <select name="status" aria-label="Status for selected roles">
     {% for s in statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
   </select>
@@ -100,7 +101,7 @@
   </tbody>
 </table>
 
-{{ pager() }}
+{{ pager(true) }}
 {% else %}
 <p class="empty">No roles match. Run <code>jobscan scan</code> in a terminal to fetch some.</p>
 {% endif %}

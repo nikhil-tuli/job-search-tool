@@ -222,6 +222,9 @@ class RoleFilter:
     portals: tuple[str, ...] = ()  # PORTALS; empty means every portal
     follow_ups: tuple[str, ...] = ()  # FOLLOW_UP_STATES; the role needs a follow-up in one of them
     today: str = ""  # YYYY-MM-DD for the follow-up states; empty means today in IST
+    titles: tuple[str, ...] = ()  # title phrases; the title contains any of them
+    titles_other: bool = False  # also roles whose title contains none of `known_titles`
+    known_titles: tuple[str, ...] = ()  # every configured phrase, used for "other"
 
 
 @dataclass(frozen=True)

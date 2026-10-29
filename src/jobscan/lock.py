@@ -7,14 +7,17 @@ from pathlib import Path
 from types import TracebackType
 from typing import IO
 
+from .timeutil import format_display, now_ist, to_iso
+
 
 class AlreadyRunningError(RuntimeError):
     """Another scan holds the lock."""
 
 
 class RunLock:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, label: str = "") -> None:
         self._path = path
+        self._label = label
         self._handle: IO[str] | None = None
 
     def acquire(self) -> None:
@@ -24,7 +27,16 @@ class RunLock:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             handle.close()
-            raise AlreadyRunningError("another scan is already running") from None
+            who = describe_holder(self._path)
+            raise AlreadyRunningError(
+                f"another run is already running ({who})"
+                if who
+                else "another run is already running"
+            ) from None
+        handle.seek(0)
+        handle.truncate()
+        handle.write(f"{self._label}|{to_iso(now_ist())}")
+        handle.flush()
         self._handle = handle
 
     def release(self) -> None:
@@ -44,3 +56,30 @@ class RunLock:
         tb: TracebackType | None,
     ) -> None:
         self.release()
+
+
+def holder(path: Path) -> tuple[str, str] | None:
+    """(command, start time) of the process holding the lock, or None when it is free."""
+    try:
+        handle = path.open("a+")
+    except OSError:
+        return None
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            handle.seek(0)
+            label, _, started = handle.read().partition("|")
+            return label, started
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return None
+    finally:
+        handle.close()
+
+
+def describe_holder(path: Path) -> str:
+    found = holder(path)
+    if found is None or not found[0]:
+        return ""
+    label, started = found
+    return f"jobscan {label}" + (f", started {format_display(started)} IST" if started else "")

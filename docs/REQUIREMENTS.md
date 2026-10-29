@@ -719,10 +719,10 @@ Fetch relevant roles straight from the career pages of chosen companies (product
 ### Config: Company sites
 **Company list**
 - Columns: Company, Career link, Hiring system (detected, can be changed), On/Off, Last result, Roles found, Test, Remove.
-- Shows **10 companies by default**. "Show all N companies" expands the list. When there are more than 10, a search box and filter chips appear: All, Working, Needs attention, Paused, Not supported yet.
+- Shows **10 companies by default**. "Show 10 more" adds ten at a time, and "Open full list in a new tab" opens every company on its own page (with the same search, filters and buttons). When there are more than 10, a search box and filter chips appear: All, Working, Needs attention, Paused, Not supported yet.
 - Companies needing attention are pinned to the top so they are never hidden by the 10-row limit. The rest are sorted by name.
 - **Add company:** name + link (adding an existing name updates its link and tag). **Add many:** paste one `Name, link` per line.
-- Optional **Tag** per company (for example GCC, Product, Services). Filter chips use it. Free text, never required.
+- Optional **Tag** per company (for example GCC, Product, Services). A multi-select Tag dropdown filters by it (any of the ticked tags). Free text, never required.
 - Pausing a company keeps its link but stops fetching.
 
 **Settings (Company sites only)**

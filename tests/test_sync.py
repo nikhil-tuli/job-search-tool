@@ -114,6 +114,13 @@ def sync(store: Store, *mails: Mail, config: Config | None = None, ai: FakeAI | 
         ("Interview scheduled with Acme", "", STAGE_INTERVIEW),
         ("Update", "We would like to schedule an interview", STAGE_INTERVIEW),
         ("Update", "Unfortunately we will not be moving forward with your profile", STAGE_REJECTED),
+        (
+            "Thank you for your interest in Quince",
+            "we\u2019ve decided not to move forward with your application for the role",
+            STAGE_REJECTED,
+        ),
+        ("Update", "We are unable to move forward with your candidacy", STAGE_REJECTED),
+        ("Update", "We won't be moving forward at this time", STAGE_REJECTED),
         ("Update", "The position has been closed", STAGE_CLOSED),
         ("Offer", "We are pleased to offer you the role", STAGE_OFFER),
         ("Thanks", "Thank you for applying to Acme", STAGE_RECEIVED),
@@ -614,3 +621,38 @@ def test_the_tab_shows_the_counter_while_running(store: Store) -> None:
     store.set_sync_progress("checking", 30, 90)
     page = create_app(store, secret_key="t").test_client().get("/sync").get_data(as_text=True)
     assert "Checking new emails:</strong> 30 of 90" in page
+
+
+QUINCE = (
+    "Thank you for your interest in Quince",
+    "Unfortunately after careful review, we\u2019ve decided not to move forward with your "
+    "application for the Principal Technical Program Manager role at this time.",
+)
+
+
+def test_quince_style_rejection_is_picked_up(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Quince", title="Principal Technical Program Manager")
+    result = sync(store, mail(*QUINCE, sender="no-reply@onequince.com"))
+    assert (result.review, result.applied) == (1, 0)
+    assert store.list_sync_updates()[0].new_status == "Initial screening rejected"
+
+
+def test_reread_looks_again_at_mail_already_read(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Quince", title="Principal Technical Program Manager")
+    quiet = mail("Weekly news", "nothing here", sender="no-reply@onequince.com", message_id="q1")
+    assert sync(store, quiet).review == 0  # read, and remembered as seen
+    assert store.seen_messages(["q1"]) == {"q1"}
+    source = FakeSource(mail(*QUINCE, sender="no-reply@onequince.com", message_id="q1"))
+    assert run_sync(store, Config(), source, lambda c: None, NOW).review == 0  # type: ignore[arg-type,return-value]
+    again = run_sync(store, Config(), source, lambda c: None, NOW, reread_days=30)  # type: ignore[arg-type,return-value]
+    assert again.review == 1
+    assert source.since[-1] <= NOW - timedelta(days=29)
+    twice = run_sync(store, Config(), source, lambda c: None, NOW, reread_days=30)  # type: ignore[arg-type,return-value]
+    assert twice.review == 0  # the same email never gets a second row
+    assert len(store.list_sync_updates()) == 1
+
+
+def test_reread_button_starts_a_sync(store: Store, client: FlaskClient) -> None:
+    reply = client.post("/sync/reread")
+    assert reply.status_code == 302
+    assert "Re-read last 30 days" in client.get("/sync").get_data(as_text=True)

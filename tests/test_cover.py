@@ -319,8 +319,8 @@ def test_missing_template_sends_you_to_upload(client: FlaskClient) -> None:
     response = client.post(
         "/tailor/start", data={"portal": "LinkedIn", "job_id": "1", "kind": "cover"}
     )
-    assert response.headers["Location"].endswith("/cv")
-    page = client.get("/cv").get_data(as_text=True)
+    assert response.headers["Location"].endswith("/cv/cover-letter")
+    page = client.get("/cv/cover-letter").get_data(as_text=True)
     assert "Upload your cover letter template (Word) to tailor a cover letter." in page
 
 

@@ -26,13 +26,17 @@ from .models import (
 )
 from .scanner import STOP_ABORTED, STOP_END, STOP_INTERRUPTED, RunResult, ScanSetupError
 from .sites_readers import (
+    Detected,
     Http,
     HttpClient,
     Reader,
     SiteError,
     SiteJob,
+    board_answers,
+    detect,
     detect_from_page,
     make_reader,
+    valid_board,
     with_detail,
 )
 from .store import RUN_FAILED, RUN_PARTIAL, RUN_SUCCESS, Store
@@ -70,6 +74,22 @@ class SiteCheck:
     total: int = 0
     matched: int = 0
     note: str = ""
+
+
+def redetect(company: SitesCompany, http: Http, keywords: list[str]) -> Detected | None:
+    """A better board for a company whose saved one failed, found again on its own career page.
+
+    A direct hiring-system link is taken as given, so only company-page links are looked at again.
+    """
+    try:
+        if detect(company.url).system:
+            return None
+    except SiteError:
+        return None
+    found = detect_from_page(company.url, http, board_answers(http, keywords))
+    if found.system and (found.system, found.board) != (company.system, company.board):
+        return found
+    return None
 
 
 def try_company(
@@ -139,8 +159,13 @@ class SitesRunner:
                 raise ScanSetupError(f"no switched-on company is named {self._only!r}")
         if not sites:
             raise ScanSetupError("no company is switched on. Add companies on the Config page")
+        for bad in [s for s in sites if s.system and not valid_board(s.system, s.board)]:
+            self._store.set_site_system(bad.id, "", "")  # a placeholder, not a real board
+        sites = [self._store.get_site(s.id) or s for s in sites]
         for site in [s for s in sites if not s.system]:
-            found = detect_from_page(site.url, self._http)  # its own page may link to the system
+            found = detect_from_page(  # its own page may link to the system
+                site.url, self._http, board_answers(self._http, keywords)
+            )
             if found.system:
                 self._store.set_site_system(site.id, found.system, found.board)
                 self._emit(f"{site.name}: found its hiring system ({found.system})")
@@ -192,7 +217,18 @@ class SitesRunner:
         try:
             reader = self._factory(site, self._http)
             self._pace()
-            jobs = reader.list_jobs(keywords, self._config.sites_max_roles_per_company)
+            limit = self._config.sites_max_roles_per_company
+            try:
+                jobs = reader.list_jobs(keywords, limit)
+            except SiteError:
+                better = redetect(site, self._http, keywords)
+                if better is None:
+                    raise
+                self._store.set_site_system(site.id, better.system, better.board)
+                self._emit(f"{label}: tried another board from its page ({better.system})")
+                site = self._store.get_site(site.id) or site
+                reader = self._factory(site, self._http)
+                jobs = reader.list_jobs(keywords, limit)
             record.cards = len(jobs)
             with self._store.transaction():
                 self._keep(run_id, site, reader, jobs, matcher, record)

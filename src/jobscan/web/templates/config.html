@@ -36,41 +36,11 @@
   {% if section == "Company sites" %}
   <div id="company-sites">
   <h2>Companies <span class="muted">{{ sites_total }}</span></h2>
-  <p class="muted">Career pages that are read for roles matching your title phrases. Paste a company's career link; the hiring system is detected from it. Companies on a system that is not supported yet stay in the list, marked.</p>
   {% if site_counts.attention %}<p class="notice"><strong>{{ site_counts.attention }} compan{{ 'y needs' if site_counts.attention == 1 else 'ies need' }} attention</strong> (pinned to the top).</p>{% endif %}
-  <p class="chips">
-    <a class="chip-link{% if not site_filter and not site_tag %} on{% endif %}" href="{{ url_for('config_page') }}#company-sites">All {{ sites_total }}</a>
-    <a class="chip-link{% if site_filter == 'working' %} on{% endif %}" href="{{ url_for('config_page', co='working') }}#company-sites">Working {{ site_counts.working }}</a>
-    <a class="chip-link{% if site_filter == 'attention' %} on{% endif %}" href="{{ url_for('config_page', co='attention') }}#company-sites">Needs attention {{ site_counts.attention }}</a>
-    <a class="chip-link{% if site_filter == 'paused' %} on{% endif %}" href="{{ url_for('config_page', co='paused') }}#company-sites">Paused {{ site_counts.paused }}</a>
-    <a class="chip-link{% if site_filter == 'unsupported' %} on{% endif %}" href="{{ url_for('config_page', co='unsupported') }}#company-sites">Not supported yet {{ site_counts.unsupported }}</a>
-    {% if site_tags %}<span class="muted">Tag:</span>{% for t in site_tags %}<a class="chip-link{% if site_tag == t %} on{% endif %}" href="{{ url_for('config_page', tag=t) }}#company-sites">{{ t }}</a>{% endfor %}{% endif %}
-  </p>
-  <p><input type="text" name="q" value="{{ site_query }}" placeholder="Search company" form="co-find" aria-label="Search company"> <button type="submit" form="co-find" class="secondary">Search</button></p>
-  {% if companies %}
-  <table class="companies">
-    <thead><tr><th>Company</th><th>Career link</th><th>System</th><th>Tag</th><th>Last result</th><th></th></tr></thead>
-    <tbody>
-    {% for row in companies %}{% set c = row.c %}
-      <tr>
-        <td><strong>{{ c.name }}</strong></td>
-        <td class="muted"><a href="{{ c.url }}" target="_blank" rel="noopener noreferrer">{{ c.url | replace('https://', '') | truncate(48, True) }}</a></td>
-        <td>{{ row.system }}</td>
-        <td>{% if c.tag %}<span class="tag">{{ c.tag }}</span>{% endif %}</td>
-        <td class="site-{{ row.state }}">{{ row.text }}</td>
-        <td class="nowrap">
-          <button type="submit" form="co-act" name="act" value="test:{{ c.id }}" class="secondary">Test</button>
-          <button type="submit" form="co-act" name="act" value="toggle:{{ c.id }}" class="secondary">{{ 'Pause' if c.enabled else 'Resume' }}</button>
-          <button type="submit" form="co-act" name="act" value="remove:{{ c.id }}" class="secondary">Remove</button>
-        </td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% if sites_hidden %}<p><a href="{{ url_for('config_page', co=site_filter or None, q=site_query or None, tag=site_tag or None, all=1) }}#company-sites">Show all {{ sites_matching }} companies</a> <span class="muted">({{ sites_hidden }} not shown)</span></p>{% endif %}
-  {% else %}
-  <p class="empty">{% if sites_total %}No company matches this filter.{% else %}No companies yet. Add one below.{% endif %}</p>
-  {% endif %}
+  {% set list_endpoint = "config_page" %}{% set list_anchor = "#company-sites" %}{% include "_company_list.html" %}
+  {% if companies %}<p class="muted">Showing {{ companies | length }} of {{ sites_matching }}.
+    {% if sites_hidden %}<a href="{{ url_for('config_page', co=site_filter or None, q=site_query or None, tag=site_tags or None, n=companies | length + 10) }}#company-sites">Show {{ [10, sites_hidden] | min }} more</a>{% endif %}
+    {% if sites_matching > 10 %}<a href="{{ url_for('companies_page', co=site_filter or None, q=site_query or None, tag=site_tags or None) }}" target="_blank" rel="noopener">Open full list in a new tab</a>{% endif %}</p>{% endif %}
   <h3>Add a company</h3>
   <p>
     <input type="text" name="name" placeholder="Company name" form="co-add" aria-label="Company name" maxlength="80">
@@ -112,9 +82,10 @@
 
   <button type="submit">Save configuration</button>
 </form>
-<form id="co-find" method="get" action="{{ url_for('config_page') }}"><input type="hidden" name="co" value="{{ site_filter }}"><input type="hidden" name="tag" value="{{ site_tag }}"></form>
+<form id="co-find" method="get" action="{{ url_for('config_page') }}"><input type="hidden" name="co" value="{{ site_filter }}"></form>
 <form id="co-add" method="post" action="{{ url_for('sites_add') }}"></form>
 <form id="co-many" method="post" action="{{ url_for('sites_add_many') }}"></form>
 <form id="co-act" method="post" action="{{ url_for('sites_act') }}"></form>
+<script src="{{ url_for('static', filename='multi.js') }}"></script>
 <script src="{{ url_for('static', filename='cfgview.js') }}"></script>
 {% endblock %}

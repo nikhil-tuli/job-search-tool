@@ -436,12 +436,12 @@ def test_schedule_status_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert "Schedule:" in out.getvalue()
 
 
-def test_summary_shows_a_running_scan_and_the_schedule(client: object, store: Store) -> None:
+def test_summary_shows_a_running_scan_but_not_the_schedule(client: object, store: Store) -> None:
     store.start_run(window_seconds=86400, keywords_total=5)
     page = client.get("/summary").get_data(as_text=True)  # type: ignore[attr-defined]
     assert "Scan running:" in page
     assert "0 of 5 keywords done" in page
-    assert "Schedule:" in page
+    assert "Schedule:" not in page
 
 
 def test_summary_day_table_shows_scan_status_and_time(client: object, store: Store) -> None:

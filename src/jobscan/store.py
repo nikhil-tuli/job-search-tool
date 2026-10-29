@@ -344,6 +344,17 @@ class Store(TailorStoreMixin, FitStoreMixin, SyncStoreMixin, SitesStoreMixin):
             params.extend(flt.portals)
         if flt.duplicates_only:
             clauses.append("possible_duplicate_of IS NOT NULL")
+        if flt.titles or flt.titles_other:
+            title_parts = ["title LIKE ? ESCAPE '\\'" for _ in flt.titles]
+            params.extend(f"%{_like_escape(t)}%" for t in flt.titles)
+            if flt.titles_other:
+                if flt.known_titles:
+                    none = " AND ".join("title NOT LIKE ? ESCAPE '\\'" for _ in flt.known_titles)
+                    title_parts.append(f"({none})")
+                    params.extend(f"%{_like_escape(t)}%" for t in flt.known_titles)
+                else:
+                    title_parts.append("1")
+            clauses.append(f"({' OR '.join(title_parts)})")
         days = [*flt.fetched_days, *([flt.fetched_on] if flt.fetched_on else [])]
         if days:
             for day in days:

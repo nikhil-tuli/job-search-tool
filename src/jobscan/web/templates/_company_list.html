@@ -1,0 +1,33 @@
+{% import "_multi.html" as multi %}
+  <p class="chips">
+    <a class="chip-link{% if not site_filter and not site_tags %} on{% endif %}" href="{{ url_for(list_endpoint) }}{{ list_anchor }}">All {{ sites_total }}</a>
+    <a class="chip-link{% if site_filter == 'working' %} on{% endif %}" href="{{ url_for(list_endpoint, co='working') }}{{ list_anchor }}">Working {{ site_counts.working }}</a>
+    <a class="chip-link{% if site_filter == 'attention' %} on{% endif %}" href="{{ url_for(list_endpoint, co='attention') }}{{ list_anchor }}">Needs attention {{ site_counts.attention }}</a>
+    <a class="chip-link{% if site_filter == 'paused' %} on{% endif %}" href="{{ url_for(list_endpoint, co='paused') }}{{ list_anchor }}">Paused {{ site_counts.paused }}</a>
+    <a class="chip-link{% if site_filter == 'unsupported' %} on{% endif %}" href="{{ url_for(list_endpoint, co='unsupported') }}{{ list_anchor }}">Not supported yet {{ site_counts.unsupported }}</a>
+  </p>
+  <p><input type="text" name="q" value="{{ site_query }}" placeholder="Search company" form="co-find" aria-label="Search company"> <button type="submit" form="co-find" class="secondary">Apply</button>
+    {% if site_tag_options %}{{ multi.pick('tag', 'Tag', site_tag_options, site_tags, 'co-find') }}{% endif %}</p>
+  {% if companies %}
+  <table class="companies">
+    <thead><tr><th>Company</th><th>Career link</th><th>System</th><th>Tag</th><th>Last result</th><th></th></tr></thead>
+    <tbody>
+    {% for row in companies %}{% set c = row.c %}
+      <tr>
+        <td><strong>{{ c.name }}</strong></td>
+        <td class="muted"><a href="{{ c.url }}" target="_blank" rel="noopener noreferrer">{{ c.url | replace('https://', '') | truncate(48, True) }}</a></td>
+        <td>{{ row.system }}</td>
+        <td>{% if c.tag %}<span class="tag">{{ c.tag }}</span>{% endif %}</td>
+        <td class="site-{{ row.state }}">{{ row.text }}</td>
+        <td class="nowrap">
+          <button type="submit" form="co-act" name="act" value="test:{{ c.id }}" class="secondary">Test</button>
+          <button type="submit" form="co-act" name="act" value="toggle:{{ c.id }}" class="secondary">{{ 'Pause' if c.enabled else 'Resume' }}</button>
+          <button type="submit" form="co-act" name="act" value="remove:{{ c.id }}" class="secondary">Remove</button>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">{% if sites_total %}No company matches this filter.{% else %}No companies yet. Add one below.{% endif %}</p>
+  {% endif %}

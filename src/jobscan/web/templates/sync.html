@@ -10,6 +10,7 @@
 
 <form method="post" action="{{ url_for('sync_run') }}" class="bar">
   <button type="submit" {% if running or problem %}disabled{% endif %}>{% if running %}Syncing&hellip;{% else %}Sync now{% endif %}</button>
+  <button type="submit" formaction="{{ url_for('sync_reread') }}" class="secondary" {% if running or problem %}disabled{% endif %} title="Looks at all mail of the last 30 days again, including mail already read. Emails that already have a row here are not added twice.">Re-read last 30 days</button>
   <span class="muted">
     {% if running and sync_state.phase == 'reading' %}<strong>Reading mail:</strong> {{ sync_state.done }} of {{ sync_state.total }}{% if sync_state.available > sync_state.total %} (cap reached: the newest {{ sync_state.total }} of {{ sync_state.available }}){% endif %} &middot;
     {% elif running and sync_state.phase == 'checking' %}<strong>Checking new emails:</strong> {{ sync_state.done }} of {{ sync_state.total }} &middot;{% endif %}

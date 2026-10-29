@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Companies<script src="{{ url_for('static', filename='multi.js') }}"></script>
+{% endblock %}
+{% block content %}
+<h1>Companies <span class="muted">{{ sites_total }}</span></h1>
+<p><a href="{{ url_for('config_page') }}#company-sites">Back to Config</a></p>
+{% set list_endpoint = "companies_page" %}{% set list_anchor = "" %}{% include "_company_list.html" %}
+<p class="muted">Showing {{ companies | length }} of {{ sites_matching }}.</p>
+<form id="co-find" method="get" action="{{ url_for('companies_page') }}"><input type="hidden" name="co" value="{{ site_filter }}"></form>
+<form id="co-act" method="post" action="{{ url_for('sites_act') }}"><input type="hidden" name="back" value="full"><input type="hidden" name="co" value="{{ site_filter }}"><input type="hidden" name="q" value="{{ site_query }}">{% for t in site_tags %}<input type="hidden" name="tag" value="{{ t }}">{% endfor %}</form>
+{% endblock %}

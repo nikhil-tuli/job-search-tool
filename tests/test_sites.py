@@ -14,12 +14,14 @@ import requests
 from flask.testing import FlaskClient
 
 from jobscan import cli, db
-from jobscan.cli import EXIT_FAILED, EXIT_OK, EXIT_PARTIAL, EXIT_USAGE, main
+from jobscan.cli import EXIT_FAILED, EXIT_OK, EXIT_PARTIAL, EXIT_USAGE, cmd_status, main
 from jobscan.config import Config
-from jobscan.models import SitesCompany
+from jobscan.lock import AlreadyRunningError, RunLock, holder
+from jobscan.models import PORTAL_SITES, SitesCompany
 from jobscan.sites_readers import (
     AshbyReader,
     Detail,
+    Detected,
     GreenhouseReader,
     HttpClient,
     JobviteReader,
@@ -28,9 +30,11 @@ from jobscan.sites_readers import (
     SiteJob,
     WorkdayReader,
     ZohoReader,
+    board_label,
     detect,
     html_to_text,
     make_reader,
+    valid_board,
     with_detail,
 )
 from jobscan.sites_run import SitesRunner, location_ok, slug, try_company
@@ -110,6 +114,8 @@ class FakeHttp:
 
     def post_json(self, url: str, body: dict[str, Any]) -> Any:
         self.calls.append(f"POST {url} {body['offset']} {body['searchText']}")
+        if self.posts is None:
+            raise SiteError("missing")
         return self.posts(url, body)
 
 
@@ -698,6 +704,16 @@ def client(store: Store) -> FlaskClient:
     return app.test_client()
 
 
+@pytest.fixture
+def client_with(store: Store) -> Any:
+    """An app that reads through the real readers, over fake pages."""
+
+    def make(pages: dict[str, Any]) -> FlaskClient:
+        return create_app(store, secret_key="t", sites_http=FakeHttp(pages)).test_client()  # type: ignore[arg-type]
+
+    return make
+
+
 def page(client: FlaskClient, url: str = "/config") -> str:
     return client.get(url).get_data(as_text=True)
 
@@ -713,8 +729,14 @@ def test_config_shows_ten_companies_then_all(store: Store, client: FlaskClient) 
         )
     first = page(client)
     assert first.count("<strong>Firm") == 10
-    assert "Show all 12 companies" in first
-    assert page(client, "/config?all=1").count("<strong>Firm") == 12
+    assert "Showing 10 of 12" in first
+    assert "Show 2 more" in first
+    assert "Open full list in a new tab" in first
+    assert page(client, "/config?n=20").count("<strong>Firm") == 12
+    assert "Show 2 more" not in page(client, "/config?n=20")
+    assert page(client, "/config?n=abc").count("<strong>Firm") == 10
+    assert page(client, "/config?n=3").count("<strong>Firm") == 10
+    assert page(client, "/companies").count("<strong>Firm") == 12
     assert page(client, "/config?q=firm11").count("<strong>Firm") == 1
     assert page(client, "/config?tag=GCC").count("<strong>Firm") == 2
     assert "Company sites only" in first
@@ -907,3 +929,148 @@ def test_run_finds_the_system_of_an_unrecognised_company(store: Store) -> None:
     assert run.run().status == "success"
     assert run.unsupported == []
     assert store.list_sites()[0].system == "workday"
+
+
+def test_more_steps_by_ten_and_full_page_keeps_filters(store: Store, client: FlaskClient) -> None:
+    for number in range(35):
+        store.upsert_site(
+            f"Co{number:02d}", f"https://jobs.lever.co/c{number}", "lever", "x|y", "GCC"
+        )
+    assert "Show 10 more" in page(client)
+    assert page(client, "/config?n=20").count("<strong>Co") == 20
+    assert page(client, "/config?n=30").count("<strong>Co") == 30
+    assert "Show 5 more" in page(client, "/config?n=30")
+    full = page(client, "/companies?tag=GCC")
+    assert full.count("<strong>Co") == 35
+    assert 'name="back" value="full"' in full
+    first = store.list_sites()[0]
+    reply = client.post(
+        "/config/sites/act", data={"act": f"toggle:{first.id}", "back": "full", "tag": "GCC"}
+    )
+    assert reply.headers["Location"].endswith("/companies?tag=GCC")
+
+
+def test_status_shows_each_portal_once_with_sites_detail_and_roles_split(
+    store: Store, tmp_path: Path
+) -> None:
+    store.upsert_site("A", "https://jobs.lever.co/a", "lever", "x|y", "")
+    store.upsert_site("B", "https://example.com/careers", "", "", "")
+    run = store.start_run(window_seconds=0, keywords_total=2, portal=PORTAL_SITES)
+    out = io.StringIO()
+    cmd_status(store, out, tmp_path / "scan.lock")
+    text = out.getvalue()
+    assert "Company sites: #1 running" in text
+    assert "0 of 2 companies done" in text
+    assert "2 companies, 1 not supported yet" in text
+    assert "Busy now" not in text  # the running run already says it
+    assert "Company sites daily fetch: on, not run yet today" in text
+    assert text.count("Company sites") == 2
+    store.finish_run(run, "success")
+    out = io.StringIO()
+    cmd_status(store, out, tmp_path / "scan.lock")
+    assert "not run yet today" not in out.getvalue()
+
+
+def test_busy_lock_names_its_holder(store: Store, tmp_path: Path) -> None:
+    path = tmp_path / "scan.lock"
+    with RunLock(path, "sites"):
+        assert holder(path) is not None
+        assert holder(path)[0] == "sites"  # type: ignore[index]
+        with pytest.raises(AlreadyRunningError, match=r"jobscan sites, started"):
+            RunLock(path, "details").acquire()
+        out = io.StringIO()
+        cmd_status(store, out, path)
+        assert "Busy now: jobscan sites, started" in out.getvalue()
+    assert holder(path) is None
+
+
+WRONG_FIRST = {
+    "https://www.aidash.com/careers": (
+        '<a href="https://boards.greenhouse.io/embed/job_board?for=oldco">old</a>'
+        '<a href="https://boards.greenhouse.io/partnerco">partner</a>'
+        '<a href="https://jobs.lever.co/aidash">Open roles</a>'
+    ),
+    "https://api.lever.co/v0/postings/aidash?mode=json": [],
+    "https://boards-api.greenhouse.io/v1/boards/oldco/jobs?content=true": SiteError(
+        "Link not found (404)."
+    ),
+}
+
+
+def test_greenhouse_embed_and_api_links_give_the_real_board() -> None:
+    assert detect("https://boards.greenhouse.io/embed/job_board?for=enterpret") == Detected(
+        "greenhouse", "enterpret"
+    )
+    assert detect("https://boards-api.greenhouse.io/v1/boards/acme/jobs") == Detected(
+        "greenhouse", "acme"
+    )
+    assert detect("https://boards.greenhouse.io/embed/job_board").system == ""
+    assert board_label("lever", "jobs.lever.co|aidash") == "aidash"
+
+
+def test_page_with_several_boards_uses_the_one_that_answers() -> None:
+    from jobscan.sites_readers import board_answers, detect_from_page
+
+    http = FakeHttp(WRONG_FIRST)
+    plain = detect_from_page("https://www.aidash.com/careers", http)  # type: ignore[arg-type]
+    assert plain.board == "oldco"  # first one when nothing is checked
+    found = detect_from_page(
+        "https://www.aidash.com/careers",
+        http,  # type: ignore[arg-type]
+        board_answers(http, ["Program Manager"]),  # type: ignore[arg-type]
+    )
+    assert (found.system, found.board) == ("lever", "jobs.lever.co|aidash")
+
+
+def test_test_button_switches_to_another_board_when_the_saved_one_fails(
+    store: Store, client_with: Any
+) -> None:
+    store.upsert_site("AIDash", "https://www.aidash.com/careers", "greenhouse", "oldco", "")
+    site = store.list_sites()[0]
+    text = (
+        client_with(WRONG_FIRST)
+        .post("/config/sites/act", data={"act": f"test:{site.id}"}, follow_redirects=True)
+        .get_data(as_text=True)
+    )
+    assert "tried another board from its page (Lever, aidash)" in text
+    assert store.list_sites()[0].board == "jobs.lever.co|aidash"
+    assert "Lever (aidash)" in client_with(WRONG_FIRST).get("/config").get_data(as_text=True)
+
+
+def test_direct_links_are_never_swapped(store: Store) -> None:
+    from jobscan.sites_run import redetect
+
+    store.upsert_site("Mythic", "https://jobs.lever.co/mythic-ai.com", "lever", "x|y", "")
+    assert redetect(store.list_sites()[0], FakeHttp(WRONG_FIRST), ["a"]) is None  # type: ignore[arg-type]
+
+
+def test_placeholder_and_site_page_links_are_not_boards() -> None:
+    assert detect("https://boards.greenhouse.io/${company}").system == ""
+    assert detect("https://boards.greenhouse.io/users/sign_in").system == ""
+    assert detect("https://boards.greenhouse.io/{{slug}}/jobs").system == ""
+    assert detect("https://boards.greenhouse.io/fivetran").board == "fivetran"
+    assert valid_board("lever", "jobs.lever.co|aidash")
+    assert not valid_board("greenhouse", "${company}")
+
+
+def test_test_button_clears_a_saved_placeholder_board(store: Store, client_with: Any) -> None:
+    store.upsert_site("Glean", "https://www.glean.com/careers", "greenhouse", "${company}", "")
+    site = store.list_sites()[0]
+    pages = {"https://www.glean.com/careers": "<p>no board linked here</p>"}
+    client_with(pages).post("/config/sites/act", data={"act": f"test:{site.id}"})
+    assert store.list_sites()[0].system == ""
+
+
+def test_tag_filter_takes_several_tags(store: Store, client: FlaskClient) -> None:
+    for name, tag in (("Aa", "GCC"), ("Bb", "Product"), ("Cc", "Services"), ("Dd", "")):
+        store.upsert_site(name, f"https://jobs.lever.co/{name}", "lever", "x|y", tag)
+    assert page(client, "/config?tag=GCC").count("<strong>") == 1
+    both = page(client, "/config?tag=GCC&tag=Product")
+    assert both.count("<strong>") == 2
+    assert 'name="tag" value="Product"' in both
+    assert page(client, "/companies?tag=GCC&tag=Services").count("<strong>") == 2
+    reply = client.post(
+        "/config/sites/act",
+        data={"act": "toggle:1", "back": "full", "tag": ["GCC", "Product"]},
+    )
+    assert reply.headers["Location"].endswith("/companies?tag=GCC&tag=Product")

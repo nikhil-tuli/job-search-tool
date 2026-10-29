@@ -13,10 +13,11 @@ import html
 import json
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any, Protocol
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -89,15 +90,40 @@ class Detected:
 _LOCALE = re.compile(r"[a-z]{2}-[A-Z]{2}")
 
 
+_BOARD_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+_NOT_BOARDS = frozenset(
+    {"users", "user", "embed", "api", "v1", "v0", "jobs", "job", "login", "sign_in", "signin",
+     "static", "assets", "images", "img", "css", "js", "widget", "www", "docs", "support"}
+)  # fmt: skip
+
+
 def detect(url: str) -> Detected:
-    """Work out the hiring system and the board name from a career link."""
+    """Work out the hiring system and the board name from a career link.
+
+    A link whose board name is a placeholder (`${company}`) or a site page (`users`) is not a
+    board, so it is not recognised.
+    """
+    found = _detect(url)
+    return found if valid_board(found.system, found.board) else Detected("", "")
+
+
+def valid_board(system: str, board: str) -> bool:
+    """False for a saved or linked board name that is really a placeholder or a site page."""
+    if not system:
+        return True
+    name = board.rpartition("|")[2]
+    return bool(_BOARD_NAME.fullmatch(name)) and name.casefold() not in _NOT_BOARDS
+
+
+def _detect(url: str) -> Detected:
     parsed = urlparse(url.strip())
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise SiteError("Enter the full link, starting with https://")
     host = parsed.hostname.lower()
     parts = [p for p in parsed.path.split("/") if p]
     if host.endswith("greenhouse.io") and parts:
-        return Detected(GREENHOUSE, parts[0])
+        board = _greenhouse_board(parsed.query, parts)
+        return Detected(GREENHOUSE, board) if board else Detected("", "")
     if host in ("jobs.lever.co", "jobs.eu.lever.co") and parts:
         return Detected(LEVER, f"{host}|{parts[0]}")
     if host == "jobs.ashbyhq.com" and parts:
@@ -113,6 +139,26 @@ def detect(url: str) -> Detected:
     return Detected("", "")
 
 
+def _greenhouse_board(query: str, parts: list[str]) -> str:
+    """The board name in a Greenhouse link: its first path part, or `for=` of an embed link."""
+    if parts[0] == "embed":
+        return parse_qs(query).get("for", [""])[0]
+    if parts[:2] == ["v1", "boards"]:
+        return parts[2] if len(parts) > 2 else ""
+    return "" if parts[0] == "v1" else parts[0]
+
+
+def board_label(system: str, board: str) -> str:
+    """The board in plain words for the Config list, for example 'aidash'."""
+    if not system:
+        return ""
+    if system == LEVER:
+        return board.rpartition("|")[2]
+    if system == WORKDAY:
+        return board.rpartition("|")[2]
+    return board
+
+
 _SYSTEM_LINK = re.compile(
     r"https?://[\w.-]*(?:myworkdayjobs\.com|greenhouse\.io|jobs\.lever\.co|jobs\.eu\.lever\.co|"
     r"jobs\.ashbyhq\.com|jobs\.jobvite\.com|zohorecruit\.\w+)[^\s\"'<>)\\]*",
@@ -120,24 +166,53 @@ _SYSTEM_LINK = re.compile(
 )
 
 
-def detect_from_page(url: str, http: Http) -> Detected:
-    """Read a company's own career page and look for a link to its hiring system.
-
-    For companies whose career page is on their own site but whose jobs sit on a hiring system.
-    Returns Detected("", "") when none is found or the page cannot be read.
-    """
+def page_candidates(url: str, http: Http) -> list[Detected]:
+    """Every different hiring-system board linked from a company's own page, in page order."""
     try:
         page = http.get_text(url)
     except SiteError:
-        return Detected("", "")
+        return []
+    found: list[Detected] = []
     for match in _SYSTEM_LINK.finditer(html.unescape(page)):
         try:
-            found = detect(match.group(0).rstrip(".,;"))
+            candidate = detect(match.group(0).rstrip(".,;"))
         except SiteError:
             continue
-        if found.system:
-            return found
-    return Detected("", "")
+        if candidate.system and candidate not in found:
+            found.append(candidate)
+    return found
+
+
+def detect_from_page(
+    url: str, http: Http, works: Callable[[Detected], bool] | None = None
+) -> Detected:
+    """Read a company's own career page and find the hiring system its jobs sit on.
+
+    A page can link to several boards (an old one, a partner's). With `works`, the first board
+    that answers is used; when none does, the first one is returned so its error is visible.
+    Returns Detected("", "") when no hiring system is linked or the page cannot be read.
+    """
+    candidates = page_candidates(url, http)
+    if not candidates:
+        return Detected("", "")
+    if works is not None:
+        for candidate in candidates:
+            if works(candidate):
+                return candidate
+    return candidates[0]
+
+
+def board_answers(http: Http, keywords: list[str]) -> Callable[[Detected], bool]:
+    """A check for `detect_from_page`: does this board return a job list for these phrases?"""
+
+    def check(candidate: Detected) -> bool:
+        try:
+            make_reader(candidate.system, candidate.board, http).list_jobs(keywords or ["a"], 1)
+        except SiteError:
+            return False
+        return True
+
+    return check
 
 
 # ---- talking to a company site ----------------------------------------------------------------

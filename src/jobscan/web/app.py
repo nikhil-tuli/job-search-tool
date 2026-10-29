@@ -11,7 +11,7 @@ import secrets
 from collections.abc import Callable, Collection, Iterable, Mapping
 from datetime import date, timedelta
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from flask import (
     Flask,
@@ -31,7 +31,6 @@ from .. import schedule as schedule_module
 from ..config import LIST_SETTINGS, Config, ConfigError, split_list
 from ..cover_docx import LIMITS, MAX_BULLETS, analyse_letter
 from ..cv import MAX_UPLOAD_BYTES, CvError, extract_text, sha_of
-from ..details import waiting_for_description
 from ..embeddings import API_KEY_ENV, Embedder
 from ..evaluation import build_report, load_labelled, score_bands
 from ..fit_book import FitBook
@@ -67,8 +66,18 @@ from ..scoring import (
     gemini_from_env,
     plan_scoring,
 )
-from ..sites_readers import SYSTEM_LABELS, Http, HttpClient, SiteError, detect, detect_from_page
-from ..sites_run import ReaderFactory, default_reader_factory, try_company
+from ..sites_readers import (
+    SYSTEM_LABELS,
+    Http,
+    HttpClient,
+    SiteError,
+    board_answers,
+    board_label,
+    detect,
+    detect_from_page,
+    valid_board,
+)
+from ..sites_run import ReaderFactory, default_reader_factory, redetect, try_company
 from ..store import Store, StoreError
 from ..sync import (
     MailSourceFactory,
@@ -724,6 +733,15 @@ def create_app(
 
     # ---- roles ----------------------------------------------------------------------------
 
+    TITLE_OTHER = "__other__"
+
+    def title_phrases() -> list[str]:
+        seen: dict[str, str] = {}
+        for p in store.list_phrases():
+            if p.phrase.strip():
+                seen.setdefault(p.phrase.strip().casefold(), p.phrase.strip())
+        return sorted(seen.values(), key=str.casefold)
+
     def read_filter(args: Any) -> tuple[RoleFilter, dict[str, Any]]:
         """Filter from the query string. Status, fit, score, follow-up and fetched take several
         values (repeated parameters); none ticked means no filter on that one."""
@@ -741,7 +759,14 @@ def create_app(
         sort = args.get("sort", "")
         query = args.get("q", "").strip()
         dup = args.get("dup", "") == "1"
+        known = title_phrases()
+        asked_titles = set(args.getlist("title"))
+        titles = [t for t in known if t in asked_titles]  # a deleted phrase drops out quietly
+        other = TITLE_OTHER in asked_titles
         flt = RoleFilter(
+            titles=tuple(titles),
+            titles_other=other,
+            known_titles=tuple(known),
             query=query,
             statuses=tuple(statuses),
             portals=tuple(portals),
@@ -759,6 +784,7 @@ def create_app(
             "followup": follow,
             "fit": fit,
             "score": score,
+            "title": [*titles, *([TITLE_OTHER] if other else [])],
             "sort": sort if sort in SORT_CHOICES else "",
         }
         if shown["sort"] and args.get("dir", "") in ("asc", "desc"):
@@ -919,7 +945,13 @@ def create_app(
                 page=page,
                 pages=pages,
                 filters=active,
-                advanced_open=any(k in active for k in ("fit", "score", "followup", "fetched")),
+                advanced_open=any(
+                    k in active for k in ("fit", "score", "followup", "fetched", "title")
+                ),
+                title_options=[
+                    *[(t, t) for t in title_phrases()],
+                    (TITLE_OTHER, "Other (no phrase)"),
+                ],
                 today=today_iso(),
                 status_options=[(v, v) for v in SORTED_STATUSES],
                 portal_options=[(p, p) for p in PORTALS],
@@ -1250,8 +1282,6 @@ def create_app(
                 chunks=[text for text, _ in store.get_cv_chunks()],
                 word_ok=store.get_cv_file() is not None and not word_problem(),
                 word_problem=word_problem(),
-                template=store.get_cover_template(),
-                template_problem=template_problem(),
                 pending=len(pending.selected) if pending else 0,
                 key_set=bool(os.environ.get(API_KEY_ENV)),
                 key_name=API_KEY_ENV,
@@ -1260,6 +1290,22 @@ def create_app(
             ),
             status,
         )
+
+    def render_cover_template(error: str = "", status: int = 200) -> tuple[str, int]:
+        return (
+            render_template(
+                "cv_cover.html",
+                template=store.get_cover_template(),
+                template_problem=template_problem(),
+                max_mb=MAX_UPLOAD_BYTES // (1024 * 1024),
+                error=error,
+            ),
+            status,
+        )
+
+    @app.get("/cv/cover-letter")
+    def cv_cover() -> tuple[str, int]:
+        return render_cover_template()
 
     @app.get("/cv")
     def cv_page() -> tuple[str, int]:
@@ -1318,15 +1364,17 @@ def create_app(
     def cv_template_upload() -> tuple[str, int] | WerkzeugResponse:
         upload = request.files.get("template")
         if upload is None or not upload.filename:
-            return render_cv("Choose a Word file for the cover letter template.", 400)
+            return render_cover_template("Choose a Word file for the cover letter template.", 400)
         name = os.path.basename(upload.filename.replace("\\", "/"))[:200]
         if not name.lower().endswith(".docx"):
-            return render_cv("The cover letter template must be a Word (.docx) file.", 400)
+            return render_cover_template(
+                "The cover letter template must be a Word (.docx) file.", 400
+            )
         data = upload.read(MAX_UPLOAD_BYTES + 1)
         try:
             analyse_letter(data)
         except DocxError as exc:
-            return render_cv(f"This letter cannot be used as a template: {exc}", 400)
+            return render_cover_template(f"This letter cannot be used as a template: {exc}", 400)
         when = to_iso(now_ist())
         saved = store.get_cover_template()
         sha = hashlib.sha256(data).hexdigest()
@@ -1336,7 +1384,7 @@ def create_app(
                 TAILOR_COVER, "Your cover letter template was replaced. Start again."
             )
         flash("Cover letter template saved. Cover letter tailoring is now available.", "ok")
-        return redirect(url_for("cv_page"))
+        return redirect(url_for("cv_cover"))
 
     # ---- summary --------------------------------------------------------------------------
 
@@ -1380,14 +1428,10 @@ def create_app(
                 for c in store.list_sites()
                 if c.enabled and c.last_status == "failed"
             ],
-            naukri_waiting=waiting_for_description(store, current_config(), PORTAL_NAUKRI),
             scans=scans_by_day(store.list_runs(200, portal or None)),
             latest_run=store.latest_run(portal or PORTAL_LINKEDIN),
             elapsed=schedule_module.elapsed_text,
-            schedule_line=schedule_module.describe_state(schedule_module.schedule_state()),
             **run_context(),
-            desc_waiting=waiting_for_description(store, current_config()),
-            desc_days=current_config().detail_max_age_days,
             **scoring_context(),
         )
 
@@ -1446,6 +1490,7 @@ def create_app(
     # ---- config ---------------------------------------------------------------------------
 
     SITES_SHOWN = 10
+    SYNC_REREAD_DAYS = 30
     SITE_FILTERS = ("working", "attention", "paused", "unsupported")
 
     def site_state(company: Any) -> str:
@@ -1468,12 +1513,17 @@ def create_app(
             return "Not fetched yet"
         return f"Working, {company.last_found} roles, {when}"
 
-    def sites_context() -> dict[str, Any]:
+    def shown_count() -> int:
+        raw = request.args.get("n", "")
+        count = int(raw) if raw.isdigit() else SITES_SHOWN
+        return max(SITES_SHOWN, min(count, 100_000))
+
+    def sites_context(full: bool = False) -> dict[str, Any]:
         everything = store.list_sites()
         wanted = request.args.get("co", "")
         wanted = wanted if wanted in SITE_FILTERS else ""
         query = request.args.get("q", "").strip().casefold()
-        tag = request.args.get("tag", "").strip()
+        asked_tags = {t.strip().casefold() for t in request.args.getlist("tag") if t.strip()}
         counts = dict.fromkeys(SITE_FILTERS, 0)
         for company in everything:
             counts[site_state(company)] += 1
@@ -1482,18 +1532,18 @@ def create_app(
             for c in everything
             if (not wanted or site_state(c) == wanted)
             and (not query or query in c.name.casefold())
-            and (not tag or c.tag.casefold() == tag.casefold())
+            and (not asked_tags or c.tag.casefold() in asked_tags)
         ]
         picked.sort(key=lambda c: (site_state(c) != "attention", c.name.casefold()))
-        show_all = request.args.get("all") == "1"
-        shown = picked if show_all else picked[:SITES_SHOWN]
+        shown = picked if full else picked[: shown_count()]
         return {
             "companies": [
                 {
                     "c": c,
                     "state": site_state(c),
                     "text": site_text(c),
-                    "system": SYSTEM_LABELS[c.system],
+                    "system": SYSTEM_LABELS[c.system]
+                    + (f" ({board_label(c.system, c.board)})" if c.system else ""),
                 }
                 for c in shown
             ],
@@ -1501,14 +1551,28 @@ def create_app(
             "sites_matching": len(picked),
             "sites_hidden": len(picked) - len(shown),
             "site_counts": counts,
-            "site_tags": sorted({c.tag for c in everything if c.tag}, key=str.casefold),
+            "site_tag_options": [
+                (t, t) for t in sorted({c.tag for c in everything if c.tag}, key=str.casefold)
+            ],
+            "site_tags": sorted(
+                {c.tag for c in everything if c.tag and c.tag.casefold() in asked_tags},
+                key=str.casefold,
+            ),
             "site_filter": wanted,
             "site_query": request.args.get("q", ""),
-            "site_tag": tag,
         }
 
     def back_to_sites() -> WerkzeugResponse:
+        if request.form.get("back") == "full":
+            pairs = [(k, request.form.get(k, "")) for k in ("co", "q")]
+            pairs += [("tag", t) for t in request.form.getlist("tag")]
+            query = "&".join(f"{k}={quote(v)}" for k, v in pairs if v)
+            return redirect(url_for("companies_page") + (f"?{query}" if query else ""))
         return redirect(url_for("config_page") + "#company-sites")
+
+    @app.get("/companies")
+    def companies_page() -> str:
+        return render_template("companies.html", **sites_context(full=True))
 
     def add_site(name: str, link: str, tag: str) -> str:
         """Add or update one company. Returns a message, or raises SiteError."""
@@ -1517,7 +1581,9 @@ def create_app(
             raise SiteError("Enter the company name.")
         found = detect(link)
         if not found.system:  # a company's own page may link to its hiring system
-            found = detect_from_page(link.strip(), sites_http or HttpClient())
+            http = sites_http or HttpClient()
+            keywords = [p.phrase for p in store.list_phrases() if p.use_as_keyword]
+            found = detect_from_page(link.strip(), http, board_answers(http, keywords))
         new = store.upsert_site(name, link.strip(), found.system, found.board, tag)
         label = SYSTEM_LABELS[found.system]
         status = "added" if new else "updated"
@@ -1576,8 +1642,13 @@ def create_app(
         elif action == "test":
             config = current_config()
             phrases = store.list_phrases()
+            http = sites_http or HttpClient()
+            keywords = [p.phrase for p in phrases if p.use_as_keyword]
+            if company.system and not valid_board(company.system, company.board):
+                store.set_site_system(company.id, "", "")  # a placeholder, not a real board
+                company = store.get_site(company.id) or company
             if not company.system:
-                found = detect_from_page(company.url, sites_http or HttpClient())
+                found = detect_from_page(company.url, http, board_answers(http, keywords))
                 if found.system:
                     store.set_site_system(company.id, found.system, found.board)
                     company = store.get_site(company.id) or company
@@ -1585,14 +1656,24 @@ def create_app(
                         f"{company.name}: found its hiring system ({SYSTEM_LABELS[found.system]}).",
                         "ok",
                     )
+            match_phrases = [p.phrase for p in phrases if p.use_for_match]
             result = try_company(
-                company,
-                config,
-                [p.phrase for p in phrases if p.use_as_keyword],
-                [p.phrase for p in phrases if p.use_for_match],
-                sites_http or HttpClient(),
-                sites_reader_factory,
+                company, config, keywords, match_phrases, http, sites_reader_factory
             )
+            if not result.ok and company.system:
+                better = redetect(company, http, keywords)
+                if better is not None:
+                    store.set_site_system(company.id, better.system, better.board)
+                    company = store.get_site(company.id) or company
+                    label = SYSTEM_LABELS[better.system]
+                    where = board_label(better.system, better.board)
+                    flash(
+                        f"{company.name}: tried another board from its page ({label}, {where}).",
+                        "ok",
+                    )
+                    result = try_company(
+                        company, config, keywords, match_phrases, http, sites_reader_factory
+                    )
             if result.ok:
                 store.record_site_result(company.id, "ok", "", result.matched)
                 flash(
@@ -1696,6 +1777,17 @@ def create_app(
             start_in_background(store, make_mail_source, make_tailor_client)
         return redirect(url_for("sync_page"))
 
+    @app.post("/sync/reread")
+    def sync_reread() -> WerkzeugResponse:
+        problem = sync_problem(current_config())
+        if problem:
+            flash(problem, "error")
+        else:
+            start_in_background(
+                store, make_mail_source, make_tailor_client, reread_days=SYNC_REREAD_DAYS
+            )
+        return redirect(url_for("sync_page"))
+
     def back_to_sync() -> WerkzeugResponse:
         return redirect(safe_next(request.form.get("next"), url_for("sync_page")))
 
@@ -1723,7 +1815,7 @@ def create_app(
             return redirect(url_for("cv_page"))
         if result.kind == START_NO_TEMPLATE:
             flash("Upload your cover letter template (Word) to tailor a cover letter.", "error")
-            return redirect(url_for("cv_page"))
+            return redirect(url_for("cv_cover"))
         if result.kind == START_NO_DESCRIPTION:
             flash("This role has no description yet, so there is nothing to tailor to.", "error")
             return redirect(back)

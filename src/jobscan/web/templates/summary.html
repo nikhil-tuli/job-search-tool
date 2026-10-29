@@ -5,7 +5,7 @@
   <div class="title-row">
     <h1>Summary <span class="muted">{{ grand_total }} roles</span></h1>
     <p class="muted">
-      Roles by the day they were first fetched (IST) and their status now. Click a number to see those roles.
+      Roles by the day they were first fetched (IST) and their status now.
       Last successful run:
       {% for name, run in last_successes %}{% if not loop.first %} &middot; {% endif %}{{ name }}
       {% if run %}{{ (run.finished_on or run.started_on) | ist }} IST{% else %}none yet{% endif %}{% endfor %}
@@ -17,19 +17,11 @@
   </p>
   {% if naukri_reminder %}<p class="notice">{{ naukri_reminder }}</p>{% endif %}
   {% if site_attention and (not portal or portal == 'Company sites') %}<p class="notice"><strong>Needs attention ({{ site_attention | length }}):</strong> {% for name, note in site_attention %}{{ name }}: {{ note }}{% if not loop.last %}; {% endif %}{% endfor %}. Fix the link under Config, Company sites, then run <code>jobscan sites</code>.</p>{% endif %}
-  <p class="muted scan-state">
-    {% if latest_run and latest_run.status == 'running' %}
-      <strong>Scan running:</strong> {{ latest_run.keywords_done }} of {{ latest_run.keywords_total }} keywords done,
-      {{ latest_run.new_roles }} new roles so far, started {{ latest_run.started_on | ist }} IST ({{ elapsed(latest_run.started_on) }}).
-      Refresh to update.
-    {% elif latest_run %}
-      Latest scan: #{{ latest_run.id }} {{ latest_run.status }}, {{ latest_run.new_roles }} new roles.
-    {% endif %}
-    {{ schedule_line }}.
-  </p>
-  <p class="muted scan-state">
-    Descriptions pending: {% if naukri_latest %}LinkedIn {{ desc_waiting }}, Naukri {{ naukri_waiting }}{% else %}{{ desc_waiting }}{% endif %} (roles from the last {{ desc_days }} days).
-  </p>
+  {% if latest_run and latest_run.status == 'running' %}<p class="muted scan-state">
+    <strong>Scan running:</strong> {{ latest_run.keywords_done }} of {{ latest_run.keywords_total }} keywords done,
+    {{ latest_run.new_roles }} new roles so far, started {{ latest_run.started_on | ist }} IST ({{ elapsed(latest_run.started_on) }}).
+    Refresh to update.
+  </p>{% endif %}
 </div>
 
 {% if days %}

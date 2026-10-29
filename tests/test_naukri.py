@@ -510,7 +510,7 @@ def test_status_shows_the_naukri_run(tmp_path: Path) -> None:
     )
     out = io.StringIO()
     main(["--db", str(db_file), "status"], out=out)
-    assert "Naukri latest run: #1 success" in out.getvalue()
+    assert "Naukri: #1 success" in out.getvalue()
 
 
 def test_naukri_settings_are_validated() -> None:

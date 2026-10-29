@@ -173,14 +173,17 @@ def run_sync(
     source: MailSource,
     make_client: ClientFactory = default_client_factory,
     now: datetime | None = None,
+    reread_days: int = 0,
 ) -> SyncResult:
     moment = now or now_ist()
     state = store.get_sync_state()
-    since = (
-        from_iso(state.last_synced_on) - timedelta(days=2)
-        if state.last_synced_on
-        else moment - timedelta(days=config.sync_first_days)
-    )
+    if reread_days:
+        since = moment - timedelta(days=reread_days)
+        store.forget_seen_since(to_iso(since))  # mail already read is looked at again
+    elif state.last_synced_on:
+        since = from_iso(state.last_synced_on) - timedelta(days=2)
+    else:
+        since = moment - timedelta(days=config.sync_first_days)
     store.set_sync_progress("reading", 0, 0)
 
     def reading(done: int, total: int, available: int) -> None:
@@ -262,15 +265,19 @@ def sync_once(
     make_source: MailSourceFactory = default_source_factory,
     make_client: ClientFactory = default_client_factory,
     now: datetime | None = None,
+    reread_days: int = 0,
 ) -> SyncResult | None:
-    """Run one sync with the guard and the bookkeeping. None when it did not run."""
+    """Run one sync with the guard and the bookkeeping. None when it did not run.
+
+    `reread_days` looks at all mail of the last days again, including mail read before.
+    """
     moment = now or now_ist()
     if not store.begin_sync(now=to_iso(moment), stale_before=to_iso(moment - STUCK_AFTER)):
         return None
     result = SyncResult()
     error = ""
     try:
-        result = run_sync(store, config, make_source(config), make_client, moment)
+        result = run_sync(store, config, make_source(config), make_client, moment, reread_days)
     except (MailError, SyncSetupError) as exc:
         error = str(exc)
     except StoreError as exc:
@@ -352,19 +359,20 @@ def start_in_background(
     store: Store,
     make_source: MailSourceFactory = default_source_factory,
     make_client: ClientFactory = default_client_factory,
+    reread_days: int = 0,
 ) -> None:
     """Run one sync without blocking the page. An in-memory database runs it straight away."""
     path = store.db_path()
     config = _config_of(store)
     if path is None:
-        sync_once(store, config, make_source, make_client)
+        sync_once(store, config, make_source, make_client, reread_days=reread_days)
         return
 
     def target() -> None:
         conn = db.connect(Path(path))
         try:
             own = Store(conn)
-            sync_once(own, _config_of(own), make_source, make_client)
+            sync_once(own, _config_of(own), make_source, make_client, reread_days=reread_days)
         finally:
             conn.close()
 
