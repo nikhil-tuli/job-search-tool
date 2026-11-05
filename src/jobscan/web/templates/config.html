@@ -55,6 +55,10 @@
   </div>
   {% endif %}
   {% for group, items in groups %}
+  {% if group in legacy_groups and not legacy_on %}
+  {# Old scoring is switched off: keep its values in the form so a save does not reset them. #}
+  {% for key, label, hint in items %}<input type="hidden" name="{{ key }}" value="{{ values.get(key, '') }}">{% endfor %}
+  {% else %}
   <h2>{{ group }}{% if group in group_info %} <span class="info" tabindex="0" role="note" aria-label="{{ group_info[group] }}">i<span class="tip">{{ group_info[group] }}</span></span>{% endif %}</h2>
   <div class="grid">
     {% for key, label, hint in items %}
@@ -63,6 +67,8 @@
         <select name="{{ key }}">
           {% for mode in match_modes %}<option value="{{ mode }}" {% if values.get(key) == mode %}selected{% endif %}>{{ mode }}</option>{% endfor %}
         </select>
+      {% elif key in textarea_settings %}
+        <textarea name="{{ key }}" rows="7" class="wide">{{ values.get(key, '') }}</textarea>
       {% else %}
         {% if key in list_settings %}
         <input type="text" name="{{ key }}" value="{{ values.get(key, '') }}" class="wide">
@@ -75,6 +81,7 @@
     </label>
     {% endfor %}
   </div>
+  {% endif %}
   {% endfor %}
 
   </details>

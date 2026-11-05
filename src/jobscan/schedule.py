@@ -2,7 +2,7 @@
 
 Nothing here runs in the cloud. `jobscan schedule on` writes a launchd job that calls
 `jobscan scheduled-run` at the set time and at login. `scheduled-run` skips the day if a scan
-already finished, reads the Gemini key from the Keychain (never from a file), runs the scan with a
+already finished, reads the AI key from the Keychain (never from a file), runs the scan with a
 time limit and sends a macOS notification when something needs attention.
 """
 
@@ -25,8 +25,9 @@ from .store import RUN_FAILED, RUN_PARTIAL, RUN_RUNNING, RUN_SUCCESS, Store
 from .timeutil import format_display, from_iso, now_ist, to_iso
 
 LABEL = "com.jobscan.daily"
-KEYCHAIN_SERVICE = "jobscan-gemini"
-KEY_ENV = "GEMINI_API_KEY"
+KEYCHAIN_SERVICE = "jobscan-ai"  # the AI scoring key, whichever provider Config names
+LEGACY_KEYCHAIN_SERVICE = "jobscan-gemini"  # the old embedding key, used only with Legacy scoring
+LEGACY_KEY_ENV = "GEMINI_API_KEY"
 LAUNCH_AGENTS = Path("~/Library/LaunchAgents")
 SECURITY = "/usr/bin/security"
 OSASCRIPT = "/usr/bin/osascript"
@@ -73,14 +74,29 @@ def _run(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, capture_output=True, text=True, check=False)
 
 
-def keychain_has_key(runner: Runner = _run) -> bool:
+@dataclass(frozen=True)
+class KeyChoice:
+    """Which Keychain item holds the scoring key, and the variable the scan reads it from."""
+
+    service: str
+    env: str
+    label: str
+
+
+def key_choice(config: Config) -> KeyChoice:
+    if config.legacy_scoring:
+        return KeyChoice(LEGACY_KEYCHAIN_SERVICE, LEGACY_KEY_ENV, "Gemini")
+    return KeyChoice(KEYCHAIN_SERVICE, config.ai_key_env, "AI")
+
+
+def keychain_has_key(service: str, runner: Runner = _run) -> bool:
     """True when the Keychain holds the key. The key itself is read and thrown away."""
-    result = runner([SECURITY, "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"])
+    result = runner([SECURITY, "find-generic-password", "-s", service, "-w"])
     return result.returncode == 0 and bool(result.stdout.strip())
 
 
-def keychain_key(runner: Runner = _run) -> str | None:
-    result = runner([SECURITY, "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"])
+def keychain_key(service: str, runner: Runner = _run) -> str | None:
+    result = runner([SECURITY, "find-generic-password", "-s", service, "-w"])
     key = result.stdout.strip()
     return key if result.returncode == 0 and key else None
 
@@ -156,11 +172,12 @@ def install(
         return 1
     print(f"Scheduled: a scan runs daily at {config.schedule_time} IST and at login.", file=out)
     print(f"Log: {log}", file=out)
-    if not keychain_has_key(runner):
+    choice = key_choice(config)
+    if not keychain_has_key(choice.service, runner):
         print(
-            "The Gemini key is not in the Keychain, so scheduled scans will fetch roles but "
-            "skip scoring. Store it once (it asks for the key, so it is not typed here):\n"
-            f'  security add-generic-password -a "$USER" -s {KEYCHAIN_SERVICE} -w',
+            f"The {choice.label} key is not in the Keychain, so scheduled scans will fetch roles "
+            "but skip scoring. Store it once (it asks for the key, so it is not typed here):\n"
+            f'  security add-generic-password -a "$USER" -s {choice.service} -w',
             file=out,
         )
     window_days = config.time_window_seconds / 86_400
@@ -268,10 +285,11 @@ def run_scheduled(
         return code
     send: Notifier = notifier or (lambda title, message: notify(title, message, runner))
     environment = dict(os.environ if env is None else env)
-    if not environment.get(KEY_ENV):
-        key = keychain_key(runner)
+    choice = key_choice(config)
+    if not environment.get(choice.env):
+        key = keychain_key(choice.service, runner)
         if key:
-            environment[KEY_ENV] = key
+            environment[choice.env] = key
     command = [python or sys.executable, "-m", "jobscan", "--db", str(db_path), "sites"]
     print(f"{format_display(now)} IST: starting the company sites fetch", file=out)
     out.flush()
@@ -311,13 +329,19 @@ def run_linkedin_scheduled(
         print(f"{format_display(now)} IST: a scan already finished today, nothing to do.", file=out)
         return 0
 
-    if not environment.get(KEY_ENV):
-        key = keychain_key(runner)
+    choice = key_choice(config)
+    if not environment.get(choice.env):
+        key = keychain_key(choice.service, runner)
         if key:
-            environment[KEY_ENV] = key
+            environment[choice.env] = key
         else:
-            print("Gemini key not found in the Keychain; scoring will be skipped.", file=out)
-            send("Job scanner", "Gemini key is not in the Keychain, so roles will not be scored.")
+            print(
+                f"{choice.label} key not found in the Keychain; scoring will be skipped.", file=out
+            )
+            send(
+                "Job scanner",
+                f"The {choice.label} key is not in the Keychain, so roles will not be scored.",
+            )
 
     command = [python or sys.executable, "-m", "jobscan", "--db", str(db_path), "scan"]
     print(f"{format_display(now)} IST: starting the scheduled scan", file=out)

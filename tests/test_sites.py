@@ -866,7 +866,7 @@ def scheduled(store: Store, tmp_path: Path) -> list[list[str]]:
         store,
         tmp_path / "jobscan.db",
         io.StringIO(),
-        env={"GEMINI_API_KEY": "k"},
+        env={"MISTRAL_API_KEY": "k"},
         spawner=spawner,
         notifier=lambda title, message: None,
         python="/usr/bin/python3",

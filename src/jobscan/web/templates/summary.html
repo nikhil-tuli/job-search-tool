@@ -161,6 +161,8 @@
 {% else %}<p class="muted">None stored.</p>{% endif %}
 </details>
 
+{# Old keyword and meaning scoring block: shown only when Legacy scoring is On in Config. #}
+{% if legacy_on %}
 <h2>Scoring</h2>
 {% if not cv %}
 <p class="muted">No CV uploaded. <a href="{{ url_for('cv_page') }}">Upload one</a> to rank roles by fit.</p>
@@ -202,6 +204,7 @@
 </table>
 </div>
 <p class="muted">* tokens are estimated when the service does not report them. Hover a column title to see what it means, or an Excluded number to see the reasons.</p>
+{% endif %}
 {% endif %}
 {% endif %}
 {% endblock %}

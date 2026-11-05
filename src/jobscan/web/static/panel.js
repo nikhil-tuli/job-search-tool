@@ -162,6 +162,13 @@
   }
 
   function showScore(score, button) {
+    if (score.result_html !== undefined) {
+      body.querySelector('[data-score-result]').innerHTML = score.result_html;
+      button.textContent = 'Re-score this role';
+      var aiCell = rows[current].querySelector('td.score');
+      if (aiCell) { aiCell.innerHTML = score.cell_html; }
+      return;
+    }
     var label = score.band.charAt(0).toUpperCase() + score.band.slice(1);
     var fact = body.querySelector('#score-fact');
     var band = fact.querySelector('[data-score-band]');

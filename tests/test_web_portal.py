@@ -42,6 +42,12 @@ def both(store: Store) -> Store:
     return store
 
 
+@pytest.fixture(autouse=True)
+def old_scoring(store: Store) -> None:
+    """These tests cover the old scoring pages, which Legacy scoring brings back."""
+    store.set_config_raw({"legacy_scoring": "1"})
+
+
 def listed(client: FlaskClient, query: str) -> list[str]:
     body = text(client.get(f"/roles?{query}"))
     return sorted({j for j in "123" if f"/jobs/view/{j}" in body})

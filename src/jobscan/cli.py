@@ -15,6 +15,13 @@ from typing import TextIO
 
 from . import __version__
 from . import schedule as scheduling
+from .ai_fit import (
+    AiRunResult,
+    AiScorer,
+    AiScoringUnavailable,
+    Completer,
+    client_from_env,
+)
 from .client import DetailFetcher, LinkedInClient, PageFetcher
 from .config import Config, ConfigError
 from .db import SchemaTooNewError, connect, migrate
@@ -232,6 +239,34 @@ def cmd_schedule(store: Store, db_path: Path, action: str, out: TextIO) -> int:
     return scheduling.install(db_path, config, out)
 
 
+AI_CLIENT_FACTORY: Callable[[Config], Completer] = client_from_env  # tests replace this
+
+
+def ai_score(
+    store: Store,
+    config: Config,
+    emit: Callable[[str], None],
+    sleep: Callable[[float], None] = time.sleep,
+    only: Sequence[Role] | None = None,
+) -> AiRunResult | None:
+    """Score pending roles with the AI. None when scoring is off or there is no CV."""
+    if not config.ai_scoring:
+        emit("AI scoring is switched off in Config, Fit scoring (AI).")
+        return None
+    scorer = AiScorer(
+        store=store,
+        config=config,
+        make_client=lambda c: AI_CLIENT_FACTORY(c),
+        emit=emit,
+        sleep=sleep,
+    )
+    try:
+        return scorer.run(only=only)
+    except AiScoringUnavailable:
+        emit("Scoring skipped: no CV uploaded. Upload one on the CV page of the app.")
+        return None
+
+
 def run_scoring(
     store: Store,
     config: Config,
@@ -246,6 +281,8 @@ def run_scoring(
 
     False when there was no CV to score against.
     """
+    if not config.legacy_scoring:
+        return ai_score(store, config, emit, sleep, only) is not None
     store.fail_stale_scoring_runs(when=to_iso(now_ist()))
     scorer = Scorer(store=store, config=config, make_embedder=make_embedder, emit=emit, sleep=sleep)
     try:
@@ -293,6 +330,13 @@ def cmd_score(
         return EXIT_USAGE
     reporter = Reporter(out, db_path.parent / "runs" / log_name(to_iso(now_ist())))
     try:
+        if not config.legacy_scoring:
+            ai = ai_score(store, config, reporter.line, sleep)
+            if ai is None:
+                return EXIT_USAGE
+            if not ai.stopped:
+                return EXIT_OK
+            return EXIT_PARTIAL if ai.scored else EXIT_FAILED
         try:
             found_cv = run_scoring(
                 store, config, TRIGGER_MANUAL, reporter.line, make_embedder, sleep
@@ -330,6 +374,13 @@ def cmd_eval(
     config = load_config(store, out, "nothing was evaluated")
     if config is None:
         return EXIT_USAGE
+    if not config.legacy_scoring:
+        print(
+            "The old keyword and meaning eval is switched off (Legacy scoring is Off in Config). "
+            "Rate roles in the app and see the Eval tab.",
+            file=out,
+        )
+        return EXIT_OK
     reporter = Reporter(out, db_path.parent / "runs" / log_name(to_iso(now_ist())))
     try:
         cv = store.get_cv()

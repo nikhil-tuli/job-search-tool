@@ -568,6 +568,40 @@ def _migration_16(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_17(conn: sqlite3.Connection) -> None:
+    """AI fit scoring: one saved verdict per role, and a log of AI calls for the daily cap."""
+    conn.execute(
+        """
+        CREATE TABLE ai_fit (
+            portal TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            checks TEXT NOT NULL,
+            role_type_ok INTEGER NOT NULL CHECK (role_type_ok IN (0, 1)),
+            domain TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            trimmed INTEGER NOT NULL DEFAULT 0,
+            inputs TEXT NOT NULL,
+            model TEXT NOT NULL,
+            scored_on TEXT NOT NULL,
+            PRIMARY KEY (portal, job_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE ai_calls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            portal TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            called_on TEXT NOT NULL,
+            ok INTEGER NOT NULL CHECK (ok IN (0, 1)),
+            note TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.execute("CREATE INDEX ai_calls_called_on ON ai_calls (called_on)")
+
+
 # Append new migrations to the end; never edit one that has shipped.
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_1,
@@ -586,6 +620,7 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_14,
     _migration_15,
     _migration_16,
+    _migration_17,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 

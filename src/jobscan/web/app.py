@@ -18,6 +18,7 @@ from flask import (
     Response,
     abort,
     flash,
+    get_template_attribute,
     jsonify,
     make_response,
     redirect,
@@ -28,6 +29,14 @@ from flask import (
 from werkzeug.wrappers import Response as WerkzeugResponse
 
 from .. import schedule as schedule_module
+from ..ai_eval import build_ai_eval
+from ..ai_fit import (
+    MIN_WORDS,
+    AiScorer,
+    AiScoringUnavailable,
+    Completer,
+    client_from_env,
+)
 from ..config import LIST_SETTINGS, Config, ConfigError, split_list
 from ..cover_docx import LIMITS, MAX_BULLETS, analyse_letter
 from ..cv import MAX_UPLOAD_BYTES, CvError, extract_text, sha_of
@@ -140,7 +149,7 @@ EXCLUDE_KINDS = {
     ),
 }
 FIT_CHOICES = ("eligible", "excluded")
-SCORE_CHOICES = ("strong", "partial", "weak", "unscored")
+SCORE_CHOICES = ("strong", "partial", "weak", "good", "bad", "unscored")
 # Sortable columns of the roles table: key -> (header, direction on the first click).
 SORT_COLUMNS = {
     "title": ("Title", "asc"),
@@ -161,7 +170,15 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]", "::1"})
 SAFE_SITES = frozenset({"same-origin", "none"})
 
 # (field, label, hint) in the order they appear on the Config page.
+LEGACY_GROUPS = frozenset({"Scoring", "Embeddings (Gemini)"})
+TEXTAREA_SETTINGS = frozenset({"ai_role_focus", "ai_extra_rules"})
 GROUP_INFO = {
+    "Fit scoring (AI)": (
+        "An AI model reads your CV and each role and labels its must-haves, role type and "
+        "domain. The band (Good, Partial, Bad) follows from the labels, so the must-haves "
+        "setting applies at once. Role focus, extra rules, model, CV and description changes "
+        "mark scores out of date; they are redone at the next scan or jobscan score."
+    ),
     "Scoring": (
         "Scores are saved as raw keyword and meaning values. The weights, floors and bands here "
         "apply as soon as you save and refresh, with no new run. Chunk weights, top matches, "
@@ -409,6 +426,63 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
         ),
     ),
     (
+        "Fit scoring (AI)",
+        (
+            (
+                "ai_scoring",
+                "AI scoring",
+                "1 scores roles with the AI service below, 0 leaves roles unscored. "
+                "The Fit filters still apply",
+            ),
+            ("ai_base_url", "AI service address", "Any OpenAI-compatible service, https only"),
+            ("ai_model", "Model", "Changing it marks every score out of date"),
+            (
+                "ai_key_env",
+                "Key variable name",
+                "Name of the terminal variable holding the key. Never stored here",
+            ),
+            (
+                "ai_role_focus",
+                "Role focus",
+                "What you want and do not want: roles, the work, domains. The AI compares each "
+                "role's day-to-day work with this, so be specific. Changing it marks scores "
+                "out of date",
+            ),
+            (
+                "ai_extra_rules",
+                "Extra rules",
+                "Optional. Added to the AI's rules. Changing it marks scores out of date",
+            ),
+            (
+                "ai_max_missing",
+                "Must-haves allowed missing",
+                "More missing than this is Bad; 1 up to this is Partial. 0 to 10",
+            ),
+            (
+                "ai_max_words",
+                "Most description words sent",
+                "Only a safety limit. Longer text loses company, benefits and legal parts first; "
+                "requirements are never cut",
+            ),
+            (
+                "ai_daily_cap",
+                "Most AI calls per 24 hours",
+                "One call per role. The rest wait for the next run",
+            ),
+            (
+                "ai_calls_per_minute",
+                "AI calls per minute",
+                "The pace. Keep it under the service's limit",
+            ),
+            (
+                "legacy_scoring",
+                "Legacy scoring (keyword and meaning)",
+                "0 hides the old scoring, its Config groups, columns and Eval report. "
+                "1 brings it all back. Nothing is deleted either way",
+            ),
+        ),
+    ),
+    (
         "Scoring",
         (
             (
@@ -548,6 +622,7 @@ GROUP_SECTION = {
     "Fit filters": "Common",
     "Tailoring": "Common",
     "Email Sync": "Common",
+    "Fit scoring (AI)": "Common",
     "Scoring": "Common",
     "Embeddings (Gemini)": "Common",
     "Retention": "Common",
@@ -614,6 +689,7 @@ def create_app(
     allowed_hosts: Collection[str] = LOOPBACK_HOSTS,
     make_embedder: Callable[[Config], Embedder] = gemini_from_env,
     make_tailor_client: ClientFactory = default_client_factory,
+    make_ai_client: Callable[[Config], Completer] = client_from_env,
     sites_http: Http | None = None,
     sites_reader_factory: ReaderFactory = default_reader_factory,
     tailor_convert: Converter = libreoffice_pdf,
@@ -959,10 +1035,19 @@ def create_app(
                 naukri_reminder=reminder_text(store),
                 fit_options=(("eligible", "Eligible"), ("excluded", "Excluded")),
                 score_options=(
-                    ("strong", "Strong fit"),
-                    ("partial", "Partial fit"),
-                    ("weak", "Weak fit"),
-                    ("unscored", "Unscored"),
+                    (
+                        ("strong", "Strong fit"),
+                        ("partial", "Partial fit"),
+                        ("weak", "Weak fit"),
+                        ("unscored", "Unscored"),
+                    )
+                    if config.legacy_scoring
+                    else (
+                        ("good", "Good"),
+                        ("partial", "Partial"),
+                        ("bad", "Bad"),
+                        ("unscored", "Not scored"),
+                    )
                 ),
                 follow_options=(
                     ("due", "Due"),
@@ -1040,15 +1125,45 @@ def create_app(
             "role": role,
             "fit": fit_book().for_roles([role])[role.key],
             "score": score_views(store, config, cv, [role]).get(role.key),
+            "ai_mode": not config.legacy_scoring,
+            "ai_error": store.last_ai_errors().get(role.key, "")
+            if not config.legacy_scoring
+            else "",
             "has_cv": cv is not None,
             "label_note": label_note(role),
             "can_tailor": bool((role.description or "").strip()),
             "sync_note": store.latest_sync_change(role.portal, role.job_id),
         }
 
+    def score_one_ai(role: Role, config: Config) -> tuple[str, ScoreView | None]:
+        """Score one role with the AI now, whatever its fit result."""
+        if not config.ai_scoring:
+            return "AI scoring is switched off in Config, Fit scoring (AI).", None
+        scorer = AiScorer(
+            store=store,
+            config=config,
+            make_client=make_ai_client,
+            emit=lambda _line: None,
+        )
+        try:
+            result = scorer.run(only=[role])
+        except AiScoringUnavailable:
+            return "Upload your CV on the CV page first.", None
+        if result.scored:
+            view = score_views(store, config, store.get_cv(), [role])[role.key]
+            return f"Scored: {view.band}.", view
+        if result.no_description:
+            return (
+                f"This role needs a description of at least {MIN_WORDS} words to be scored.",
+                None,
+            )
+        return result.stopped or store.last_ai_errors().get(role.key, "Could not score."), None
+
     def score_one(role: Role) -> tuple[str, ScoreView | None]:
         """Score one role now, whatever its fit result. Returns a message and the new score."""
         config = current_config()
+        if not config.legacy_scoring:
+            return score_one_ai(role, config)
         scorer = Scorer(
             store=store,
             config=config,
@@ -1138,6 +1253,15 @@ def create_app(
         if request.headers.get("X-Panel") == "1":
             if view is None:
                 return jsonify(message=message), 400
+            if view.ai:
+                return jsonify(
+                    message=message,
+                    score={
+                        "band": view.band,
+                        "result_html": get_template_attribute("_ai_score.html", "result")(view),
+                        "cell_html": get_template_attribute("_ai_score.html", "pill")(view),
+                    },
+                )
             return jsonify(
                 message=message,
                 score={
@@ -1177,6 +1301,19 @@ def create_app(
             chosen = request.cookies.get(EVAL_PORTAL_COOKIE, "")
         portal = chosen if chosen in PORTALS else ""
         portals = [portal] if portal else []
+        if not config.legacy_scoring:
+            response = make_response(
+                render_template(
+                    "eval_ai.html",
+                    ev=build_ai_eval(store, config, cv, portals, phrases, now_ist()),
+                    has_cv=cv is not None,
+                    portal=portal,
+                    portals=PORTALS,
+                )
+            )
+            if request.args.get("portal") is not None:
+                response.set_cookie(EVAL_PORTAL_COOKIE, portal, max_age=365 * 86400, samesite="Lax")
+            return response
         report = build_report(load_labelled(store, config, cv, portals), config, phrases)
         response = make_response(
             render_template(
@@ -1391,9 +1528,12 @@ def create_app(
 
     def scoring_context() -> dict[str, Any]:
         config, cv = current_config(), store.get_cv()
+        if not config.legacy_scoring:
+            return {"cv": cv, "legacy_on": False}
         history = store.list_scoring_runs(10)
         waiting = plan_scoring(store, config, cv, now_ist()) if cv else None
         return {
+            "legacy_on": True,
             "cv": cv,
             "score_runs": history,
             "score_latest": history[0] if history else None,
@@ -1720,6 +1860,9 @@ def create_app(
                 sections=CONFIG_SECTIONS,
                 group_info=GROUP_INFO,
                 list_settings=LIST_SETTINGS,
+                textarea_settings=TEXTAREA_SETTINGS,
+                legacy_groups=LEGACY_GROUPS,
+                legacy_on=raw.get("legacy_scoring") == "1",
                 values=raw,
                 phrases=rows,
                 errors=errors,

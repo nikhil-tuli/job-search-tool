@@ -17,6 +17,7 @@ from jobscan.store import RUN_FAILED, RUN_PARTIAL, RUN_SUCCESS, Store
 from jobscan.timeutil import now_ist, to_iso
 
 SECRET = "AIza-test-secret-value"
+KEY_ENV = "MISTRAL_API_KEY"
 
 
 def done(*, returncode: int = 0, stdout: str = "") -> subprocess.CompletedProcess[str]:
@@ -150,7 +151,7 @@ def test_plist_runs_at_the_set_time_and_at_login(tmp_path: Path) -> None:
     assert job["ProgramArguments"][0] == "/opt/py/bin/python"
     assert job["ProgramArguments"][-1] == "scheduled-run"
     assert SECRET not in raw.decode()
-    assert schedule.KEY_ENV not in raw.decode()
+    assert KEY_ENV not in raw.decode()
 
 
 def test_install_writes_and_loads_the_job(tmp_path: Path) -> None:
@@ -286,7 +287,7 @@ def test_a_failed_scan_today_does_not_block_the_next(store: Store, tmp_path: Pat
 def test_key_comes_from_the_keychain_and_stays_out_of_output(store: Store, tmp_path: Path) -> None:
     spawner, notes = FakeSpawner(), Notes()
     _, text = go(store, tmp_path, spawner, notes)
-    assert spawner.seen_env[schedule.KEY_ENV] == SECRET
+    assert spawner.seen_env[KEY_ENV] == SECRET
     assert SECRET not in text
     assert all(SECRET not in n for n in notes.sent)
 
@@ -296,8 +297,8 @@ def test_an_environment_key_is_used_without_asking_the_keychain(
 ) -> None:
     runner = FakeRunner()
     spawner = FakeSpawner()
-    go(store, tmp_path, spawner, Notes(), runner=runner, env={schedule.KEY_ENV: "from-env"})
-    assert spawner.seen_env[schedule.KEY_ENV] == "from-env"
+    go(store, tmp_path, spawner, Notes(), runner=runner, env={KEY_ENV: "from-env"})
+    assert spawner.seen_env[KEY_ENV] == "from-env"
     assert not any(c[0] == schedule.SECURITY for c in runner.calls)
 
 
@@ -305,8 +306,41 @@ def test_missing_key_notifies_but_still_scans(store: Store, tmp_path: Path) -> N
     spawner, notes = FakeSpawner(), Notes()
     go(store, tmp_path, spawner, notes, runner=FakeRunner(key=None))
     assert spawner.calls == 1
-    assert schedule.KEY_ENV not in spawner.seen_env
+    assert KEY_ENV not in spawner.seen_env
     assert any("Keychain" in n for n in notes.sent)
+
+
+def test_the_keychain_item_is_the_ai_one_and_the_variable_follows_config(
+    store: Store, tmp_path: Path
+) -> None:
+    store.set_config_raw({"ai_key_env": "MY_AI_KEY"})
+    runner, spawner = FakeRunner(), FakeSpawner()
+    go(store, tmp_path, spawner, Notes(), runner=runner)
+    asked = [c for c in runner.calls if c[0] == schedule.SECURITY]
+    assert asked
+    assert all(schedule.KEYCHAIN_SERVICE in c for c in asked)
+    assert spawner.seen_env["MY_AI_KEY"] == SECRET
+    assert KEY_ENV not in spawner.seen_env
+
+
+def test_legacy_scoring_still_uses_the_gemini_item(store: Store, tmp_path: Path) -> None:
+    store.set_config_raw({"legacy_scoring": "1"})
+    runner, spawner = FakeRunner(), FakeSpawner()
+    go(store, tmp_path, spawner, Notes(), runner=runner)
+    asked = [c for c in runner.calls if c[0] == schedule.SECURITY]
+    assert asked
+    assert all(schedule.LEGACY_KEYCHAIN_SERVICE in c for c in asked)
+    assert spawner.seen_env[schedule.LEGACY_KEY_ENV] == SECRET
+
+
+def test_install_names_the_ai_keychain_item(tmp_path: Path) -> None:
+    out = io.StringIO()
+    schedule.install(
+        tmp_path / "jobscan.db", Config(), out, runner=FakeRunner(key=None), home=tmp_path,
+        uid=501, platform="darwin",
+    )  # fmt: skip
+    assert f"-s {schedule.KEYCHAIN_SERVICE} -w" in out.getvalue()
+    assert "AI key" in out.getvalue()
 
 
 def test_timeout_comes_from_config(store: Store, tmp_path: Path) -> None:

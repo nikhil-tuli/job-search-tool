@@ -23,7 +23,7 @@ class FitBook:
         self._rules = rules
         self._now = now
         self._saved = {key: result for key, (result, _) in store.get_fits().items()}
-        self._scored = set(store.get_scores())
+        self._scored = set(store.get_scores()) | set(store.get_ai_fits())
 
     def get(self, role: Role) -> FitResult:
         saved = self._saved.get(role.key)

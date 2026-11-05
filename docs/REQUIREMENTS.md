@@ -143,9 +143,15 @@ Every scoring run (automatic, button or re-score) is recorded and shown in the a
 
 **Open questions**
 
-- LLM review: not in the first release. Revisit after the eval.
+- LLM review: done as Round 15 (AI fit scoring, built).
 - Whether a batched embedding request counts as one request or one per text against the Gemini quota (100 per minute, 30K tokens per minute, 1K per day) is not verified. The build assumes the worse case, one per text, so it can only under-use the quota. Check the AI Studio usage meter after the first real run. The batch request body and response shape were written from the API reference and are also unverified.
 - Score weights and bands: calibrate on about 20 rated roles, using the Eval page.
+- Fit score weights and ranges: to be discussed again. Open points:
+    - How the 40:60 keyword to meaning weights were chosen, and why each signal has its own floor and ceiling (keyword 0.08 to 0.20, meaning 0.50 to 0.85).
+    - How your Good and Poor ratings can validate the weights, the ranges and the bands (AUC by keyword share, the best cut-off score, the lowest-scored Good roles).
+    - Whether to keep the fixed ranges or replace them with percentile ranks.
+    - Nothing is changed until this is agreed.
+    - Not needed if Round 15 (AI fit scoring) is agreed, since weights and ranges go away.
 
 **Build order**
 
@@ -153,7 +159,7 @@ Every scoring run (automatic, button or re-score) is recorded and shown in the a
 2. CV upload, chunking and keyword score. **Built.**
 3. Gemini embeddings, cosine, merge and the scoring run log. **Built.**
 4. Fit rating, `jobscan eval`, `jobscan details`, the Eval page and the relevance tools. **Built.** Calibrating the weights and bands needs about 20 or more rated roles.
-5. LLM review: not planned.
+5. AI fit scoring: see Round 15 (built).
 
 ## Round 5: scheduled scan and panel changes (built)
 
@@ -167,7 +173,7 @@ This reverses the earlier "no schedule" goal, so it stays off until switched on.
 - **Commands:** `jobscan schedule on` and `jobscan schedule off` write and remove the job. `jobscan status` shows the schedule state.
 - **Missed runs:** `launchd` runs a job missed during sleep when the Mac wakes. It does not run a job missed while the Mac was off, so the job also runs at login, and skips the run if a scan already completed that day.
 - **Search window (configurable):** the scheduled scan does not default to the last 24 hours. It uses a Config value for how far back to look (the existing `time_window_seconds`, sent to LinkedIn as `f_TPR=r<seconds>`), so a skipped day can be covered by widening it. Two cautions: only 86400 seconds has been confirmed against LinkedIn, and the scan prints a warning at the start for any other value, so a wider value must be tested on the first run. The scan already warns when the last successful run is older than the window, which is how a gap is flagged. `fit_recency_days` (default 1) also drops roles older than that from scoring, so it must be raised to match, or older roles found by a wider scan are excluded. The wider the window, the more roles and texts each run uses, against the 1,000 daily limit.
-- **Gemini key:** the job reads it from the macOS Keychain at run time. It is never written to a file, a log, the job definition or a URL.
+- **AI key:** the job reads it from the macOS Keychain at run time (item `jobscan-ai`, passed to the scan as the variable named in Config, default `MISTRAL_API_KEY`). With Legacy scoring on it reads the old item `jobscan-gemini` as `GEMINI_API_KEY`. It is never written to a file, a log, the job definition or a URL.
 - **Absolute paths:** the job uses absolute paths to Python and the project, because it has no shell setup.
 - **Time limit:** a wrapper stops the scan after a set time (default 180 minutes, since scans have taken up to about 2.5 hours), so a hang cannot block the next day, and sends a notification.
 - **Overlap:** the existing `scan.lock` file refuses a second scan while one runs, so a scheduled run and a manual run cannot overlap.
@@ -181,7 +187,7 @@ This reverses the earlier "no schedule" goal, so it stays off until switched on.
 
 - **Commands:** `jobscan schedule on`, `schedule off` and `schedule status`. `jobscan scheduled-run` is what the job calls. `jobscan status` and the Summary page show the schedule state.
 - **Config group "Scheduled scan":** run time (HH:MM, IST), stop-after minutes (default 180) and notify-when-a-scan-ends (0 or 1). Changing the time needs `jobscan schedule on` again, because launchd holds the time.
-- **Keychain:** store the key once with `security add-generic-password -a "$USER" -s jobscan-gemini -w`, which asks for the key so it is not typed on the command line. `schedule on` prints this if the key is missing.
+- **Keychain:** store the key once with `security add-generic-password -a "$USER" -s jobscan-ai -w`, which asks for the key so it is not typed on the command line. `schedule on` prints this if the key is missing.
 - **Skip rule:** the run is skipped when a scan that ended well (success or partial) started today. A failed scan does not block the next attempt.
 - **Time limit:** at the limit the scan gets Ctrl-C, so it can close its run record. If it is still running 60 seconds later it is killed.
 - **Notifications:** failure, timeout, a partial run, a missing key and an invalid config always notify. Success notifies only if the setting is 1, and says how many new roles and how many are Strong. A scan that declines to start (another running, or the minimum gap) is silent.
@@ -799,3 +805,186 @@ A company with no matching roles is a normal result, not a failure.
 - It prints a summary: likely system counts, pages with JobPosting data, pages not read by reason. The counts decide which readers to build next.
 - First survey (247 companies): recognised 52, nothing recognised 135, not read 60 (not found 26, blocked 19, unreachable 8, other 4, timed out 3). Systems seen: Oracle Recruiting 10, Keka 10, Phenom 6, Darwinbox 5, SuccessFactors 4, SmartRecruiters 4, Freshteam 3, iCIMS 2, Workable 2, Eightfold 2, others 1 each. A generic JobPosting reader is not worth building (1 page).
 - Result: SmartRecruiters, Oracle Recruiting and Keka readers built (see Supported hiring systems).
+
+## Round 15: AI fit scoring (built; replaces keyword and meaning scoring)
+
+### Decision
+- An AI model reads your CV and the job description and returns Good, Partial or Bad. It replaces the keyword and meaning (embedding) score. Nothing is blended.
+- One model only, no fallback. First choice: Mistral free tier (data-training opt-in accepted). Kept only if it scores well on your rated roles (see Trial).
+- The exclusion filters (recency, years, seniority, excluded companies, status, title deny words, excluded industries) stay and run first. Excluded roles are not sent to the AI.
+- The old scoring is switched off, not deleted. All its code (scoring, embeddings, the old Eval report, `jobscan eval`) and all its data (scores, ratings, embeddings) stay in place. One Config setting, Legacy scoring (default 0), brings it all back: the Scoring and Embeddings Config groups, the old score column and filters, the old Eval report and the Summary Scoring block. The hidden parts are behind this switch, not removed. Their values stay in the Config form so saving never resets them.
+
+### Workflow: AI fit scoring (new)
+```mermaid
+flowchart TD
+    A[Scan, jobscan score or Score button] --> B{AI scoring On and CV uploaded?}
+    B -->|No| Z[Roles stay unscored]
+    B -->|Yes| C{Exclusion filters}
+    C -->|Excluded| X[Tagged Excluded, not sent to the AI]
+    C -->|Eligible| D{Description 100 words or more, no current verdict?}
+    D -->|No| N[Not scored]
+    D -->|Yes| E{Daily cap left?}
+    E -->|No| W[Waits for the next run]
+    E -->|Yes| F[Trim only if over max words: company, benefits, legal first, requirements never]
+    F --> G[One AI call: CV without contact details, Role focus, extra rules, posting]
+    G --> H[AI labels each must-have Met, Partly or Missing with the CV line, role type yes or no, domain match, close or different]
+    H --> I[App sets the band from the labels and Must-haves allowed missing]
+    I --> J[App builds the one-line reason from the labels]
+    J --> K[(Saved: labels, reason, fingerprint, trimmed flag)]
+    K --> L[Roles tab: band pill with info icon. Side panel: checklist]
+    L --> M[You rate Good or Poor]
+    M --> O[Eval tab: your rating against the AI, disagreements]
+```
+
+### Workflow: old keyword and meaning scoring (kept behind Legacy scoring)
+```mermaid
+flowchart TD
+    A([Scan fetches roles and descriptions]) --> B{Rule filter}
+    B -->|Fails any rule| X[Tagged Excluded, no score]
+    B -->|Passes| C{Description and CV present?}
+    C -->|No| N[No score yet]
+    C -->|Yes| D[Split description into sections and chunks of about 40 words. CV: one chunk per achievement]
+    D --> E[Keyword score: IDF-weighted share of role terms found in the CV, local]
+    D --> F[Meaning score: Gemini embeddings cached by text hash]
+    F --> G[Cosine: closest CV chunk for each role chunk]
+    G --> H[Average by section weight: requirement 2, responsibility 1, company 0]
+    E --> I[Stretch raw 0.08 to 0.20 onto 0 to 100]
+    H --> J[Stretch raw 0.50 to 0.85 onto 0 to 100]
+    I --> K[Mix: 40% keyword and 60% meaning]
+    J --> K
+    K --> L{Band}
+    L -->|70 or more| S1[Strong]
+    L -->|50 to 69| S2[Partial]
+    L -->|Below 50| S3[Weak]
+    K --> M[(Saved: raw values and fingerprint, stale if CV or settings change)]
+    R[Your Good and Poor ratings] --> V[Eval: AUC, best keyword share, best cut-off, worst misses]
+    M --> V
+```
+- Rule filter checks (both workflows): recency, minimum years asked, junior words and levels, excluded companies, status already actioned, title deny words, excluded industries.
+
+### What is sent and what comes back
+- Sent: role title, company, location, the description, your CV text (name line, emails, links and phone numbers removed), your Role focus and Extra rules.
+- Back (one call per role):
+    - checklist: each must-have, Met / Partly / Missing, and the CV line that proves it
+    - role type fit (yes or no, with a short note when no) and domain fit (match, close or different)
+- The AI only labels. The app applies the band rules and builds the one-line reason from the labels, so the band and the reason always agree with the checklist and with the settings.
+
+### Description length
+- Max description words (default 3,000) is only a safety limit for rare very long pages. In a copy of your database (23 descriptions, 19 Oct 2026, LinkedIn only) the median was 551 words and the longest 1,424; 9% were over 1,200 and none over 2,000.
+- It never cuts blindly. If a description is over the limit, it drops the least useful parts first: company blurb, benefits, equal-opportunity and legal text. Then the end of the rest. Requirement sections are never cut.
+- A trimmed role shows a note in the side panel under the band: "Description trimmed: company, benefits and legal text left out". The Roles list shows nothing.
+
+### Must-haves (no core or secondary split)
+- **Must-have** = anything the posting states as required: "must", "required", "mandatory", "minimum", or a named tool, skill, domain, degree or certification in the requirements. "Preferred", "plus" and "good to have" are nice-to-haves: listed but never change the band.
+- Years of experience are not judged by the AI. The Fit filters handle years.
+- Similar items are merged, and at most 12 are listed.
+- Each must-have is Met (a CV line shows it; with no CV line it is downgraded to Partly), Partly (related experience) or Missing (nothing on the CV). The AI never assumes a skill that is not on the CV. When unsure between two labels it picks the lower one.
+- Matching is by meaning, not exact words. The AI reads the CV and the posting and understands that different wording can mean the same experience. That is what Partly is for. There is no separate embedding or similarity score, and no overall CV-to-description similarity check for now.
+- **Role type** = the day-to-day work compared with your Role focus. It is the AI's reading of what the responsibilities really are, not a keyword or title match. A "Program Manager" who runs warehouse operations, a sales program role or a hands-on coding role is a wrong role type even when the title and some skills match. It is a yes or no. With no Role focus it is always yes. The quality of this check depends on how complete your Role focus is: write what you want, what you do not want, and the domains.
+- **Domain** = the industry, match, close or different, judged against the domains in your Role focus.
+
+### Band logic (applied by the app to the labels)
+M = Must-haves allowed missing (Config, default 2).
+1. Role type wrong: **Bad**. Nothing else is checked.
+2. Description missing or under 100 words: Not scored.
+3. Missing more than M: **Bad**.
+4. Missing 1 to M: **Partial**.
+5. Missing 0 and Partly 2 or more: **Partial**.
+6. Missing 0 and Partly 0 or 1: **Good**. This includes a posting with no stated must-haves: it is then decided by role type and domain only.
+7. Domain different: the band drops from Good to Partial. It never makes a role Bad on its own.
+- Nice-to-haves, seniority and years never change the band.
+- Trade-off: a single missing deal-breaker (for example a required certification) gives Partial, not Bad. Set M to 0 or 1 to be stricter.
+- Because the app sets the band, changing M changes bands at once, with no new AI call.
+
+### When it runs
+- After each scan, on `jobscan score`, and from the side-panel Score button.
+- Only Eligible roles that have a description of 100 words or more and no current verdict. The Score button scores that one role whatever its Fit.
+- A verdict is current for the same role (title, company, location, description), CV, model, Role focus, Extra rules and Max description words. Role focus is text you write in Config; it changes only when you edit it. A change to any of these marks the verdict out of date; it is redone on the next run. Must-haves allowed missing is not one of them.
+- Newest first, one call per role, within the daily cap and the per-minute pace. The rest wait for the next run.
+- The key comes from a terminal variable (default MISTRAL_API_KEY), like Tailoring. A scan or scheduled run started where the variable is not set reports "The AI key is missing" and leaves roles unscored. The scan is unaffected.
+- A scoring failure never fails a scan.
+
+### Failures (shown in plain words)
+- The AI service was busy, slow or unreachable, or the key was refused: the run stops, roles stay Not scored and are retried next run.
+- The reply could not be read: one retry, then that role is Not scored and the run continues.
+- No description yet, or under 100 words: Not scored.
+- Daily cap reached: the rest wait for tomorrow.
+- The side panel shows the last error for a role that is not scored.
+
+### Config (new group "Fit scoring (AI)")
+- AI scoring: 1 or 0. 0 leaves roles unscored; the exclusion filters still work.
+- AI service address (default https://api.mistral.ai/v1), model (default mistral-small-latest; confirm in your Mistral console that it is free and suits the task), key variable name (default MISTRAL_API_KEY).
+- Role focus: free text, the comprehensive description of what you want and do not want. A default is pre-filled from your background; edit it.
+- Extra rules: free text added to the rules.
+- Must-haves allowed missing (default 2).
+- Most description words sent (default 3,000): the safety limit above.
+- Most AI calls per 24 hours (default 150): stops a first run with a big backlog from using the whole day. 150 covers 100 roles a day plus retries.
+- AI calls per minute (default 30): the pace. Mistral's free tier allows 1 call a second, so 30 stays well under it. 100 roles take about 4 minutes.
+- Legacy scoring: 0 or 1, as in Decision.
+- Unchanged: the Fit filters group (including years), Excluded industries and Tailoring.
+- The old Scoring and Embeddings groups are hidden unless Legacy scoring is 1.
+
+### Roles tab
+- The Score column shows Good, Partial or Bad as a coloured pill, with an info icon (i) that shows the reason on hover. A role with no verdict shows a dash. There is no separate reason column.
+- Filters: Good, Partial, Bad, Not scored. Sort by Score: Good, Partial, Bad, Not scored (newest first inside each band).
+- Side panel: band pill with the info icon, the reason, an expandable checklist (hover a Met item for the CV line), the trimmed note when it applies, a Score / Re-score button, and your rating.
+- With Legacy scoring on, the old Strong, Partial and Weak display returns.
+
+### Eval tab (kept, rebuilt as the human check)
+- The old eval report (AUC, keyword share, cut-offs) and `jobscan eval` are kept in code and data and show again when Legacy scoring is 1. Off, `jobscan eval` says so and the tab shows the human check below.
+- Your rating is the human eval: 👍 Good or 👎 Poor in the side panel. A role is "rated" only when you give one of these.
+- The page shows:
+    - Roles AI-scored, with the split Good, Partial, Bad.
+    - Roles AI-scored and rated by you.
+    - Roles waiting to be scored, with the reason (no description, error on the last try, daily cap reached, next run), the count of out-of-date verdicts, and AI calls used in the last 24 hours against the cap.
+    - A pivot: rows are your rating (Good, Poor), columns are the AI band (Good, Partial, Bad), with totals. Each count opens the roles in it.
+    - Good roles AI scored lowest (your 👍 roles, AI Bad first, then Partial).
+    - Bad roles AI scored highest (your 👎 roles, AI Good first, then Partial).
+    - Search phrases, Deny word ideas, Industry ideas (as before).
+    - "Directional only" until at least 5 Good and 5 Poor rated roles and 20 in all.
+- Agreement means AI Good with your 👍, and AI Bad with your 👎. AI Partial is in between and is not counted as agree or disagree.
+- Portal chips (All, LinkedIn, Naukri, Company sites) work as before.
+
+### Summary tab
+- Stays as it is, except the old Scoring block is hidden unless Legacy scoring is 1.
+
+### Trial and model choice
+- After the build, score about 20 of your rated roles and read the pivot. If Good roles often land on Bad, or Poor roles on Good, change Role focus, Extra rules or the model and re-score.
+- Mistral's performance on this task is not known yet. It is judged on that pivot.
+
+### Privacy
+- The CV (without name, phone, email and links) and the description go to Mistral. The free Experiment plan requires opting in to data training; you accepted this. Cost: zero.
+
+### Providers checked (public pages, not confirmed in your account)
+Need: about 100 roles a day, about 3,500 tokens a role (estimate), so about 350K tokens a day.
+
+| Option | Free limit seen | Roles a day it allows | Catch | Verdict |
+|---|---|---|---|---|
+| Mistral Small (Experiment plan) | 1 request a second, 500K tokens a minute, 1B tokens a month | Well over 100 | Phone verification; data-training opt-in (accepted) | **Chosen** |
+| Gemini Flash-Lite (3.5 / 3.1) | 500 requests a day | About 500 | Only the Flash-Lite models; 3.8 Flash and 3.6 Flash allow just 20 a day | Workable, not chosen |
+| Cerebras gpt-oss-120b | 1M tokens a day, 5 requests a minute | About 280 by tokens | May be trial credits that expire; also used for Tailoring | Workable, not chosen |
+| Groq gpt-oss-120b | About 200K tokens a day | About 55 | Too small for 100 roles | Rejected |
+
+- Source: public pages, not confirmed in your account. Confirm limits in the Mistral console.
+- Model in use: `mistral-small-2603` (Mistral Small 4, 262K context). `mistral-small-latest` is an alias of it; pinning the dated name stops a silent change. Medium (`mistral-medium-2604`) is the step up if Small scores badly in the Trial.
+
+### Key questions discussed
+- **Why AI only, not on top of keyword and meaning?** With the AI reading the CV and the posting, the embedding steps were redundant. The old logic scored irrelevant roles high when the must-haves sat only in the description.
+- **Token use?** About 3,500 tokens a role, about 350K a day at 100 roles (estimate). Embeddings used about 70K.
+- **Could trimming drop needed text?** Only above 3,000 words, and requirements are never cut.
+- **Core versus secondary must-haves?** Dropped. Every must-have counts the same; the role type check catches wrong kinds of job.
+- **No must-haves in the posting?** No effect on the score; role type and domain decide.
+- **Role type check: how does it match?** The AI's semantic reading of the day-to-day work against your Role focus, a yes or no. No keywords, no embeddings.
+- **Overall CV versus description semantic check?** Not included for now.
+- **Years?** Removed from the AI. The Fit filters keep the minimum-years rule. It only drops roles asking for fewer years than the minimum; there is no upper limit.
+- **Can Role focus change on its own?** No. Only you edit it. A change marks scores out of date.
+- **Why 150 calls a day and 30 a minute?** 150 covers 100 roles plus retries. 30 a minute stays well under Mistral's 1 a second.
+- **What do the max words and daily cap do?** Words: a safety limit on text sent. Cap: the most AI calls in 24 hours.
+- **Fallback model?** None. A single model.
+- **Evals?** Kept simple: your 👍 and 👎 are the human eval, shown as a pivot against the AI band.
+- **Old code?** Kept behind Legacy scoring, with its data.
+
+### Deferred
+- An overall CV-to-description similarity check.
+- A maximum-years filter in the Fit filters (a role asking 20+ years still passes today).
+- Batching several roles in one call.

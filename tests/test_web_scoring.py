@@ -17,6 +17,12 @@ from tests.test_cv import docx_bytes, pdf_bytes
 from tests.test_scoring import CV_TEXT, PAYMENTS_JD, WAREHOUSE_JD
 
 
+@pytest.fixture(autouse=True)
+def old_scoring(store: Store) -> None:
+    """These tests cover the old keyword and meaning scoring, which Legacy scoring brings back."""
+    store.set_config_raw({"legacy_scoring": "1"})
+
+
 def body(response) -> str:  # type: ignore[no-untyped-def]
     return response.get_data(as_text=True)
 

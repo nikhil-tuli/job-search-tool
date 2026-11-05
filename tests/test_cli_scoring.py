@@ -32,6 +32,9 @@ def db_path(tmp_path: Path) -> Path:
     path = tmp_path / "data" / "jobscan.db"
     store = cli.open_store(path)
     store.replace_phrases([(TPM, True, True)])
+    store.set_config_raw(
+        {"legacy_scoring": "1"}
+    )  # these tests cover the old keyword + meaning path
     store.close()
     return path
 
@@ -486,3 +489,94 @@ def test_status_shows_how_many_descriptions_are_pending(db_path: Path) -> None:
     store.save_detail("LinkedIn", "900", JobDetail("CTC 6-9 LPA"), when=to_iso(now_ist()))
     store.close()
     assert "Descriptions pending: 0" in run_cli(db_path, "status")[1]
+
+
+# ---- AI scoring from the command line ---------------------------------------------------------
+
+AI_REPLY = (
+    '{"must_haves": [{"item": "payment gateways", "status": "Met", "evidence": "Led migration"}],'
+    ' "role_type_ok": true, "role_type_note": "", "domain": "match"}'
+)
+
+
+class _AiClient:
+    def __init__(self, reply: str = AI_REPLY, error: Exception | None = None) -> None:
+        self.reply, self.error, self.calls = reply, error, 0
+
+    def complete(
+        self, system: str, user: str, *, temperature: float = 0, max_tokens: int = 0
+    ) -> str:
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.reply
+
+
+@pytest.fixture
+def ai_db(db_path: Path) -> Path:
+    store = cli.open_store(db_path)
+    store.set_config_raw({"legacy_scoring": "0"})
+    store.close()
+    return db_path
+
+
+def _long_jd() -> str:
+    return (
+        PAYMENTS_JD
+        + "\n"
+        + "\n".join(f"- Extra duty {i} across teams and vendors" for i in range(30))
+    )
+
+
+def _seed_long(db_path: Path) -> None:
+    seed(db_path)
+    store = cli.open_store(db_path)
+    store.save_detail("LinkedIn", "900", JobDetail(_long_jd()), when=to_iso(now_ist()))
+    store.close()
+
+
+def test_score_uses_the_ai_by_default(ai_db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_long(ai_db)
+    client = _AiClient()
+    monkeypatch.setattr(cli, "AI_CLIENT_FACTORY", lambda _c: client)
+    code, text, bag = run_cli(ai_db, "score")
+    assert code == EXIT_OK
+    assert "AI scoring: 1 scored" in text
+    assert client.calls == 1
+    assert not bag.calls  # no embeddings in AI mode
+    store = cli.open_store(ai_db)
+    try:
+        assert "LinkedIn|900" in store.get_ai_fits()
+        assert not store.get_scores()
+    finally:
+        store.close()
+
+
+def test_score_ai_service_trouble_is_partial_or_failed(
+    ai_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jobscan.tailor_ai import TailorError
+
+    _seed_long(ai_db)
+    monkeypatch.setattr(
+        cli, "AI_CLIENT_FACTORY", lambda _c: _AiClient(error=TailorError("busy (rate limit)"))
+    )
+    code, text, _ = run_cli(ai_db, "score")
+    assert code == EXIT_FAILED
+    assert "AI scoring stopped: busy (rate limit)" in text
+
+
+def test_score_ai_off_says_so(ai_db: Path) -> None:
+    store = cli.open_store(ai_db)
+    store.set_config_raw({"ai_scoring": "0"})
+    store.close()
+    seed(ai_db)
+    code, text, _ = run_cli(ai_db, "score")
+    assert code == EXIT_USAGE
+    assert "switched off" in text
+
+
+def test_eval_command_is_off_without_legacy_scoring(ai_db: Path) -> None:
+    code, text, _ = run_cli(ai_db, "eval")
+    assert code == EXIT_OK
+    assert "switched off" in text

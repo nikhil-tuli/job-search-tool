@@ -1,4 +1,5 @@
 {% import "_fit.html" as fit_html %}
+{% import "_ai_score.html" as ai %}
 <h1>{{ role.title }}</h1>
 <p class="muted">{{ role.company }} &middot; {{ role.location }} &middot; {{ role.portal }} {{ role.job_id }}</p>
 {% set link = role.link | safe_link %}
@@ -11,7 +12,9 @@
   <dt>Fit score</dt>
   <dd id="score-fact">
     <div class="score-row">
-      {% if score %}
+      {% if ai_mode %}
+      <span data-score-result>{% if score %}{{ ai.result(score) }}{% else %}<span class="muted">Not scored{% if ai_error %}: {{ ai_error }}{% endif %}</span>{% endif %}</span>
+      {% elif score %}
       <span class="band {{ score.band }}" data-score-band>{{ score.final }}</span> <span data-score-label>{{ score.band | capitalize }} fit</span>
       {% else %}
       <span class="muted" data-score-label>Not scored</span>
@@ -22,7 +25,7 @@
         <span class="note" aria-live="polite"></span>
       </form>
     </div>
-    {% if score %}
+    {% if score and not ai_mode %}
     <small data-score-detail>Keywords {{ score.keyword }}, meaning {{ score.semantic }}, {{ score.chunks }} chunks, scored {{ score.scored_on | ist }}</small>
     {% if score.stale %}<small class="stale-note">Out of date: made with an earlier CV or settings. Run jobscan score.</small>{% endif %}
     {% endif %}

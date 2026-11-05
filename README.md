@@ -8,7 +8,8 @@ your own computer.
 
 - **Finds roles:** scans LinkedIn, Naukri and the career pages of companies you list, for the job titles you choose.
 - **Removes noise:** skips repeats and flags roles that don't fit (too junior, wrong company, etc.).
-- **Ranks by fit:** scores each role 0 to 100 against your CV (Strong, Partial, Weak).
+- **Ranks by fit:** an AI (Mistral) reads each role against your CV and rates it Good, Partial or
+  Bad, with a one-line reason and a checklist of the role's must-haves.
 - **Tailors documents:** suggests resume and cover-letter changes for a role. You review and
   approve every change before a Word file is made.
 - **Updates statuses:** reads your Gmail for rejections, interview invites and closures, and
@@ -21,7 +22,7 @@ your own computer.
 
 - **Roles:** all roles, newest first. Click one for details, status and tailoring buttons.
 - **Summary:** roles per day and where they stand.
-- **Eval:** checks how well the score matches your own ratings.
+- **Eval:** compares the AI's rating with your own 👍 and 👎 on roles.
 - **Manage CV:** upload your CV and cover letter template; History lists tailored documents.
 - **Email Sync:** status changes found in your mail, waiting for review or applied.
 - **Config:** titles, filters, scan speed, the company list for Company sites and other settings.
@@ -61,15 +62,17 @@ Never paste keys into chats or files.
 
 | Feature | What you need | Variable |
 |---|---|---|
-| Fit scores | Google Gemini key | `GEMINI_API_KEY` |
+| Fit scores (AI) | Mistral key (free plan) | `MISTRAL_API_KEY` |
 | Resume and cover letter tailoring | Cerebras key | `CEREBRAS_API_KEY` |
 | Email Sync | Gmail address (set in Config) and a Gmail app password | `JOBSYNC_APP_PASSWORD` |
 
 ```sh
-export GEMINI_API_KEY=your-key
+read -s MISTRAL_API_KEY && export MISTRAL_API_KEY   # paste the key, press Enter; nothing is shown
 ```
 
-- **Scoring:** run `.venv/bin/jobscan score` after uploading a CV, or let the next scan do it.
+- **Scoring:** a Mistral key is not tied to a model. The model is a setting: Config, Fit scoring
+  (AI), Model (currently `mistral-small-2603`). Run `.venv/bin/jobscan score` after uploading a CV,
+  or let the next scan do it. Only roles that pass your Fit filters and have a description are scored.
 - **Tailoring:** upload your Word CV and, for letters, your Word cover letter template. On a
   role, choose **Tailor resume** or **Tailor cover letter**, then follow progress in History.
 - **Email Sync:** it only reads mail; it never sends or deletes. Syncs run while `jobscan serve`
@@ -79,13 +82,17 @@ export GEMINI_API_KEY=your-key
 
 - Your CV, roles and settings stay on your computer in `~/.jobscan/`.
 - Name, phone, email and links are never sent to any AI service.
-- Scoring sends CV and role text to Google; tailoring sends role and CV experience text to Cerebras.
+- Scoring sends CV and role text to Mistral (the free plan allows Mistral to train on it);
+  tailoring sends role and CV experience text to Cerebras.
 
 ## Good to know
 
 - Fit scores and AI suggestions are aids, not decisions. Check them before you rely on them.
 - Tailored documents never add skills, employers, dates or numbers that are not in your CV.
-- Free-tier limits cap how many roles can be scored per day; leftovers are scored next time.
+- Free-tier limits cap how many roles can be scored per day (Config sets a daily cap, default 150
+  AI calls); leftovers are scored next time.
+- The old keyword-and-meaning scoring is still in the code. Turn it back on with Config, Legacy
+  scoring.
 - Company career pages on custom or unsupported systems are listed as "Not supported yet".
 - If LinkedIn or Naukri changes its page layout, the scan stops safely and the parser needs an update.
 
@@ -98,9 +105,11 @@ export GEMINI_API_KEY=your-key
   - `naukri`: fetch Naukri roles
   - `sites`: fetch roles from the company career pages in Config
   - `naukri-details`, `details`: fetch missing job descriptions (Naukri, LinkedIn)
-  - `score`: score roles against your CV
+  - `score`: score roles against your CV with the AI
   - `sync`: read Gmail once and propose status changes
   - `status`: show the last run and counts
-  - `eval`: check how well scores match your ratings
+  - `eval`: check how well old-style scores match your ratings (only with Legacy scoring on; the
+    Eval screen covers AI scores)
+  - `salary-check`: show how many stored descriptions mention a salary
   - `schedule on|off|status`: daily LinkedIn scan and company sites fetch (Mac only)
 - Back up your data by copying `~/.jobscan/` while the app is closed.

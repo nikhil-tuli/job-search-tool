@@ -1,0 +1,12 @@
+{% macro pill(sc) -%}
+<span class="band {{ sc.band }}{% if sc.stale %} stale{% endif %}">{{ sc.band | capitalize }}</span><span class="info" tabindex="0" role="note" aria-label="{{ sc.reason }}">i<span class="tip">{{ sc.reason }}{% if sc.stale %} (out of date){% endif %}</span></span>
+{%- endmacro %}
+{% macro result(sc) -%}
+{{ pill(sc) }}
+<small class="reason">{{ sc.reason }}</small>
+{% if sc.trimmed %}<small class="muted block">Description trimmed: company, benefits and legal text left out.</small>{% endif %}
+{% if sc.checks %}<details class="checklist"><summary>Must-have checklist ({{ sc.checks | length }})</summary>
+<table class="checks">{% for name, status, evidence in sc.checks %}<tr><td>{{ name }}</td><td class="chk-{{ status | lower }}"{% if evidence %} title="{{ evidence }}"{% endif %}>{{ status }}</td></tr>{% endfor %}</table>
+<small class="muted block">Hover a Met item to see the CV line.</small></details>{% endif %}
+{% if sc.stale %}<small class="stale-note">Out of date: made with an earlier CV or settings. Run jobscan score.</small>{% endif %}
+{%- endmacro %}

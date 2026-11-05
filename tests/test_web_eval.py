@@ -7,10 +7,17 @@ from flask.testing import FlaskClient
 
 from jobscan.config import Config
 from jobscan.models import STATUSES
+from jobscan.store import Store
 from jobscan.web.app import label_note
 from tests.conftest import Harness
 from tests.test_evaluation import make_role
 from tests.test_web_scoring import add_role, body, upload_cv
+
+
+@pytest.fixture(autouse=True)
+def old_scoring(store: Store) -> None:
+    """These tests cover the old keyword and meaning scoring, which Legacy scoring brings back."""
+    store.set_config_raw({"legacy_scoring": "1"})
 
 
 def rate(client: FlaskClient, job_id: str, choice: str, *, panel: bool = True):  # type: ignore[no-untyped-def]

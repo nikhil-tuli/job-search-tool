@@ -14,6 +14,16 @@ from dataclasses import dataclass, fields
 from .matching import MATCH_MODES
 
 VERIFIED_WINDOW_SECONDS = 86_400  # Only this value has been confirmed against LinkedIn.
+MAX_FOCUS_CHARS = 4_000
+DEFAULT_ROLE_FOCUS = (
+    "Roles I want: Technical Program Manager, Senior Program Manager or Delivery Manager in a "
+    "technology company. The work is owning cross-team technical delivery: planning, "
+    "dependencies, risks, vendor and API integrations, stakeholder updates.\n"
+    "Not what I want: sales or business development; warehouse, supply chain or other "
+    "operations programs; hands-on software engineering; non-technical, event, HR or "
+    "recruitment program roles; pure product management.\n"
+    "Domains: fintech, payments, SaaS and platform are preferred. Others are acceptable."
+)
 
 
 class ConfigError(ValueError):
@@ -72,6 +82,17 @@ class Config:
     embed_texts_per_minute: int = 90
     embed_tokens_per_minute: int = 25_000
     embed_daily_limit: int = 1_000
+    legacy_scoring: int = 0
+    ai_scoring: int = 1
+    ai_base_url: str = "https://api.mistral.ai/v1"
+    ai_model: str = "mistral-small-latest"
+    ai_key_env: str = "MISTRAL_API_KEY"
+    ai_role_focus: str = DEFAULT_ROLE_FOCUS
+    ai_extra_rules: str = ""
+    ai_max_missing: int = 2
+    ai_max_words: int = 3_000
+    ai_daily_cap: int = 150
+    ai_calls_per_minute: int = 30
     naukri_location: str = "india"
     naukri_max_pages: int = 5
     naukri_delay_seconds_min: float = 6.0
@@ -204,6 +225,12 @@ _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
     "sites_fetch_descriptions": (int, 0, 1),
     "sites_max_roles_per_company": (int, 1, 5_000),
     "sites_daily": (int, 0, 1),
+    "legacy_scoring": (int, 0, 1),
+    "ai_scoring": (int, 0, 1),
+    "ai_max_missing": (int, 0, 10),
+    "ai_max_words": (int, 500, 20_000),
+    "ai_daily_cap": (int, 1, 5_000),
+    "ai_calls_per_minute": (int, 1, 600),
     "schedule_timeout_minutes": (int, 5, 240),
     "schedule_notify_finish": (int, 0, 1),
 }
@@ -306,6 +333,31 @@ def _parse_text_fields(
         values["tailor_key_env"] = key_env
     else:
         errors["tailor_key_env"] = "a variable name: letters, digits and underscores"
+
+    ai_url = raw.get("ai_base_url", defaults.ai_base_url).strip().rstrip("/")
+    if _SERVICE_URL.fullmatch(ai_url) and len(ai_url) <= 200:
+        values["ai_base_url"] = ai_url
+    else:
+        errors["ai_base_url"] = "an https:// address, for example https://api.mistral.ai/v1"
+
+    ai_model = raw.get("ai_model", defaults.ai_model).strip()
+    if _MODEL_NAME.fullmatch(ai_model):
+        values["ai_model"] = ai_model
+    else:
+        errors["ai_model"] = "letters, digits, dots, dashes, slashes and underscores only"
+
+    ai_key = raw.get("ai_key_env", defaults.ai_key_env).strip()
+    if _ENV_NAME.fullmatch(ai_key):
+        values["ai_key_env"] = ai_key
+    else:
+        errors["ai_key_env"] = "a variable name: letters, digits and underscores"
+
+    for key in ("ai_role_focus", "ai_extra_rules"):
+        text = raw.get(key, getattr(defaults, key)).replace("\r\n", "\n").strip()
+        if len(text) <= MAX_FOCUS_CHARS:
+            values[key] = text
+        else:
+            errors[key] = f"at most {MAX_FOCUS_CHARS} characters"
 
     email = raw.get("sync_email", defaults.sync_email).strip()
     if not email or _EMAIL.fullmatch(email):

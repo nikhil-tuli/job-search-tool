@@ -1099,8 +1099,23 @@ def test_config_save_stores_fit_settings_tidily(client: FlaskClient, store: Stor
 
 def test_config_fit_group_has_info_icon(client: FlaskClient) -> None:
     html = client.get("/config").get_data(as_text=True)
-    assert html.count('class="info"') == len(GROUP_INFO)
+    assert html.count('class="info"') == len(GROUP_INFO) - 1  # the old Scoring group is hidden
     assert "Status is never part of Fit" in html
+
+
+def test_old_scoring_groups_are_hidden_but_kept_in_the_form(
+    client: FlaskClient, store: Store
+) -> None:
+    store.set_config_raw({"score_weight_keyword": "55"})
+    html = client.get("/config").get_data(as_text=True)
+    assert "Fit scoring (AI)" in html
+    assert "<h2>Scoring" not in html
+    assert "<h2>Embeddings (Gemini)" not in html
+    assert 'type="hidden" name="score_weight_keyword" value="55"' in html
+    store.set_config_raw({"legacy_scoring": "1"})
+    shown = client.get("/config").get_data(as_text=True)
+    assert "<h2>Scoring" in shown
+    assert "<h2>Embeddings (Gemini)" in shown
 
 
 def order(page: str, ids: list[str]) -> list[str]:

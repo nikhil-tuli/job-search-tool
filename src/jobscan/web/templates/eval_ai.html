@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Eval{% endblock %}
+{% block content %}
+<h1>Eval</h1>
+<p class="portal-pick">Portal:
+  <a class="chip-link{% if not portal %} on{% endif %}" href="{{ url_for('eval_page', portal='all') }}">All</a>
+  {% for p in portals %}<a class="chip-link{% if portal == p %} on{% endif %}" href="{{ url_for('eval_page', portal=p) }}">{{ p }}</a>{% endfor %}
+</p>
+<p class="muted">Does the AI agree with the roles you rated? Only roles you rate yourself in the side panel (Good or Poor) count. Treat the result as a guide, not proof.</p>
+
+<dl class="facts">
+  <dt>Roles AI-scored</dt><dd>{{ ev.scored }} ({{ ev.by_band.good }} Good, {{ ev.by_band.partial }} Partial, {{ ev.by_band.bad }} Bad)</dd>
+  <dt>Roles AI-scored and rated by you</dt><dd>{{ ev.rated_scored }} ({{ ev.rated_good }} Good, {{ ev.rated_bad }} Poor)</dd>
+  <dt>Waiting to be scored</dt><dd>{{ ev.waiting_total }}{% if ev.waiting %} <span class="muted">({% for reason, n in ev.waiting.items() %}{{ reason }}: {{ n }}{% if not loop.last %}; {% endif %}{% endfor %})</span>{% endif %}</dd>
+  <dt>Out of date (will be redone)</dt><dd>{{ ev.stale }}</dd>
+  <dt>AI calls in the last 24 hours</dt><dd>{{ ev.calls_used }} of {{ ev.calls_cap }}</dd>
+</dl>
+
+{% if not has_cv %}
+<p class="empty">Upload your CV on the CV page first. Scoring needs it.</p>
+{% elif not ev.rated_scored %}
+<p class="empty">Nothing to compare yet. Rate AI-scored roles Good or Poor in the side panel on the Roles page.</p>
+{% else %}
+{% if not ev.reliable %}
+<p class="stale-note">Directional only. It takes about 5 or more Good and 5 or more Poor rated roles, and 20 or more in all, before these counts are worth acting on.</p>
+{% endif %}
+<h2>Your rating against the AI</h2>
+<table class="pivot eval">
+  <thead><tr><th>You \ AI</th><th class="num">Good</th><th class="num">Partial</th><th class="num">Bad</th><th class="num">Total</th></tr></thead>
+  <tbody>
+  {% for label, name in (('good', '&#128077; Good'), ('bad', '&#128078; Poor')) %}
+    <tr><td>{{ name | safe }}</td>
+    {% for band in ('good', 'partial', 'bad') %}
+      {% set found = ev.pivot[(label, band)] %}
+      <td class="num">{% if found %}<details class="cell"><summary>{{ found | length }}</summary>
+        <ul class="cell-list">{% for r in found %}<li><a href="{{ url_for('role_page', portal=r.portal, job_id=r.job_id) }}" target="_blank" rel="noopener">{{ r.title }}</a> <span class="muted">{{ r.company }}</span></li>{% endfor %}</ul></details>{% else %}0{% endif %}</td>
+    {% endfor %}
+    <td class="num">{{ (ev.rated_good if label == 'good' else ev.rated_bad) }}</td></tr>
+  {% endfor %}
+  <tr><td>Total</td>{% for band in ('good', 'partial', 'bad') %}<td class="num">{{ (ev.pivot[('good', band)] | length) + (ev.pivot[('bad', band)] | length) }}</td>{% endfor %}<td class="num">{{ ev.rated_scored }}</td></tr>
+  </tbody>
+</table>
+<p class="muted">Click a count to list its roles. Agreement is Good with Good, and Poor with Bad. Partial is in between.</p>
+
+<div class="eval-grid">
+  <div>
+    <h2>Good roles AI scored lowest</h2>
+    {% if ev.missed_good %}
+    <table class="pivot eval"><tbody>{% for m in ev.missed_good %}<tr><td>{{ m.band | capitalize }}</td><td><a href="{{ url_for('role_page', portal=m.role.portal, job_id=m.role.job_id) }}" target="_blank" rel="noopener">{{ m.role.title }}</a> <span class="muted">{{ m.role.company }}: {{ m.reason }}</span></td></tr>{% endfor %}</tbody></table>
+    {% else %}<p class="muted">None.</p>{% endif %}
+  </div>
+  <div>
+    <h2>Bad roles AI scored highest</h2>
+    {% if ev.false_good %}
+    <table class="pivot eval"><tbody>{% for m in ev.false_good %}<tr><td>{{ m.band | capitalize }}</td><td><a href="{{ url_for('role_page', portal=m.role.portal, job_id=m.role.job_id) }}" target="_blank" rel="noopener">{{ m.role.title }}</a> <span class="muted">{{ m.role.company }}: {{ m.reason }}</span></td></tr>{% endfor %}</tbody></table>
+    {% else %}<p class="muted">None.</p>{% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if ev.phrases %}
+<h2>Search phrases</h2>
+<p class="muted">How many of your rated roles each search phrase brought in. A phrase with many bad roles and few good ones is too broad: narrow it on the Config page.</p>
+<table class="pivot eval">
+  <thead><tr><th>Phrase</th><th class="num">Good</th><th class="num">Bad</th></tr></thead>
+  <tbody>{% for p in ev.phrases %}<tr><td>{{ p.phrase }}</td><td class="num">{{ p.good }}</td><td class="num">{{ p.bad }}</td></tr>{% endfor %}</tbody>
+</table>
+{% endif %}
+
+{% if ev.suggestions %}
+<h2>Deny word ideas</h2>
+<p class="muted">Words that appear in the titles of at least 2 bad roles and in no good one. Adding one to the title deny words tags matching roles Excluded. Nothing is hidden, and you can remove it in Config.</p>
+<ul>
+  {% for s in ev.suggestions %}
+  <li><strong>{{ s.word }}</strong> <span class="muted">in {{ s.bad_roles }} bad roles</span>
+    <form class="inline-add" method="post" action="{{ url_for('eval_exclude') }}"><input type="hidden" name="kind" value="title"><input type="hidden" name="value" value="{{ s.word }}"><button type="submit">Add to deny words</button></form></li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if ev.industry_suggestions %}
+<h2>Industry ideas</h2>
+<p class="muted">LinkedIn industries listed on at least 2 bad roles and on no good one. Adding one tags roles in that industry Excluded. It only works for roles whose description has been fetched.</p>
+<ul>
+  {% for s in ev.industry_suggestions %}
+  <li><strong>{{ s.word }}</strong> <span class="muted">on {{ s.bad_roles }} bad roles</span>
+    <form class="inline-add" method="post" action="{{ url_for('eval_exclude') }}"><input type="hidden" name="kind" value="industry"><input type="hidden" name="value" value="{{ s.word }}"><button type="submit">Exclude this industry</button></form></li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

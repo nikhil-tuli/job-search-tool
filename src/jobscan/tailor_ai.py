@@ -83,22 +83,26 @@ class TailorClient:
         *,
         session: requests.Session | None = None,
         timeout: int = REQUEST_TIMEOUT_SECONDS,
+        where: str = "Config, Tailoring",
     ) -> None:
+        self._where = where
         self._url = base_url.rstrip("/") + "/chat/completions"
         self._model = model
         self._key = api_key
         self._session = session or requests.Session()
         self._timeout = timeout
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(
+        self, system: str, user: str, *, temperature: float = 0.2, max_tokens: int = 8_000
+    ) -> str:
         body = {
             "model": self._model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "temperature": 0.2,
-            "max_completion_tokens": 8_000,
+            "temperature": temperature,
+            "max_completion_tokens": max_tokens,
         }
         try:
             response = self._session.post(
@@ -115,11 +119,11 @@ class TailorClient:
         if status in (401, 403):
             raise TailorError(
                 f"The AI service refused the key (HTTP {status}). Check the key and its "
-                "variable name in Config, Tailoring."
+                f"variable name in {self._where}."
             )
         if status == 404:
             raise TailorError(
-                "The AI service address or model was not found. Check Config, Tailoring."
+                f"The AI service address or model was not found. Check {self._where}."
             )
         if status == 429:
             raise TailorError("The AI service is busy (rate limit). Try again in a minute.")
