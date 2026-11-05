@@ -7,6 +7,7 @@
     <a class="chip-link{% if site_filter == 'unsupported' %} on{% endif %}" href="{{ url_for(list_endpoint, co='unsupported') }}{{ list_anchor }}">Not supported yet {{ site_counts.unsupported }}</a>
   </p>
   <p><input type="text" name="q" value="{{ site_query }}" placeholder="Search company" form="co-find" aria-label="Search company"> <button type="submit" form="co-find" class="secondary">Apply</button>
+    <a href="{{ url_for('companies_csv', co=site_filter or None, q=site_query or None, tag=site_tags or None) }}">Export CSV</a>
     {% if site_tag_options %}{{ multi.pick('tag', 'Tag', site_tag_options, site_tags, 'co-find') }}{% endif %}</p>
   {% if companies %}
   <table class="companies">

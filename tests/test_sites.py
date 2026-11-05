@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import io
 import json
 from collections.abc import Iterator
@@ -1074,3 +1075,104 @@ def test_tag_filter_takes_several_tags(store: Store, client: FlaskClient) -> Non
         data={"act": "toggle:1", "back": "full", "tag": ["GCC", "Product"]},
     )
     assert reply.headers["Location"].endswith("/companies?tag=GCC&tag=Product")
+
+
+def test_company_csv_has_last_result_and_follows_filters(store: Store, client: FlaskClient) -> None:
+    store.upsert_site("Alpha", "https://jobs.lever.co/alpha", "lever", "jobs.lever.co|alpha", "GCC")
+    store.upsert_site("Zeta", "https://jobs.lever.co/zeta", "lever", "jobs.lever.co|zeta", "")
+    store.upsert_site("Custom", "https://example.com/careers", "", "", "Product")
+    zeta = next(c for c in store.list_sites() if c.name == "Zeta")
+    store.record_site_result(zeta.id, "failed", "Link not found (404).", 0)
+    reply = client.get("/companies.csv")
+    assert reply.mimetype == "text/csv"
+    assert "companies_" in reply.headers["Content-Disposition"]
+    rows = list(csv.reader(io.StringIO(reply.get_data(as_text=True))))
+    assert rows[0][:7] == [
+        "Company", "Career link", "Hiring system", "Board", "Tag", "Status", "Last result"
+    ]  # fmt: skip
+    by_name = {r[0]: r for r in rows[1:]}
+    assert len(by_name) == 3
+    assert by_name["Zeta"][5] == "Needs attention"
+    assert by_name["Zeta"][6].startswith("Failed: Link not found (404).")
+    assert by_name["Alpha"][2:4] == ["Lever", "alpha"]
+    assert by_name["Custom"][5] == "Not supported yet"
+    only = list(
+        csv.reader(io.StringIO(client.get("/companies.csv?tag=GCC").get_data(as_text=True)))
+    )
+    assert [r[0] for r in only[1:]] == ["Alpha"]
+    assert "Export CSV" in page(client)
+
+
+# ---- the survey ---------------------------------------------------------------------------------
+
+SURVEY_PAGES = {
+    "https://a.example/careers": (
+        '<a href="https://jobs.smartrecruiters.com/AAA/1">x</a>'
+        '<a href="https://jobs.smartrecruiters.com/AAA/2">y</a>'
+        '<script src="https://cdn.workable.com/x.js"></script>'
+    ),
+    "https://b.example/careers": (
+        '<script type="application/ld+json">'
+        '{"@graph":[{"@type":"JobPosting","title":"TPM"},{"@type":"JobPosting"}]}</script>'
+        "<p>Plain page</p>"
+    ),
+    "https://c.example/careers": SiteError("Blocked or too many requests (HTTP 403). Retried."),
+    "https://d.example/careers": SiteError("Link not found (404). Check the career link."),
+}
+
+
+def test_survey_finds_systems_and_job_data() -> None:
+    from jobscan.sites_survey import survey_page
+
+    page = survey_page(SURVEY_PAGES["https://a.example/careers"])  # type: ignore[arg-type]
+    assert page.systems == ("SmartRecruiters", "Workable")  # most mentioned first
+    data = survey_page(SURVEY_PAGES["https://b.example/careers"])  # type: ignore[arg-type]
+    assert (data.systems, data.job_postings) == ((), 2)
+    assert (
+        survey_page("<p>broken ld</p><script type='application/ld+json'>{x</script>").job_postings
+        == 0
+    )
+
+
+def test_survey_command_writes_a_csv_and_changes_nothing(db_path: Path) -> None:
+    s = cli.open_store(db_path)
+    for name, host in (("A", "a"), ("B", "b"), ("C", "c"), ("D", "d")):
+        s.upsert_site(name, f"https://{host}.example/careers", "", "", "GCC")
+    add_company(s, "Good")  # supported, so not surveyed
+    before = [(c.name, c.system, c.last_status) for c in s.list_sites()]
+    s.close()
+    out = io.StringIO()
+    code = main(
+        ["--db", str(db_path), "sites", "--survey"],
+        out=out,
+        sleep=lambda s: None,
+        sites_http=FakeHttp(SURVEY_PAGES),  # type: ignore[arg-type]
+    )
+    text = out.getvalue()
+    assert code == EXIT_OK
+    assert "Surveying 4 companies" in text
+    assert "Likely system: SmartRecruiters 1, none recognised 1" in text
+    assert "Pages with JobPosting data in the page: 1" in text
+    assert "Pages not read: blocked 1, not found 1" in text
+    path = next((db_path.parent / "surveys").glob("survey_*.csv"))
+    with path.open(encoding="utf-8") as handle:
+        rows = list(csv.reader(handle))
+    assert rows[0][:5] == ["Company", "Career link", "Tag", "Page", "Systems found"]
+    by_name = {r[0]: r for r in rows[1:]}
+    assert by_name["A"][5] == "SmartRecruiters"
+    assert by_name["C"][3] == "blocked"
+    assert by_name["B"][6] == "2"
+    s = cli.open_store(db_path)
+    assert [(c.name, c.system, c.last_status) for c in s.list_sites()] == before
+    assert s.latest_run("Company sites") is None  # no run was recorded
+    s.close()
+
+
+def test_survey_without_unsupported_companies(db_path: Path) -> None:
+    s = cli.open_store(db_path)
+    add_company(s, "Good")
+    s.close()
+    out = io.StringIO()
+    code = main(["--db", str(db_path), "sites", "--survey"], out=out, sleep=lambda s: None)
+    assert code == EXIT_USAGE
+    assert "No unsupported company" in out.getvalue()

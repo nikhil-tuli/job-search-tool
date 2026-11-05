@@ -35,6 +35,9 @@ ASHBY = "ashby"
 WORKDAY = "workday"
 JOBVITE = "jobvite"
 ZOHO = "zoho"
+SMARTRECRUITERS = "smartrecruiters"
+ORACLE = "oracle"
+KEKA = "keka"
 SYSTEM_LABELS = {
     GREENHOUSE: "Greenhouse",
     LEVER: "Lever",
@@ -42,8 +45,15 @@ SYSTEM_LABELS = {
     WORKDAY: "Workday",
     JOBVITE: "Jobvite",
     ZOHO: "Zoho Recruit",
+    SMARTRECRUITERS: "SmartRecruiters",
+    ORACLE: "Oracle Recruiting",
+    KEKA: "Keka",
     "": "Unknown",
 }
+SMARTRECRUITERS_PAGE = 100
+MAX_SMARTRECRUITERS_PAGES = 10
+ORACLE_PAGE = 25
+MAX_ORACLE_PAGES = 10
 
 
 class SiteError(Exception):
@@ -136,7 +146,24 @@ def _detect(url: str) -> Detected:
         return Detected(JOBVITE, parts[0])
     if "zohorecruit." in host:
         return Detected(ZOHO, host)
+    if host in _SMARTRECRUITERS_HOSTS and parts:
+        company = parts[2] if parts[0] == "oneclick-ui" and len(parts) > 2 else parts[0]
+        if host == "api.smartrecruiters.com":
+            company = parts[2] if parts[:2] == ["v1", "companies"] and len(parts) > 2 else ""
+        return Detected(SMARTRECRUITERS, company) if company else Detected("", "")
+    if host.endswith(".oraclecloud.com"):
+        site = _ORACLE_SITE.search(parsed.path)
+        return Detected(ORACLE, f"{host}|{site.group(1)}") if site else Detected("", "")
+    if host.endswith((".keka.com", ".kekahire.com")) and host.split(".")[0] not in _NOT_KEKA:
+        return Detected(KEKA, host)
     return Detected("", "")
+
+
+_SMARTRECRUITERS_HOSTS = frozenset(
+    {"jobs.smartrecruiters.com", "careers.smartrecruiters.com", "api.smartrecruiters.com"}
+)
+_ORACLE_SITE = re.compile(r"/hcmUI/CandidateExperience/[^/]+/sites/([^/?#]+)", re.IGNORECASE)
+_NOT_KEKA = frozenset({"www", "help", "developers", "app", "api", "docs", "support", "blog"})
 
 
 def _greenhouse_board(query: str, parts: list[str]) -> str:
@@ -156,12 +183,18 @@ def board_label(system: str, board: str) -> str:
         return board.rpartition("|")[2]
     if system == WORKDAY:
         return board.rpartition("|")[2]
+    if system == ORACLE:
+        host, _, site = board.partition("|")
+        return f"{host.split('.')[0]}, {site}"
+    if system == KEKA:
+        return board.split(".")[0]
     return board
 
 
 _SYSTEM_LINK = re.compile(
     r"https?://[\w.-]*(?:myworkdayjobs\.com|greenhouse\.io|jobs\.lever\.co|jobs\.eu\.lever\.co|"
-    r"jobs\.ashbyhq\.com|jobs\.jobvite\.com|zohorecruit\.\w+)[^\s\"'<>)\\]*",
+    r"jobs\.ashbyhq\.com|jobs\.jobvite\.com|zohorecruit\.\w+|smartrecruiters\.com|"
+    r"oraclecloud\.com|keka(?:hire)?\.com)[^\s\"'<>)\\]*",
     re.IGNORECASE,
 )
 
@@ -590,6 +623,209 @@ class ZohoReader:
         return Detail(job.description)
 
 
+class SmartRecruitersReader:
+    """SmartRecruiters' public Posting API. The list has the date and place; the text is per job."""
+
+    def __init__(self, board: str, http: Http) -> None:
+        self._board, self._http = board, http
+
+    def _api(self) -> str:
+        return f"https://api.smartrecruiters.com/v1/companies/{quote(self._board)}/postings"
+
+    def _page(self, keyword: str, offset: int, size: int) -> dict[str, Any]:
+        query = f"limit={size}&offset={offset}" + (f"&q={quote(keyword)}" if keyword else "")
+        data = self._http.get_json(f"{self._api()}?{query}")
+        if not isinstance(data, dict) or not isinstance(data.get("content"), list):
+            raise SiteError("The job list was not in the expected form.")
+        return data
+
+    def list_jobs(self, keywords: list[str], limit: int) -> list[SiteJob]:
+        seen: dict[str, SiteJob] = {}
+        pages = min(MAX_SMARTRECRUITERS_PAGES, max(1, math.ceil(limit / SMARTRECRUITERS_PAGE)))
+        for keyword in keywords or [""]:
+            for page in range(pages):
+                data = self._page(keyword, page * SMARTRECRUITERS_PAGE, SMARTRECRUITERS_PAGE)
+                items = _items(data, "content")
+                for item in items:
+                    job = self._job(item)
+                    if job is not None:
+                        seen.setdefault(job.job_id, job)
+                found = data.get("totalFound")
+                total = found if isinstance(found, int) else 0
+                if len(items) < SMARTRECRUITERS_PAGE or (page + 1) * SMARTRECRUITERS_PAGE >= total:
+                    break
+        if not seen and self._page("", 0, 1).get("totalFound") == 0:
+            # SmartRecruiters answers an unknown company with an empty list, not an error.
+            raise SiteError(
+                "SmartRecruiters has no jobs under this company name. Check the career link."
+            )
+        return list(seen.values())
+
+    def _job(self, item: dict[str, Any]) -> SiteJob | None:
+        job_id, title = _text(item.get("id")), _text(item.get("name"))
+        if not job_id or not title:
+            return None
+        company = item.get("company")
+        owner = _text(company.get("identifier")) if isinstance(company, dict) else ""
+        place = item.get("location")
+        where = place if isinstance(place, dict) else {}
+        parts = [_text(where.get(k)) for k in ("city", "region", "country")]
+        location = ", ".join(p for p in parts if p)
+        if where.get("remote") is True:
+            location = f"{location} (Remote)" if location else "Remote"
+        return SiteJob(
+            job_id=job_id,
+            title=title,
+            location=location,
+            link=f"https://jobs.smartrecruiters.com/{quote(owner or self._board)}/{quote(job_id)}",
+            posted_on=_date_iso(item.get("releasedDate")),
+        )
+
+    def describe(self, job: SiteJob) -> Detail:
+        data = self._http.get_json(f"{self._api()}/{quote(job.job_id)}")
+        ad = data.get("jobAd") if isinstance(data, dict) else None
+        sections = ad.get("sections") if isinstance(ad, dict) else None
+        if not isinstance(sections, dict):
+            raise SiteError("The job page was not in the expected form.")
+        parts = []
+        for key in (
+            "companyDescription",
+            "jobDescription",
+            "qualifications",
+            "additionalInformation",
+        ):
+            block = sections.get(key)
+            if isinstance(block, dict):
+                parts.append(_text(block.get("title")))
+                parts.append(html_to_text(_text(block.get("text"))))
+        return Detail(description="\n".join(p for p in parts if p) or None)
+
+
+class OracleReader:
+    """Oracle Recruiting (Fusion HCM) career sites. The board is 'host|site'."""
+
+    def __init__(self, board: str, http: Http) -> None:
+        self._host, _, self._site = board.partition("|")
+        self._http = http
+
+    def _api(self, resource: str) -> str:
+        return f"https://{self._host}/hcmRestApi/resources/latest/{resource}"
+
+    def list_jobs(self, keywords: list[str], limit: int) -> list[SiteJob]:
+        seen: dict[str, SiteJob] = {}
+        pages = min(MAX_ORACLE_PAGES, max(1, math.ceil(limit / ORACLE_PAGE)))
+        for keyword in keywords or [""]:
+            for page in range(pages):
+                finder = f"findReqs;siteNumber={self._site},limit={ORACLE_PAGE}"
+                finder += f",offset={page * ORACLE_PAGE},sortBy=POSTING_DATES_DESC"
+                if keyword:
+                    finder += f",keyword={quote(keyword.replace(',', ' '))}"
+                data = self._http.get_json(
+                    f"{self._api('recruitingCEJobRequisitions')}"
+                    f"?onlyData=true&expand=requisitionList&finder={finder}"
+                )
+                outer = _items(data, "items")
+                postings = _items(outer[0], "requisitionList") if outer else []
+                for item in postings:
+                    job = self._job(item)
+                    if job is not None:
+                        seen.setdefault(job.job_id, job)
+                found = outer[0].get("TotalJobsCount") if outer else 0
+                total = found if isinstance(found, int) else 0
+                if len(postings) < ORACLE_PAGE or (page + 1) * ORACLE_PAGE >= total:
+                    break
+        return list(seen.values())
+
+    def _job(self, item: dict[str, Any]) -> SiteJob | None:
+        job_id, title = _text(item.get("Id")), _text(item.get("Title"))
+        if not job_id or not title:
+            return None
+        return SiteJob(
+            job_id=job_id,
+            title=title,
+            location=_text(item.get("PrimaryLocation")),
+            link=f"https://{self._host}/hcmUI/CandidateExperience/en/sites/{self._site}/job/{job_id}",
+            posted_on=_date_iso(item.get("PostedDate")),
+        )
+
+    def describe(self, job: SiteJob) -> Detail:
+        finder = quote(f'ById;Id="{job.job_id}",siteNumber={self._site}', safe=";,=")
+        data = self._http.get_json(
+            f"{self._api('recruitingCEJobRequisitionDetails')}?onlyData=true&expand=all"
+            f"&finder={finder}"
+        )
+        rows = _items(data, "items")
+        if not rows:
+            raise SiteError("The job page was not in the expected form.")
+        info = rows[0]
+        text = _text(info.get("ExternalDescriptionStr")) or _text(info.get("ShortDescriptionStr"))
+        return Detail(
+            description=html_to_text(text) or None,
+            location=_text(info.get("PrimaryLocation")) or None,
+            posted_on=_date_iso(info.get("ExternalPostedStartDate")),
+        )
+
+
+class KekaReader:
+    """Keka Hire career sites (<company>.keka.com/careers). Field names are matched loosely."""
+
+    def __init__(self, board: str, http: Http) -> None:
+        self._host, _, portal = board.partition("|")
+        self._portal = portal or "default"
+        self._http = http
+
+    def list_jobs(self, keywords: list[str], limit: int) -> list[SiteJob]:
+        data = self._http.get_json(
+            f"https://{self._host}/careers/api/jobs/{quote(self._portal)}/active"
+        )
+        if isinstance(data, dict):
+            found = next((data[k] for k in ("data", "items", "jobs", "result") if k in data), None)
+            data = found if isinstance(found, list) else data
+        jobs = [j for j in (self._job(i) for i in _items(data)) if j is not None]
+        if not jobs and _items(data):
+            raise SiteError("The job list was not in the expected form.")
+        return jobs
+
+    def _job(self, item: dict[str, Any]) -> SiteJob | None:
+        job_id = _text(item.get("id") or item.get("jobId") or item.get("identifier"))
+        if not job_id:
+            raw = item.get("id") or item.get("jobId")
+            job_id = str(raw) if isinstance(raw, int) else ""
+        title = _text(item.get("title") or item.get("jobTitle") or item.get("name"))
+        if not job_id or not title:
+            return None
+        description = _text(item.get("description") or item.get("jobDescription"))
+        return SiteJob(
+            job_id=job_id,
+            title=title,
+            location=self._location(item),
+            link=f"https://{self._host}/careers/{quote(job_id)}",
+            posted_on=_date_iso(
+                item.get("publishedOn") or item.get("publishedDate") or item.get("postedOn")
+            ),
+            description=html_to_text(description) or None,
+        )
+
+    @staticmethod
+    def _location(item: dict[str, Any]) -> str:
+        places: list[str] = []
+        for entry in item.get("jobLocations") or item.get("locations") or []:
+            if isinstance(entry, str):
+                places.append(entry.strip())
+            elif isinstance(entry, dict):
+                parts = [_text(entry.get(k)) for k in ("name", "city", "state", "country")]
+                places.append(", ".join(p for p in parts if p))
+        single = item.get("location")
+        if not places and isinstance(single, str):
+            places.append(single.strip())
+        if not places:
+            places.append(_text(item.get("city")))
+        return "; ".join(dict.fromkeys(p for p in places if p))
+
+    def describe(self, job: SiteJob) -> Detail:
+        return Detail(job.description)
+
+
 READERS: dict[str, type] = {
     GREENHOUSE: GreenhouseReader,
     LEVER: LeverReader,
@@ -597,6 +833,9 @@ READERS: dict[str, type] = {
     WORKDAY: WorkdayReader,
     JOBVITE: JobviteReader,
     ZOHO: ZohoReader,
+    SMARTRECRUITERS: SmartRecruitersReader,
+    ORACLE: OracleReader,
+    KEKA: KekaReader,
 }
 
 

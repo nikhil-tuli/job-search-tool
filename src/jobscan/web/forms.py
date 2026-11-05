@@ -8,6 +8,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, fields
 from datetime import date, datetime
+from typing import Any
 from urllib.parse import urlparse
 
 from ..config import Config, ConfigError
@@ -216,6 +217,47 @@ CSV_HEADER = (
     "Contact Phone",
     "Contact LinkedIn",
 )
+
+
+COMPANY_CSV_HEADER = (
+    "Company",
+    "Career link",
+    "Hiring system",
+    "Board",
+    "Tag",
+    "Status",
+    "Last result",
+    "Last run",
+    "Roles found",
+    "Switched on",
+)
+
+
+def companies_to_csv(rows: Iterable[Mapping[str, Any]]) -> str:
+    """One line per company, with the same status and last result the Config list shows."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\r\n")
+    writer.writerow(COMPANY_CSV_HEADER)
+    for row in rows:
+        company = row["c"]
+        writer.writerow(
+            [
+                csv_cell(v)
+                for v in (
+                    company.name,
+                    company.url,
+                    row["system_name"],
+                    row["board"],
+                    company.tag,
+                    row["state_label"],
+                    row["text"],
+                    format_display(company.last_run_on, with_time=False),
+                    company.last_found if company.last_run_on else "",
+                    "Yes" if company.enabled else "No",
+                )
+            ]
+        )
+    return buffer.getvalue()
 
 
 def roles_to_csv(roles: Iterable[Role], scores: Mapping[str, ScoreView] | None = None) -> str:

@@ -115,6 +115,7 @@ from ..timeutil import (
 from .diffs import moved_items, word_diff
 from .forms import (
     NEW_PHRASE_ROWS,
+    companies_to_csv,
     parse_config_form,
     parse_role_form,
     rated_to_csv,
@@ -1492,6 +1493,12 @@ def create_app(
     SITES_SHOWN = 10
     SYNC_REREAD_DAYS = 30
     SITE_FILTERS = ("working", "attention", "paused", "unsupported")
+    SITE_STATE_LABELS = {
+        "working": "Working",
+        "attention": "Needs attention",
+        "paused": "Paused",
+        "unsupported": "Not supported yet",
+    }
 
     def site_state(company: Any) -> str:
         if not company.enabled:
@@ -1544,6 +1551,9 @@ def create_app(
                     "text": site_text(c),
                     "system": SYSTEM_LABELS[c.system]
                     + (f" ({board_label(c.system, c.board)})" if c.system else ""),
+                    "system_name": SYSTEM_LABELS[c.system] if c.system else "",
+                    "board": board_label(c.system, c.board),
+                    "state_label": SITE_STATE_LABELS[site_state(c)],
                 }
                 for c in shown
             ],
@@ -1569,6 +1579,16 @@ def create_app(
             query = "&".join(f"{k}={quote(v)}" for k, v in pairs if v)
             return redirect(url_for("companies_page") + (f"?{query}" if query else ""))
         return redirect(url_for("config_page") + "#company-sites")
+
+    @app.get("/companies.csv")
+    def companies_csv() -> Response:
+        body = companies_to_csv(sites_context(full=True)["companies"])
+        stamp = now_ist().strftime("%Y-%m-%d_%H%M")
+        return Response(
+            body,
+            mimetype="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="companies_{stamp}.csv"'},
+        )
 
     @app.get("/companies")
     def companies_page() -> str:

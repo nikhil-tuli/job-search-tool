@@ -700,7 +700,7 @@ Fetch relevant roles straight from the career pages of chosen companies (product
 - Uses the role keywords and filters you already have. Everything else (Fit, Score, Summary, Eval, resume, cover letter, Email Sync, follow-ups) works as it does today.
 
 ### How company career pages work
-- Most companies host jobs on a hiring system (Greenhouse, Lever, Workday, Ashby, Jobvite and others). Many publish a public job list for it, so reading it is simple and gentle.
+- Most companies host jobs on a hiring system (Greenhouse, Lever, Workday, Ashby, Jobvite, SmartRecruiters, Oracle Recruiting, Keka and others). Many publish a public job list for it, so reading it is simple and gentle.
 - You paste the company's career link. The app works out the hiring system from the link and shows it.
 - Companies with a fully custom career page cannot be read reliably. They are listed as **Not supported yet**, never skipped silently.
 - Whether each public job list can be read can only be proven from your Mac, so every company row has a **Test** button that shows how many roles it found.
@@ -724,6 +724,16 @@ Fetch relevant roles straight from the career pages of chosen companies (product
 - **Add company:** name + link (adding an existing name updates its link and tag). **Add many:** paste one `Name, link` per line.
 - Optional **Tag** per company (for example GCC, Product, Services). A multi-select Tag dropdown filters by it (any of the ticked tags). Free text, never required.
 - Pausing a company keeps its link but stops fetching.
+
+**Supported hiring systems** (the readers behind the Hiring system column)
+- Greenhouse, Lever, Ashby, Workday, Jobvite, Zoho Recruit, plus three added after the page survey (24 of the 247 companies): **SmartRecruiters**, **Oracle Recruiting** and **Keka**.
+- Recognised from the career link, or from any link to them on the company's own career page. Several boards on one page: the first that answers is used (as for the others).
+- **SmartRecruiters:** board = company name in the link (`jobs.smartrecruiters.com/<Company>`). Reads the public posting list, searched by each role keyword. Posting date and place come with the list; the description is fetched per new role. A company name SmartRecruiters does not know shows "SmartRecruiters has no jobs under this company name".
+- **Oracle Recruiting:** board = the Oracle host plus the site name in the link (`...oraclecloud.com/hcmUI/CandidateExperience/en/sites/<Site>`). Reads the public requisition list, searched by each role keyword, newest first. A link without the site name is not recognised. A site with a custom name that Oracle does not accept as a site number shows the refusal under Needs attention.
+- **Keka:** board = the company's Keka address (`<company>.keka.com`). Reads its public active job list. The list is read as a whole and filtered here. Field names are matched loosely because Keka does not document them; if none match, the row shows "The job list was not in the expected form".
+- Shown in Config as `SmartRecruiters (Experian)`, `Oracle Recruiting (eeho, CX_1)`, `Keka (gokwik)`.
+- None of the three has been run against the live sites yet. The Test button on your Mac is the first check; wrong field names are fixed from one failing example.
+- Companies on other systems stay **Not supported yet** until their reader is built. Still not built after the survey: Phenom, Darwinbox, SuccessFactors, Freshteam, iCIMS, Workable, Eightfold and others (counts in the survey section below).
 
 **Settings (Company sites only)**
 - **Daily fetch:** on/off. Runs with the LinkedIn scan at the scheduled time (08:00), LinkedIn first, then company sites.
@@ -782,3 +792,10 @@ A company with no matching roles is a normal result, not a failure.
 ### Deferred
 - Custom career pages (DoorDash, Syneos, Tazapay), Ashby, Zoho Recruit, Roles tab filter by Tag.
 - Auto-closing roles that vanish from a company's list, per-company keywords, a "new companies" suggestions feed.
+
+### Company sites survey (built)
+- `jobscan sites --survey` reads each switched-on company that has no supported system, once, and saves `~/.jobscan/surveys/survey_<date>_<time>.csv`. It changes nothing in the app and fetches no roles.
+- Columns: company, career link, tag, page (read, or blocked, not found, timed out, unreachable), systems found on the page (most mentioned first), likely system, JobPosting data entries in the page, visible text size.
+- It prints a summary: likely system counts, pages with JobPosting data, pages not read by reason. The counts decide which readers to build next.
+- First survey (247 companies): recognised 52, nothing recognised 135, not read 60 (not found 26, blocked 19, unreachable 8, other 4, timed out 3). Systems seen: Oracle Recruiting 10, Keka 10, Phenom 6, Darwinbox 5, SuccessFactors 4, SmartRecruiters 4, Freshteam 3, iCIMS 2, Workable 2, Eightfold 2, others 1 each. A generic JobPosting reader is not worth building (1 page).
+- Result: SmartRecruiters, Oracle Recruiting and Keka readers built (see Supported hiring systems).

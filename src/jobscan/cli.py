@@ -44,8 +44,9 @@ from .scoring import (
     ScoringUnavailable,
     gemini_from_env,
 )
-from .sites_readers import Http
+from .sites_readers import Http, HttpClient
 from .sites_run import ReaderFactory, SitesRunner, default_reader_factory
+from .sites_survey import run_survey, write_csv
 from .store import RUN_FAILED, RUN_PARTIAL, RUN_RUNNING, RUN_SUCCESS, Store
 from .sync import MailSourceFactory, default_source_factory, sync_once, sync_problem
 from .timeutil import format_display, from_iso, now_ist, to_iso
@@ -85,6 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sites = sub.add_parser("sites", help="fetch new roles from the company career pages in Config")
     sites.add_argument("--company", help="fetch only this company (as named in Config)")
+    sites.add_argument(
+        "--survey",
+        action="store_true",
+        help="find which hiring system each unsupported company uses; saves a CSV, no roles",
+    )
 
     sub.add_parser(
         "naukri-details",
@@ -622,6 +628,45 @@ def cmd_naukri(
         reporter.close()
 
 
+def cmd_sites_survey(
+    store: Store,
+    db_path: Path,
+    config: Config,
+    out: TextIO,
+    http: Http | None,
+    sleep: Callable[[float], None],
+    company: str | None,
+) -> int:
+    """Read every unsupported company's page once and save a CSV. Nothing else is changed."""
+    todo = [
+        c
+        for c in store.list_sites()
+        if c.enabled and not c.system and (not company or c.name.casefold() == company.casefold())
+    ]
+    if not todo:
+        print("No unsupported company to survey.", file=out)
+        return EXIT_USAGE
+    seconds = int(len(todo) * (config.sites_delay_seconds + 1))
+    print(f"Surveying {len(todo)} companies, about {max(1, seconds // 60)} min.", file=out)
+    reporter = Reporter(out, db_path.parent / "runs" / log_name(to_iso(now_ist())))
+    try:
+        result = run_survey(
+            todo,
+            http or HttpClient(),
+            sleep=sleep,
+            delay=config.sites_delay_seconds,
+            emit=reporter.line,
+        )
+        path = db_path.parent / "surveys" / f"survey_{now_ist().strftime('%Y-%m-%d_%H%M')}.csv"
+        write_csv(result, path)
+        for line in result.summary():
+            reporter.line(line)
+        reporter.line(f"CSV saved: {path}")
+    finally:
+        reporter.close()
+    return EXIT_OK
+
+
 def cmd_sites(
     store: Store,
     db_path: Path,
@@ -632,10 +677,13 @@ def cmd_sites(
     make_embedder: EmbedderFactory,
     sleep: Callable[[float], None],
     company: str | None,
+    survey: bool = False,
 ) -> int:
     config = load_config(store, out, "nothing was fetched")
     if config is None:
         return EXIT_USAGE
+    if survey:
+        return cmd_sites_survey(store, db_path, config, out, http, sleep, company)
     stale = store.fail_stale_runs()
     if stale:
         print(f"Marked {stale} unfinished earlier run(s) as failed", file=out)
@@ -858,6 +906,7 @@ def main(
                         make_embedder=make_embedder,
                         sleep=sleep,
                         company=args.company,
+                        survey=args.survey,
                     )
                 if args.command == "naukri-details":
                     return cmd_naukri_details(
