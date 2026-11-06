@@ -29,6 +29,9 @@ from .details import fetch_descriptions, waiting_for_description
 from .embeddings import Embedder
 from .evaluation import build_report, load_labelled, roles_to_score
 from .fit_filters import listed_salary, rupee_text
+from .langfuse_push import LangfuseClient
+from .langfuse_push import client_from_env as langfuse_client_from_env
+from .langfuse_push import push as push_traces
 from .lock import AlreadyRunningError, RunLock, holder
 from .models import (
     PORTAL_LINKEDIN,
@@ -119,6 +122,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("eval", help="measure how well the score separates good and bad roles")
     sub.add_parser("details", help="fetch missing descriptions for recent roles")
     sub.add_parser("salary-check", help="show how many stored descriptions list a salary")
+    sub.add_parser(
+        "push-traces",
+        help="send AI call details and your ratings to Langfuse (off unless set in Config)",
+    )
     schedule = sub.add_parser("schedule", help="run the scan daily on this Mac (macOS only)")
     schedule.add_argument("action", choices=("on", "off", "status"))
     sub.add_parser("scheduled-run", help="what the daily job calls: one guarded, timed scan")
@@ -240,6 +247,7 @@ def cmd_schedule(store: Store, db_path: Path, action: str, out: TextIO) -> int:
 
 
 AI_CLIENT_FACTORY: Callable[[Config], Completer] = client_from_env  # tests replace this
+LANGFUSE_CLIENT_FACTORY: Callable[[Config], LangfuseClient] = langfuse_client_from_env
 
 
 def ai_score(
@@ -315,6 +323,25 @@ def score_after_scan(
     except Exception as exc:  # the scan already succeeded; report the bug and keep that result
         emit(f"Scoring failed unexpectedly ({type(exc).__name__}: {exc}). The scan is unaffected.")
     return False
+
+
+def cmd_push_traces(store: Store, out: TextIO, sleep: Callable[[float], None]) -> int:
+    config = load_config(store, out, "nothing was sent")
+    if config is None:
+        return EXIT_USAGE
+    if not config.langfuse_on:
+        print("Langfuse is switched off in Config, Tracing (Langfuse).", file=out)
+        return EXIT_USAGE
+    result = push_traces(
+        store,
+        config,
+        lambda line: print(line, file=out),
+        make_client=lambda c: LANGFUSE_CLIENT_FACTORY(c),
+        sleep=sleep,
+    )
+    if not result.stopped:
+        return EXIT_OK
+    return EXIT_PARTIAL if (result.traces or result.ratings) else EXIT_FAILED
 
 
 def cmd_score(
@@ -901,6 +928,8 @@ def main(
             return cmd_status(store, stream, db_path.parent / "scan.lock")
         if args.command == "salary-check":
             return cmd_salary_check(store, stream)
+        if args.command == "push-traces":
+            return cmd_push_traces(store, stream, sleep)
         if args.command == "sync":
             return cmd_sync(store, stream, make_mail_source, bool(args.reread))
         if args.command == "serve":

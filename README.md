@@ -111,5 +111,9 @@ read -s MISTRAL_API_KEY && export MISTRAL_API_KEY   # paste the key, press Enter
   - `eval`: check how well old-style scores match your ratings (only with Legacy scoring on; the
     Eval screen covers AI scores)
   - `salary-check`: show how many stored descriptions mention a salary
+  - `push-traces`: send AI call details and your ratings to Langfuse (optional, off by default)
   - `schedule on|off|status`: daily LinkedIn scan and company sites fetch (Mac only)
+- Eval also shows how your AI calls went (errors, time, tokens, what the service said). To view them in
+  Langfuse as well, turn on Config, Tracing (Langfuse) and run `jobscan push-traces`; role text and
+  the CV are not sent unless you choose to send role text.
 - Back up your data by copying `~/.jobscan/` while the app is closed.

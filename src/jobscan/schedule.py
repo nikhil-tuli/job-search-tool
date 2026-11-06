@@ -28,6 +28,9 @@ LABEL = "com.jobscan.daily"
 KEYCHAIN_SERVICE = "jobscan-ai"  # the AI scoring key, whichever provider Config names
 LEGACY_KEYCHAIN_SERVICE = "jobscan-gemini"  # the old embedding key, used only with Legacy scoring
 LEGACY_KEY_ENV = "GEMINI_API_KEY"
+LANGFUSE_PUBLIC_SERVICE = "jobscan-langfuse-public"
+LANGFUSE_SECRET_SERVICE = "jobscan-langfuse-secret"
+PUSH_TIMEOUT_SECONDS = 15 * 60
 LAUNCH_AGENTS = Path("~/Library/LaunchAgents")
 SECURITY = "/usr/bin/security"
 OSASCRIPT = "/usr/bin/osascript"
@@ -173,6 +176,19 @@ def install(
     print(f"Scheduled: a scan runs daily at {config.schedule_time} IST and at login.", file=out)
     print(f"Log: {log}", file=out)
     choice = key_choice(config)
+    if config.langfuse_on:
+        missing = [
+            s
+            for s in (LANGFUSE_PUBLIC_SERVICE, LANGFUSE_SECRET_SERVICE)
+            if not keychain_has_key(s, runner)
+        ]
+        for service in missing:
+            print(
+                f"The Langfuse key item {service} is not in the Keychain, so daily traces will "
+                f'not be sent. Store it once:\n  security add-generic-password -a "$USER" '
+                f"-s {service} -w",
+                file=out,
+            )
     if not keychain_has_key(choice.service, runner):
         print(
             f"The {choice.label} key is not in the Keychain, so scheduled scans will fetch roles "
@@ -262,7 +278,86 @@ def run_scheduled(
     notifier: Notifier | None = None,
     python: str | None = None,
 ) -> int:
-    """The daily job: the LinkedIn scan, then the company sites fetch when it is switched on."""
+    """The daily job: the LinkedIn scan, the company sites fetch when it is switched on, and the
+    Langfuse push when that is switched on. The push never changes the result of the job."""
+    code = _run_fetches(
+        store,
+        db_path,
+        out,
+        env=env,
+        runner=runner,
+        spawner=spawner,
+        notifier=notifier,
+        python=python,
+    )
+    push_traces_scheduled(
+        store,
+        db_path,
+        out,
+        env=env,
+        runner=runner,
+        spawner=spawner,
+        notifier=notifier,
+        python=python,
+    )
+    return code
+
+
+def push_traces_scheduled(
+    store: Store,
+    db_path: Path,
+    out: TextIO,
+    *,
+    env: Mapping[str, str] | None = None,
+    runner: Runner = _run,
+    spawner: Spawner = spawn_with_timeout,
+    notifier: Notifier | None = None,
+    python: str | None = None,
+) -> None:
+    """Send the day's AI call details to Langfuse when Config switches that on."""
+    try:
+        config = Config.from_raw(store.get_config_raw())
+    except ConfigError:
+        return
+    if not config.langfuse_on:
+        return
+    send: Notifier = notifier or (lambda title, message: notify(title, message, runner))
+    environment = dict(os.environ if env is None else env)
+    for service, name in (
+        (LANGFUSE_PUBLIC_SERVICE, config.langfuse_public_env),
+        (LANGFUSE_SECRET_SERVICE, config.langfuse_secret_env),
+    ):
+        if not environment.get(name):
+            key = keychain_key(service, runner)
+            if key:
+                environment[name] = key
+    if not environment.get(config.langfuse_public_env) or not environment.get(
+        config.langfuse_secret_env
+    ):
+        print("Langfuse keys not found in the Keychain; traces were not sent.", file=out)
+        send("Job scanner", "The Langfuse keys are not in the Keychain, so traces were not sent.")
+        return
+    command = [python or sys.executable, "-m", "jobscan", "--db", str(db_path), "push-traces"]
+    print(f"{format_display(to_iso(now_ist()))} IST: sending traces to Langfuse", file=out)
+    out.flush()
+    code = spawner(command, environment, PUSH_TIMEOUT_SECONDS)
+    if code not in (0, None):
+        send("Job scanner", "Sending traces to Langfuse failed. See the Eval page.")
+    elif code is None:
+        send("Job scanner", "Sending traces to Langfuse was stopped after the time limit.")
+
+
+def _run_fetches(
+    store: Store,
+    db_path: Path,
+    out: TextIO,
+    *,
+    env: Mapping[str, str] | None = None,
+    runner: Runner = _run,
+    spawner: Spawner = spawn_with_timeout,
+    notifier: Notifier | None = None,
+    python: str | None = None,
+) -> int:
     code = run_linkedin_scheduled(
         store,
         db_path,

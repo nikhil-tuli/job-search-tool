@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,7 +52,26 @@ job. "gaps" has at most 6 short strings."""
 
 
 class TailorError(Exception):
-    """A failure with a plain-words reason that is shown in History."""
+    """A failure with a plain-words reason that is shown in History.
+
+    `status` is the HTTP status when the service answered, and `provider_message` is the
+    service's own explanation, when it gave one.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None, provider_message: str = ""):
+        super().__init__(message)
+        self.status = status
+        self.provider_message = provider_message
+
+
+@dataclass(frozen=True)
+class CallInfo:
+    """What the last request to the service looked like, for the AI call log."""
+
+    ms: int
+    status: int | None
+    tokens_in: int | None
+    tokens_out: int | None
 
 
 @dataclass(frozen=True)
@@ -91,6 +111,7 @@ class TailorClient:
         self._key = api_key
         self._session = session or requests.Session()
         self._timeout = timeout
+        self.last_call: CallInfo | None = None
 
     def complete(
         self, system: str, user: str, *, temperature: float = 0.2, max_tokens: int = 8_000
@@ -104,6 +125,8 @@ class TailorClient:
             "temperature": temperature,
             "max_completion_tokens": max_tokens,
         }
+        started = time.monotonic()
+        self.last_call = None
         try:
             response = self._session.post(
                 self._url,
@@ -112,42 +135,99 @@ class TailorClient:
                 timeout=self._timeout,
             )
         except requests.Timeout:
+            self.last_call = CallInfo(_elapsed_ms(started), None, None, None)
             raise TailorError("The AI service took too long to answer. Try again.") from None
         except requests.RequestException:
+            self.last_call = CallInfo(_elapsed_ms(started), None, None, None)
             raise TailorError("The AI service could not be reached. Check your internet.") from None
         status = response.status_code
+        tokens_in, tokens_out = _usage(response)
+        self.last_call = CallInfo(_elapsed_ms(started), status, tokens_in, tokens_out)
+        said = _provider_message(response)
         if status in (401, 403):
             raise TailorError(
                 f"The AI service refused the key (HTTP {status}). Check the key and its "
-                f"variable name in {self._where}."
+                f"variable name in {self._where}.",
+                status=status,
+                provider_message=said,
             )
         if status == 404:
             raise TailorError(
-                f"The AI service address or model was not found. Check {self._where}."
+                f"The AI service address or model was not found. Check {self._where}.",
+                status=status,
+                provider_message=said,
             )
         if status == 429:
-            raise TailorError("The AI service is busy (rate limit). Try again in a minute.")
+            raise TailorError(
+                "The AI service is busy (rate limit). Try again in a minute.",
+                status=status,
+                provider_message=said,
+            )
         if status >= 500:
-            raise TailorError(f"The AI service had a problem (HTTP {status}). Try again later.")
+            raise TailorError(
+                f"The AI service had a problem (HTTP {status}). Try again later.",
+                status=status,
+                provider_message=said,
+            )
         if status != 200:
             raise TailorError(
-                f"The AI service refused the request (HTTP {status}).{_detail(response)}"
+                f"The AI service refused the request (HTTP {status}).{_detail(response)}",
+                status=status,
+                provider_message=said,
             )
         try:
             content = response.json()["choices"][0]["message"]["content"]
         except (ValueError, KeyError, IndexError, TypeError):
             raise TailorError("The AI service reply was not in the expected form.") from None
+        if isinstance(content, list):  # a reasoning model: thinking blocks and text blocks
+            content = "".join(
+                str(part.get("text", ""))
+                for part in content
+                if isinstance(part, dict) and part.get("type") == "text"
+            )
+            if not content.strip():
+                raise TailorError(
+                    "The AI model used its whole reply on reasoning and gave no answer. "
+                    f"Choose a model that does not reason in {self._where}."
+                )
         if not isinstance(content, str) or not content.strip():
             raise TailorError("The AI service returned an empty reply.")
         return content
 
 
-def _detail(response: requests.Response) -> str:
+def _elapsed_ms(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
+
+
+def _usage(response: requests.Response) -> tuple[int | None, int | None]:
     try:
-        message = response.json()["error"]["message"]
+        usage = response.json()["usage"]
+        tokens_in, tokens_out = usage["prompt_tokens"], usage["completion_tokens"]
     except (ValueError, KeyError, TypeError):
+        return None, None
+    ok = isinstance(tokens_in, int) and isinstance(tokens_out, int)
+    return (tokens_in, tokens_out) if ok else (None, None)
+
+
+def _provider_message(response: requests.Response) -> str:
+    """The service's own explanation of a failure. Services put it in different places."""
+    try:
+        body = response.json()
+    except ValueError:
         return ""
-    return f" {message[:160]}" if isinstance(message, str) else ""
+    if not isinstance(body, dict):
+        return ""
+    error = body.get("error")
+    candidates = [error.get("message") if isinstance(error, dict) else error, body.get("message")]
+    for message in candidates:
+        if isinstance(message, str) and message.strip():
+            return message.strip()[:300]
+    return ""
+
+
+def _detail(response: requests.Response) -> str:
+    message = _provider_message(response)
+    return f" {message[:160]}" if message else ""
 
 
 def make_client(

@@ -92,7 +92,12 @@ class Config:
     ai_max_missing: int = 2
     ai_max_words: int = 3_000
     ai_daily_cap: int = 150
-    ai_calls_per_minute: int = 30
+    ai_calls_per_minute: int = 4
+    langfuse_on: int = 0
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+    langfuse_public_env: str = "LANGFUSE_PUBLIC_KEY"
+    langfuse_secret_env: str = "LANGFUSE_SECRET_KEY"
+    langfuse_send_text: int = 0
     naukri_location: str = "india"
     naukri_max_pages: int = 5
     naukri_delay_seconds_min: float = 6.0
@@ -231,6 +236,8 @@ _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
     "ai_max_words": (int, 500, 20_000),
     "ai_daily_cap": (int, 1, 5_000),
     "ai_calls_per_minute": (int, 1, 600),
+    "langfuse_on": (int, 0, 1),
+    "langfuse_send_text": (int, 0, 1),
     "schedule_timeout_minutes": (int, 5, 240),
     "schedule_notify_finish": (int, 0, 1),
 }
@@ -351,6 +358,19 @@ def _parse_text_fields(
         values["ai_key_env"] = ai_key
     else:
         errors["ai_key_env"] = "a variable name: letters, digits and underscores"
+
+    lf_url = raw.get("langfuse_base_url", defaults.langfuse_base_url).strip().rstrip("/")
+    if _SERVICE_URL.fullmatch(lf_url) and len(lf_url) <= 200:
+        values["langfuse_base_url"] = lf_url
+    else:
+        errors["langfuse_base_url"] = "an https:// address, for example https://cloud.langfuse.com"
+
+    for key in ("langfuse_public_env", "langfuse_secret_env"):
+        name = raw.get(key, getattr(defaults, key)).strip()
+        if _ENV_NAME.fullmatch(name):
+            values[key] = name
+        else:
+            errors[key] = "a variable name: letters, digits and underscores"
 
     for key in ("ai_role_focus", "ai_extra_rules"):
         text = raw.get(key, getattr(defaults, key)).replace("\r\n", "\n").strip()

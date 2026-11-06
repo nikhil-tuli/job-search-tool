@@ -919,7 +919,7 @@ M = Must-haves allowed missing (Config, default 2).
 - Must-haves allowed missing (default 2).
 - Most description words sent (default 3,000): the safety limit above.
 - Most AI calls per 24 hours (default 150): stops a first run with a big backlog from using the whole day. 150 covers 100 roles a day plus retries.
-- AI calls per minute (default 30): the pace. Mistral's free tier allows 1 call a second, so 30 stays well under it. 100 roles take about 4 minutes.
+- AI calls per minute (default 4): the pace. Your Mistral account allows 20,000 tokens a minute, about 4 to 5 roles a minute at about 3,500 tokens each (100 roles take about 25 minutes). The 429 "busy" error is what a faster pace causes. A rate-limit error in a batch run waits a minute and retries once (Round 16).
 - Legacy scoring: 0 or 1, as in Decision.
 - Unchanged: the Fit filters group (including years), Excluded industries and Tailoring.
 - The old Scoring and Embeddings groups are hidden unless Legacy scoring is 1.
@@ -960,12 +960,12 @@ Need: about 100 roles a day, about 3,500 tokens a role (estimate), so about 350K
 
 | Option | Free limit seen | Roles a day it allows | Catch | Verdict |
 |---|---|---|---|---|
-| Mistral Small (Experiment plan) | 1 request a second, 500K tokens a minute, 1B tokens a month | Well over 100 | Phone verification; data-training opt-in (accepted) | **Chosen** |
+| Mistral Small (Experiment plan) | Your console shows 20,000 tokens a minute and 1 request a second for `mistral-small-2603`; no daily limit shown | About 100 a day if paced at 4 calls a minute (about 25 minutes) | Phone verification; data-training opt-in (accepted). The tokens-a-minute limit is the tight one | **Chosen** |
 | Gemini Flash-Lite (3.5 / 3.1) | 500 requests a day | About 500 | Only the Flash-Lite models; 3.8 Flash and 3.6 Flash allow just 20 a day | Workable, not chosen |
 | Cerebras gpt-oss-120b | 1M tokens a day, 5 requests a minute | About 280 by tokens | May be trial credits that expire; also used for Tailoring | Workable, not chosen |
 | Groq gpt-oss-120b | About 200K tokens a day | About 55 | Too small for 100 roles | Rejected |
 
-- Source: public pages, not confirmed in your account. Confirm limits in the Mistral console.
+- Source: the other rows are public pages, not confirmed in your account. The Mistral row is from your console. An earlier note said 500K tokens a minute and 1B a month; that was from a public page and is wrong for your account.
 - Model in use: `mistral-small-2603` (Mistral Small 4, 262K context). `mistral-small-latest` is an alias of it; pinning the dated name stops a silent change. Medium (`mistral-medium-2604`) is the step up if Small scores badly in the Trial.
 
 ### Key questions discussed
@@ -978,7 +978,7 @@ Need: about 100 roles a day, about 3,500 tokens a role (estimate), so about 350K
 - **Overall CV versus description semantic check?** Not included for now.
 - **Years?** Removed from the AI. The Fit filters keep the minimum-years rule. It only drops roles asking for fewer years than the minimum; there is no upper limit.
 - **Can Role focus change on its own?** No. Only you edit it. A change marks scores out of date.
-- **Why 150 calls a day and 30 a minute?** 150 covers 100 roles plus retries. 30 a minute stays well under Mistral's 1 a second.
+- **Why 150 calls a day and 30 a minute?** 150 covers 100 roles plus retries. The old 30 a minute default assumed Mistral's 1 request a second was the only limit; your account's 20,000 tokens a minute is tighter, so the default is now 4 a minute.
 - **What do the max words and daily cap do?** Words: a safety limit on text sent. Cap: the most AI calls in 24 hours.
 - **Fallback model?** None. A single model.
 - **Evals?** Kept simple: your 👍 and 👎 are the human eval, shown as a pivot against the AI band.
@@ -988,3 +988,79 @@ Need: about 100 roles a day, about 3,500 tokens a role (estimate), so about 350K
 - An overall CV-to-description similarity check.
 - A maximum-years filter in the Fit filters (a role asking 20+ years still passes today).
 - Batching several roles in one call.
+
+## Round 16: AI call log and Langfuse push (built; the live Langfuse part is not yet tested against Langfuse)
+
+Two options, built in this order. Option 1 needs no outside service. Option 2 is opt-in and off by default. Agreed: default 4 calls a minute, one wait-and-retry on a rate-limit error in batch runs only (not on the single-role Score button, because the app serves one request at a time and a minute's wait would freeze it), and no description text sent to Langfuse by default.
+
+### Why
+- Rate-limit and refusal errors this week (HTTP 429 with a limit of 0, a 400 with no explanation, a reasoning model using its whole reply budget on thinking) were found by hand with curl. The app showed only "HTTP 400".
+- Real token use per call is unknown (3,500 is an estimate), and Mistral's limit on this account is 20,000 tokens a minute.
+
+### Option 1: AI call log in the Eval tab
+**What is stored, per scoring call** (extends the `ai_calls` table; a migration adds columns, no existing rows change):
+- model, HTTP status, the provider's own error message (cut to 300 characters, with the key value removed if it ever appears), time taken in milliseconds, tokens in, tokens out.
+- No request text, no CV, no description, no reply text is stored here.
+- Only scoring calls are logged. Tailoring is out of scope for now, and the daily cap keeps counting only scoring calls.
+
+**Eval tab, new section "AI calls"** (mock sent with this round):
+- Period: 24 hours, 7 days (default) or 30 days.
+- Summary: calls, how many ok, rate-limited and other errors; median and slowest time; average and largest tokens in, average tokens out; busiest minute in tokens (compare it with your service's limit; the app does not hold that number).
+- By model: calls, ok, errors, median seconds, average tokens in and out.
+- Recent failures: the last 10, with time, role, model and the provider's message.
+- Times shown in IST.
+
+**Role side panel:** one line under the score: "Scored <date> by <model> in <seconds>, <tokens> in, <tokens> out."
+
+**Error messages:** when a call is refused, the message on screen includes the provider's explanation. Mistral puts it at the top level of its reply (`message`), which the app does not read today; both forms will be read.
+
+**Built with this round:**
+1. Default "AI calls per minute" changes from 30 to 4, because the account allows 20,000 tokens a minute.
+2. In batch runs (`jobscan score`, after a scan), a rate-limit error waits one minute and retries once instead of stopping the run. The single-role Score button shows the message and does not wait.
+3. Not built, if wanted later: pace by tokens actually used, using the count in each reply.
+
+**Not included:** reasoning models (for example `mistral-large-4`) return their answer inside "thinking" blocks and spend the reply budget on thinking. They are not supported. Use a non-reasoning model such as `ministral-14b-2512`.
+
+### Option 2: scheduled push to Langfuse (opt-in)
+**What it is:** a command, `jobscan push-traces`, that reads new rows from the local database and sends them to a Langfuse Cloud project. It also runs at the end of the daily scheduled run when switched on. The app never talks to Langfuse while scoring, so a Langfuse outage cannot affect scoring.
+
+**What is sent, per scoring call (one trace each):**
+- Time, model, time taken, tokens in and out, status and error message.
+- The labels the AI returned (the must-have checks) and the computed band and reason.
+- Role title and company. Portal and job id as tags. Prompt version.
+- Your 👍/👎 rating, sent as a score on that trace (1 for Good, 0 for Poor), with a second score for agree or disagree with the AI band. If you change a rating later, the score is updated.
+
+**Not sent by default:** the CV text and the full job description. A Config switch "Send role text" (default 0) would add the description; the CV is never sent.
+
+**Config group "Tracing (Langfuse)":** On or off (default off), service address (default https://cloud.langfuse.com), and the names of the variables holding the public and secret keys (defaults `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`).
+
+**Keys:** from terminal variables, like the Mistral key. For the scheduled job, from two Keychain items, `jobscan-langfuse-public` and `jobscan-langfuse-secret`. Keys are never stored in the database, a log or a config value.
+
+**Behaviour:**
+- Each call is pushed once. A call is marked pushed only after Langfuse accepts it, so a failed run is retried next time. Trace ids are derived from the call, so a repeat cannot create a duplicate.
+- Pushed in batches of 100.
+- The Eval tab shows "Last push: date, N calls sent" or the last error.
+- If the keys are missing, the command says so and sends nothing. The daily job notes it and carries on.
+
+**Volume:** about 100 calls a day, so about 3,000 traces a month plus ratings. The free Hobby plan allows 50,000 units a month and keeps 30 days of data. Check the usage meter after the first week.
+
+**Assumptions to check on the first real push:**
+- Langfuse accepts past timestamps on traces sent in a batch. Not verified.
+- The Langfuse OpenTelemetry endpoint (`/api/public/otel`) is the supported way in; its older ingestion API is deprecated and is due to be shut down on Langfuse Cloud on 16 November 2026, so it is not used.
+- Hobby's request rate limit is not published on the pages I read. Batches of 100 with a short pause between them keep well inside any normal limit.
+
+**Privacy:** Langfuse is a third party. With the defaults, only labels, titles, companies, numbers and your ratings leave your computer.
+
+**Not included:** live per-call tracing, Phoenix, trajectory and convergence measures (the scanner has no agent loop to measure), tailoring calls, and sending the CV.
+
+### Key questions discussed
+- **Could hosted Langfuse read the local database or GitHub?** No. It only receives data pushed to it. Uploading the database to GitHub would put CV and role data in a third-party repo and Langfuse would not read it anyway.
+- **Why not Phoenix?** About 790 MB and 146 packages to install, a server to run, and its trajectory tools do not apply to a single-call pipeline.
+- **Why not LangSmith?** Free plan is 5,000 traces a month with 14 days of data, which is tight with retries.
+
+### Built details, Round 16
+- **Commands:** `jobscan push-traces` (needs Config, Tracing (Langfuse), "Send traces to Langfuse" = 1, and the two key variables set in the terminal). The daily job runs it last when switched on, reading the keys from the Keychain items `jobscan-langfuse-public` and `jobscan-langfuse-secret`. A failed push notifies but never changes the daily job's result.
+- **Reasoning models:** if a model returns thinking blocks plus an answer block, the answer is used. If it returns only thinking (its reply budget ran out), the message says to choose a model that does not reason.
+- **Rated roles:** a rating is sent as two scores on the trace that made the current AI score: `human_rating` (1 Good, 0 Poor) and `agrees_with_ai` (1 or 0; not sent when the AI band is Partial). Scores go about 2.5 seconds apart, since Hobby's general API limit is about 30 requests a minute (from Langfuse's pricing page; the Scores endpoint is assumed to count against it).
+- **Unverified until the first real push:** that Langfuse accepts past timestamps on traces sent in a batch; that the attribute names used (from Langfuse's OpenTelemetry mapping table) show model, tokens, input and output as expected; that the Scores endpoint accepts the body used (`id`, `traceId`, `name`, `value`, `dataType`, `comment`). The code was tested only against a fake server. If Langfuse shows nothing or an error appears on the Eval page, send me the message.
+

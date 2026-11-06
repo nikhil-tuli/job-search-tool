@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ..ai_fit import BAND_RANK, band_of
 from ..ai_fit import inputs_fingerprint as ai_fingerprint
-from ..ai_fit_store import AiFitRow
+from ..ai_fit_store import AiCallRow, AiFitRow
 from ..config import Config
 from ..models import Cv, Role, RoleScore
 from ..scoring import ScoreModel, inputs_fingerprint
 from ..store import Store
+from ..timeutil import format_display
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class ScoreView:
     reason: str = ""
     checks: tuple[tuple[str, str, str], ...] = ()
     trimmed: bool = False
+    call_note: str = ""  # "Scored 5 Nov 23:04 by <model> in 3.2 s, ..." from the call log
 
     @property
     def detail(self) -> str:
@@ -77,13 +79,31 @@ def _ai_views(
     saved = store.get_ai_fits()
     if not saved:
         return {}
+    calls = store.latest_ok_ai_calls()
     views: dict[str, ScoreView] = {}
     for role in roles:
         row = saved.get(role.key)
         if row is not None:
             stale = cv is None or row.inputs != ai_fingerprint(config, cv, role)
-            views[role.key] = ai_view(config, row, stale=stale)
+            view = ai_view(config, row, stale=stale)
+            call = calls.get(role.key)
+            views[role.key] = replace(view, call_note=call_note(row.scored_on, call))
     return views
+
+
+def call_note(scored_on: str, call: AiCallRow | None) -> str:
+    """One line on how the score was made, from the call log. Empty when there is no log row."""
+    if call is None:
+        return ""
+    parts = [f"Scored {format_display(scored_on)}"]
+    if call.model:
+        parts.append(f"by {call.model}")
+    text = " ".join(parts)
+    if call.ms is not None:
+        text += f" in {call.ms / 1000:.1f} s"
+    if call.tokens_in is not None and call.tokens_out is not None:
+        text += f", {call.tokens_in:,} tokens in, {call.tokens_out:,} out"
+    return text + "."
 
 
 def ai_view(config: Config, row: AiFitRow, *, stale: bool) -> ScoreView:

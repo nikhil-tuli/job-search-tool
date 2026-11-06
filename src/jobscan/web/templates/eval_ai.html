@@ -88,4 +88,42 @@
   {% endfor %}
 </ul>
 {% endif %}
+
+<h2 id="ai-calls">AI calls</h2>
+<p class="portal-pick">Period:
+  {% for p, label in (('24h', '24 hours'), ('7d', '7 days'), ('30d', '30 days')) %}<a class="chip-link{% if calls.period == p %} on{% endif %}" href="{{ url_for('eval_page', portal=portal or 'all', calls=p) }}#ai-calls">{{ label }}</a> {% endfor %}
+</p>
+{% if not calls.calls %}
+<p class="muted">No AI calls in this period.</p>
+{% else %}
+<dl class="facts">
+  <dt>Calls</dt><dd>{{ calls.calls }}: {{ calls.ok }} ok, {{ calls.rate_limited }} rate-limited, {{ calls.other_errors }} other errors</dd>
+  <dt>Time per call</dt><dd>{% if calls.median_s is not none %}median {{ calls.median_s }} s, slowest {{ calls.slowest_s }} s{% else %}not recorded{% endif %}</dd>
+  <dt>Tokens per call</dt><dd>{% if calls.avg_in is not none %}average {{ '{:,}'.format(calls.avg_in) }} in, {{ '{:,}'.format(calls.avg_out) }} out (largest call {{ '{:,}'.format(calls.max_in) }} in){% else %}not recorded{% endif %}</dd>
+  <dt>Busiest minute</dt><dd>{% if calls.busiest_minute is not none %}{{ '{:,}'.format(calls.busiest_minute) }} tokens{% else %}not recorded{% endif %}</dd>
+</dl>
+<h2 class="sub">By model</h2>
+<table class="pivot eval">
+  <thead><tr><th>Model</th><th class="num">Calls</th><th class="num">OK</th><th class="num">Errors</th><th class="num">Median s</th><th class="num">Avg tokens in</th><th class="num">Avg tokens out</th></tr></thead>
+  <tbody>{% for m in calls.by_model %}
+    <tr><td>{{ m.model }}</td><td class="num">{{ m.calls }}</td><td class="num">{{ m.ok }}</td><td class="num">{{ m.errors }}</td><td class="num">{{ m.median_s if m.median_s is not none else '-' }}</td><td class="num">{{ '{:,}'.format(m.avg_in) if m.avg_in is not none else '-' }}</td><td class="num">{{ '{:,}'.format(m.avg_out) if m.avg_out is not none else '-' }}</td></tr>
+  {% endfor %}</tbody>
+</table>
+{% if calls.failures %}
+<h2 class="sub">Recent failures</h2>
+<table class="pivot eval">
+  <thead><tr><th>When</th><th>Role</th><th>Model</th><th>What the service said</th></tr></thead>
+  <tbody>{% for f in calls.failures %}
+    <tr><td>{{ f.when | ist }}</td><td>{% if f.role %}<a href="{{ url_for('role_page', portal=f.portal, job_id=f.job_id) }}" target="_blank" rel="noopener">{{ f.role.title }}</a> <span class="muted">{{ f.role.company }}</span>{% else %}<span class="muted">{{ f.portal }} {{ f.job_id }}</span>{% endif %}</td><td>{{ f.model }}</td><td class="err">{{ f.message }}</td></tr>
+  {% endfor %}</tbody>
+</table>
+{% endif %}
+<p class="muted">Times are IST. Messages are the service's own wording, cut to 300 characters. No request text or key is stored in this log.</p>
+{% endif %}
+{% if langfuse_on or push_state %}
+<p class="muted">Langfuse:
+{% if push_state %}last push {{ push_state[0] | ist }}, {{ push_state[1] }} traces and {{ push_state[2] }} ratings sent{% if push_state[3] %}. <span class="err">{{ push_state[3] }}</span>{% endif %}.
+{% else %}not pushed yet. Run <code>jobscan push-traces</code>.{% endif %}
+{% if not langfuse_on %} Switched off in Config, Tracing (Langfuse).{% endif %}</p>
+{% endif %}
 {% endblock %}

@@ -603,6 +603,44 @@ def _migration_17(conn: sqlite3.Connection) -> None:
 
 
 # Append new migrations to the end; never edit one that has shipped.
+def _migration_18(conn: sqlite3.Connection) -> None:
+    """AI call log detail: model, status, the provider's message, time and tokens per call."""
+    for column in (
+        "model TEXT NOT NULL DEFAULT ''",
+        "status INTEGER",
+        "error_text TEXT NOT NULL DEFAULT ''",
+        "ms INTEGER",
+        "tokens_in INTEGER",
+        "tokens_out INTEGER",
+        "pushed_on TEXT",
+    ):
+        conn.execute(f"ALTER TABLE ai_calls ADD COLUMN {column}")
+    conn.execute(
+        """
+        CREATE TABLE langfuse_scores (
+            portal TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            trace_id TEXT NOT NULL,
+            human INTEGER NOT NULL,
+            agree INTEGER NOT NULL,
+            pushed_on TEXT NOT NULL,
+            PRIMARY KEY (portal, job_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE langfuse_push (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            pushed_on TEXT NOT NULL,
+            traces INTEGER NOT NULL,
+            ratings INTEGER NOT NULL,
+            error TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+
+
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_1,
     _migration_2,
@@ -621,6 +659,7 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_15,
     _migration_16,
     _migration_17,
+    _migration_18,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 

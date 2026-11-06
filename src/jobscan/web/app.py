@@ -29,7 +29,7 @@ from flask import (
 from werkzeug.wrappers import Response as WerkzeugResponse
 
 from .. import schedule as schedule_module
-from ..ai_eval import build_ai_eval
+from ..ai_eval import CALL_PERIODS, build_ai_eval, build_call_stats
 from ..ai_fit import (
     MIN_WORDS,
     AiScorer,
@@ -173,6 +173,12 @@ SAFE_SITES = frozenset({"same-origin", "none"})
 LEGACY_GROUPS = frozenset({"Scoring", "Embeddings (Gemini)"})
 TEXTAREA_SETTINGS = frozenset({"ai_role_focus", "ai_extra_rules"})
 GROUP_INFO = {
+    "Tracing (Langfuse)": (
+        "Optional. jobscan push-traces sends how each AI call went (model, time, tokens, "
+        "errors, the labels and band) and your Good/Poor ratings to a Langfuse project. "
+        "Off by default. The CV is never sent. Keys come from terminal variables, or from the "
+        "Keychain for the daily job."
+    ),
     "Fit scoring (AI)": (
         "An AI model reads your CV and each role and labels its must-haves, role type and "
         "domain. The band (Good, Partial, Bad) follows from the labels, so the must-haves "
@@ -483,6 +489,38 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
         ),
     ),
     (
+        "Tracing (Langfuse)",
+        (
+            (
+                "langfuse_on",
+                "Send traces to Langfuse",
+                "1 lets jobscan push-traces (and the daily job) send call details and your "
+                "ratings, 0 sends nothing",
+            ),
+            (
+                "langfuse_base_url",
+                "Langfuse address",
+                "https://cloud.langfuse.com (EU) or https://us.cloud.langfuse.com (US)",
+            ),
+            (
+                "langfuse_public_env",
+                "Public key variable name",
+                "Name of the terminal variable holding the public key. Never stored here",
+            ),
+            (
+                "langfuse_secret_env",
+                "Secret key variable name",
+                "Name of the terminal variable holding the secret key. Never stored here",
+            ),
+            (
+                "langfuse_send_text",
+                "Send role description",
+                "0 sends only the role title and company with each call. 1 also sends the "
+                "role description. The CV is never sent",
+            ),
+        ),
+    ),
+    (
         "Scoring",
         (
             (
@@ -623,6 +661,7 @@ GROUP_SECTION = {
     "Tailoring": "Common",
     "Email Sync": "Common",
     "Fit scoring (AI)": "Common",
+    "Tracing (Langfuse)": "Common",
     "Scoring": "Common",
     "Embeddings (Gemini)": "Common",
     "Retention": "Common",
@@ -1144,6 +1183,7 @@ def create_app(
             config=config,
             make_client=make_ai_client,
             emit=lambda _line: None,
+            retry_rate_limit=False,  # the app serves one request at a time; do not hold it a minute
         )
         try:
             result = scorer.run(only=[role])
@@ -1306,6 +1346,10 @@ def create_app(
                 render_template(
                     "eval_ai.html",
                     ev=build_ai_eval(store, config, cv, portals, phrases, now_ist()),
+                    calls=build_call_stats(store, now_ist(), request.args.get("calls", "")),
+                    push_state=store.get_push_state(),
+                    langfuse_on=bool(config.langfuse_on),
+                    call_periods=tuple(CALL_PERIODS),
                     has_cv=cv is not None,
                     portal=portal,
                     portals=PORTALS,

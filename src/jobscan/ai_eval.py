@@ -6,12 +6,14 @@ AI agrees, lists the roles where it did not, and says what is waiting to be scor
 
 from __future__ import annotations
 
-from collections import Counter
+import statistics
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .ai_fit import BAD, BANDS, DAILY_WINDOW, GOOD, MIN_WORDS, PARTIAL, band_of, inputs_fingerprint
+from .ai_fit_store import AiCallRow
 from .config import Config
 from .evaluation import (
     Labelled,
@@ -41,6 +43,119 @@ class Miss:
     role: Role
     band: str
     reason: str
+
+
+@dataclass(frozen=True)
+class ModelStats:
+    model: str
+    calls: int
+    ok: int
+    errors: int
+    median_s: float | None
+    avg_in: int | None
+    avg_out: int | None
+
+
+@dataclass(frozen=True)
+class Failure:
+    when: str
+    role: Role | None
+    portal: str
+    job_id: str
+    model: str
+    message: str
+
+
+@dataclass(frozen=True)
+class CallStats:
+    period: str  # "24h", "7d" or "30d"
+    calls: int
+    ok: int
+    rate_limited: int
+    other_errors: int
+    median_s: float | None
+    slowest_s: float | None
+    avg_in: int | None
+    avg_out: int | None
+    max_in: int | None
+    busiest_minute: int | None  # most tokens (in plus out) in one minute
+    by_model: tuple[ModelStats, ...]
+    failures: tuple[Failure, ...]
+
+
+CALL_PERIODS = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
+DEFAULT_CALL_PERIOD = "7d"
+MAX_FAILURES = 10
+
+
+def _median_s(rows: Sequence[AiCallRow]) -> float | None:
+    times = [r.ms / 1000 for r in rows if r.ms is not None]
+    return round(statistics.median(times), 1) if times else None
+
+
+def _avg(values: Sequence[int]) -> int | None:
+    return round(sum(values) / len(values)) if values else None
+
+
+def _is_rate_limited(row: AiCallRow) -> bool:
+    return row.status == 429 or (row.status is None and "rate limit" in row.note.lower())
+
+
+def build_call_stats(store: Store, now: datetime, period: str) -> CallStats:
+    """How the AI calls went over the period: errors, time, tokens, and the latest failures."""
+    period = period if period in CALL_PERIODS else DEFAULT_CALL_PERIOD
+    rows = store.ai_calls_between(to_iso(now - CALL_PERIODS[period]))
+    good = [r for r in rows if r.ok]
+    failed = [r for r in rows if not r.ok]
+    rate_limited = sum(1 for r in failed if _is_rate_limited(r))
+    slow = [r.ms / 1000 for r in rows if r.ms is not None]
+    tokens_in = [r.tokens_in for r in rows if r.tokens_in is not None]
+    tokens_out = [r.tokens_out for r in rows if r.tokens_out is not None]
+    per_minute: defaultdict[str, int] = defaultdict(int)
+    for r in rows:
+        if r.tokens_in is not None and r.tokens_out is not None:
+            per_minute[r.called_on[:16]] += r.tokens_in + r.tokens_out
+    groups: defaultdict[str, list[AiCallRow]] = defaultdict(list)
+    for r in rows:
+        groups[r.model or "(not recorded)"].append(r)
+    by_model = tuple(
+        ModelStats(
+            model=name,
+            calls=len(items),
+            ok=sum(1 for r in items if r.ok),
+            errors=sum(1 for r in items if not r.ok),
+            median_s=_median_s(items),
+            avg_in=_avg([r.tokens_in for r in items if r.tokens_in is not None]),
+            avg_out=_avg([r.tokens_out for r in items if r.tokens_out is not None]),
+        )
+        for name, items in sorted(groups.items(), key=lambda kv: -len(kv[1]))
+    )
+    failures = tuple(
+        Failure(
+            when=r.called_on,
+            role=store.get_role(r.portal, r.job_id),
+            portal=r.portal,
+            job_id=r.job_id,
+            model=r.model or "(not recorded)",
+            message=(f"{r.status} " if r.status else "") + (r.error_text or r.note),
+        )
+        for r in reversed(failed[-MAX_FAILURES:])
+    )
+    return CallStats(
+        period=period,
+        calls=len(rows),
+        ok=len(good),
+        rate_limited=rate_limited,
+        other_errors=len(failed) - rate_limited,
+        median_s=round(statistics.median(slow), 1) if slow else None,
+        slowest_s=round(max(slow), 1) if slow else None,
+        avg_in=_avg(tokens_in),
+        avg_out=_avg(tokens_out),
+        max_in=max(tokens_in) if tokens_in else None,
+        busiest_minute=max(per_minute.values()) if per_minute else None,
+        by_model=by_model,
+        failures=failures,
+    )
 
 
 @dataclass(frozen=True)

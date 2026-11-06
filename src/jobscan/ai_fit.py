@@ -28,7 +28,7 @@ from .config import Config
 from .fit_filters import FitRules, evaluate
 from .models import Cv, Role
 from .store import Store
-from .tailor_ai import TailorClient, TailorError, _extract_json
+from .tailor_ai import CallInfo, TailorClient, TailorError, _extract_json
 from .timeutil import now_ist, to_iso
 
 PROMPT_VERSION = "1"
@@ -80,6 +80,9 @@ class Completer(Protocol):
     def complete(
         self, system: str, user: str, *, temperature: float = ..., max_tokens: int = ...
     ) -> str: ...
+
+
+RATE_LIMIT_WAIT_SECONDS = 60.0
 
 
 # ---- what goes in -------------------------------------------------------------------------------
@@ -292,7 +295,9 @@ class AiScorer:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], datetime] = now_ist,
         monotonic: Callable[[], float] = time.monotonic,
+        retry_rate_limit: bool = True,
     ) -> None:
+        self._retry_rate_limit = retry_rate_limit
         self._store = store
         self._config = config
         self._make_client = make_client
@@ -371,6 +376,30 @@ class AiScorer:
             todo.append(role)
         return todo
 
+    def _log(
+        self,
+        role: Role,
+        when: str,
+        ok: bool,
+        note: str,
+        client: Completer,
+        error: TailorError | None = None,
+    ) -> None:
+        info: CallInfo | None = getattr(client, "last_call", None)
+        self._store.log_ai_call(
+            role.portal,
+            role.job_id,
+            when=when,
+            ok=ok,
+            note=note,
+            model=self._config.ai_model,
+            status=error.status if error is not None else (info.status if info else None),
+            error_text=error.provider_message if error is not None else "",
+            ms=info.ms if info else None,
+            tokens_in=info.tokens_in if info else None,
+            tokens_out=info.tokens_out if info else None,
+        )
+
     def _pace(self) -> None:
         gap = 60.0 / self._config.ai_calls_per_minute
         if self._last_call is not None:
@@ -392,7 +421,9 @@ class AiScorer:
         description, trimmed = trim_description(role.description or "", config.ai_max_words)
         message = build_user_message(config, cv, role, description)
         verdict: Verdict | None = None
-        for attempt in range(2):  # one retry when the reply cannot be read
+        unreadable = 0  # one retry when the reply cannot be read
+        waited = False  # one wait and retry when the service says it is busy
+        while True:
             self._pace()
             when = to_iso(self._clock())
             try:
@@ -400,21 +431,25 @@ class AiScorer:
                     SYSTEM_PROMPT, message, temperature=0.0, max_tokens=MAX_REPLY_TOKENS
                 )
             except TailorError as exc:
-                self._store.log_ai_call(
-                    role.portal, role.job_id, when=when, ok=False, note=str(exc)
-                )
+                self._log(role, when, False, str(exc), client, exc)
+                if exc.status == 429 and self._retry_rate_limit and not waited:
+                    waited = True
+                    self._emit("AI service is busy (rate limit): waiting a minute, then retrying")
+                    self._sleep(RATE_LIMIT_WAIT_SECONDS)
+                    continue
                 result.stopped = str(exc)
                 return False
             try:
                 verdict = parse_reply(reply)
             except AiFitError as exc:
                 note = f"The AI reply could not be read: {exc}."
-                self._store.log_ai_call(role.portal, role.job_id, when=when, ok=False, note=note)
-                if attempt == 1:
+                self._log(role, when, False, note, client)
+                unreadable += 1
+                if unreadable == 2:
                     result.failed += 1
                     return True
                 continue
-            self._store.log_ai_call(role.portal, role.job_id, when=when, ok=True)
+            self._log(role, when, True, "", client)
             break
         assert verdict is not None
         now = self._clock()
