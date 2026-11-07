@@ -118,7 +118,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="look at all mail of the last 30 days again, including mail already read",
     )
-    sub.add_parser("score", help="score roles against your CV (also runs after each scan)")
+    score = sub.add_parser(
+        "score", help="score new roles against your CV (also runs after each scan)"
+    )
+    score.add_argument(
+        "--stale",
+        action="store_true",
+        help="also score again the roles scored under older settings (CV, model, role focus)",
+    )
     sub.add_parser("eval", help="measure how well the score separates good and bad roles")
     sub.add_parser("details", help="fetch missing descriptions for recent roles")
     sub.add_parser("salary-check", help="show how many stored descriptions list a salary")
@@ -256,8 +263,12 @@ def ai_score(
     emit: Callable[[str], None],
     sleep: Callable[[float], None] = time.sleep,
     only: Sequence[Role] | None = None,
+    rescore_stale: bool = False,
 ) -> AiRunResult | None:
-    """Score pending roles with the AI. None when scoring is off or there is no CV."""
+    """Score new roles with the AI (and, if asked, roles scored under older settings).
+
+    None when scoring is off or there is no CV.
+    """
     if not config.ai_scoring:
         emit("AI scoring is switched off in Config, Fit scoring (AI).")
         return None
@@ -267,6 +278,7 @@ def ai_score(
         make_client=lambda c: AI_CLIENT_FACTORY(c),
         emit=emit,
         sleep=sleep,
+        rescore_stale=rescore_stale,
     )
     try:
         return scorer.run(only=only)
@@ -351,6 +363,7 @@ def cmd_score(
     out: TextIO,
     make_embedder: EmbedderFactory,
     sleep: Callable[[float], None],
+    rescore_stale: bool = False,
 ) -> int:
     config = load_config(store, out, "nothing was scored")
     if config is None:
@@ -358,7 +371,7 @@ def cmd_score(
     reporter = Reporter(out, db_path.parent / "runs" / log_name(to_iso(now_ist())))
     try:
         if not config.legacy_scoring:
-            ai = ai_score(store, config, reporter.line, sleep)
+            ai = ai_score(store, config, reporter.line, sleep, rescore_stale=rescore_stale)
             if ai is None:
                 return EXIT_USAGE
             if not ai.stopped:
@@ -1005,6 +1018,7 @@ def main(
                         out=stream,
                         make_embedder=make_embedder,
                         sleep=sleep,
+                        rescore_stale=args.stale,
                     )
                 return cmd_scan(
                     store,

@@ -276,6 +276,7 @@ class AiRunResult:
     no_description: int = 0
     excluded: int = 0
     waiting: int = 0  # roles left for the next run (cap reached or the service stopped)
+    stale_kept: int = 0  # scored under older settings and left alone (see rescore_stale)
     stopped: str = ""
     notes: list[str] = field(default_factory=list)
 
@@ -296,8 +297,10 @@ class AiScorer:
         clock: Callable[[], datetime] = now_ist,
         monotonic: Callable[[], float] = time.monotonic,
         retry_rate_limit: bool = True,
+        rescore_stale: bool = False,
     ) -> None:
         self._retry_rate_limit = retry_rate_limit
+        self._rescore_stale = rescore_stale
         self._store = store
         self._config = config
         self._make_client = make_client
@@ -319,6 +322,11 @@ class AiScorer:
             raise AiScoringUnavailable("no CV uploaded yet")
         result = AiRunResult()
         todo = self._select(cv, only, result)
+        if result.stale_kept:
+            self._emit(
+                f"AI scoring: {result.stale_kept} role(s) were scored under older settings and "
+                "are left as they are. Run jobscan score --stale to score them again."
+            )
         if not todo:
             self._emit("AI scoring: nothing to score")
             return result
@@ -365,6 +373,9 @@ class AiScorer:
             current = saved.get(role.key)
             if only is None:
                 if current and current.inputs == inputs_fingerprint(self._config, cv, role):
+                    continue
+                if current and not self._rescore_stale:
+                    result.stale_kept += 1  # keep the old verdict; the user re-scores on purpose
                     continue
                 if current is None and not evaluate(role, rules, now).eligible:
                     result.excluded += 1

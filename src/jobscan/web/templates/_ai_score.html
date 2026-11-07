@@ -9,5 +9,5 @@
 <table class="checks">{% for name, status, evidence in sc.checks %}<tr><td>{{ name }}</td><td class="chk-{{ status | lower }}"{% if evidence %} title="{{ evidence }}"{% endif %}>{{ status }}</td></tr>{% endfor %}</table>
 <small class="muted block">Hover a Met item to see the CV line.</small></details>{% endif %}
 {% if sc.call_note %}<small class="muted block">{{ sc.call_note }}</small>{% endif %}
-{% if sc.stale %}<small class="stale-note">Out of date: made with an earlier CV or settings. Run jobscan score.</small>{% endif %}
+{% if sc.stale %}<small class="stale-note">Out of date: made with an earlier CV or settings. Press Score to redo it, or run jobscan score --stale for all.</small>{% endif %}
 {%- endmacro %}

@@ -73,6 +73,8 @@ read -s MISTRAL_API_KEY && export MISTRAL_API_KEY   # paste the key, press Enter
 - **Scoring:** a Mistral key is not tied to a model. The model is a setting: Config, Fit scoring
   (AI), Model (currently `mistral-small-2603`). Run `.venv/bin/jobscan score` after uploading a CV,
   or let the next scan do it. Only roles that pass your Fit filters and have a description are scored.
+  Changing the role focus, model or CV does not re-score old roles by itself: use `jobscan score --stale`,
+  or press Score on a single role.
 - **Tailoring:** upload your Word CV and, for letters, your Word cover letter template. On a
   role, choose **Tailor resume** or **Tailor cover letter**, then follow progress in History.
 - **Email Sync:** it only reads mail; it never sends or deletes. Syncs run while `jobscan serve`
@@ -105,7 +107,7 @@ read -s MISTRAL_API_KEY && export MISTRAL_API_KEY   # paste the key, press Enter
   - `naukri`: fetch Naukri roles
   - `sites`: fetch roles from the company career pages in Config
   - `naukri-details`, `details`: fetch missing job descriptions (Naukri, LinkedIn)
-  - `score`: score roles against your CV with the AI
+  - `score`: score new roles against your CV with the AI (`score --stale` also redoes roles scored under older settings)
   - `sync`: read Gmail once and propose status changes
   - `status`: show the last run and counts
   - `eval`: check how well old-style scores match your ratings (only with Legacy scoring on; the

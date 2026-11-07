@@ -135,6 +135,12 @@ def test_eval_page_pivot_and_waiting(seeded: Store) -> None:
     assert "Missing: SAP." in page
     assert "AUC" not in page
     assert " of 150" in page
+    assert 'data-cell="good-partial"' in page  # a count opens its roles in the panel below
+    assert 'id="cell-good-partial"' in page
+    assert 'id="cell-good-bad"' in page
+    assert 'id="cell-bad-good"' in page
+    assert 'id="cell-good-good"' not in page  # empty cells show 0 and have no panel
+    assert "<details" not in page.split("Your rating against the AI")[1].split("eval-grid")[0]
 
 
 def test_eval_page_before_anything_is_rated(seeded: Store) -> None:

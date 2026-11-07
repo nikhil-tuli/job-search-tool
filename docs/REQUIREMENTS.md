@@ -1054,6 +1054,10 @@ Two options, built in this order. Option 1 needs no outside service. Option 2 is
 **Not included:** live per-call tracing, Phoenix, trajectory and convergence measures (the scanner has no agent loop to measure), tailoring calls, and sending the CV.
 
 ### Key questions discussed
+- **What does "104 traces" mean after `jobscan push-traces`?** 104 AI calls, not 104 roles. Each call is one trace, and the log counts every call: failed ones (the 429 and 400 errors), re-scores, and the retry of an unreadable reply. Roles with a score are on the Eval tab ("Roles AI-scored"); calls are in its "AI calls" section.
+- **Why does the command print nothing for a while after the traces?** It is sending your ratings. Each rated role sends two scores about 2.5 seconds apart (Langfuse Hobby allows about 30 general API requests a minute), so about 5 seconds per rated role. It prints `Langfuse push: N traces and M ratings sent` at the end. Ctrl+C is safe: sent traces stay marked as sent, and each rating is recorded only after Langfuse accepts it. Progress lines during the ratings phase are not built yet.
+- **What is the "ratings" number (for example 25)?** The number of roles whose Good/Poor rating was sent, not the number of scores. Each role sends `human_rating`, plus `agrees_with_ai` when the AI band is Good or Bad (not when Partial), so Langfuse holds between 25 and 50 scores for 25 roles.
+- **Which rated roles are included?** Only roles you rated that also have a current AI score, whose scoring call was sent. The order does not matter (rating first or score first). Roles you rated that have no AI score are skipped, because there is no trace to attach the rating to. To include them, run `jobscan score`, then `jobscan push-traces` again. A role is sent again only if its rating changes or it is re-scored. Check: the count should match "Roles AI-scored and rated by you" on the Eval tab.
 - **Could hosted Langfuse read the local database or GitHub?** No. It only receives data pushed to it. Uploading the database to GitHub would put CV and role data in a third-party repo and Langfuse would not read it anyway.
 - **Why not Phoenix?** About 790 MB and 146 packages to install, a server to run, and its trajectory tools do not apply to a single-call pipeline.
 - **Why not LangSmith?** Free plan is 5,000 traces a month with 14 days of data, which is tight with retries.
@@ -1064,3 +1068,27 @@ Two options, built in this order. Option 1 needs no outside service. Option 2 is
 - **Rated roles:** a rating is sent as two scores on the trace that made the current AI score: `human_rating` (1 Good, 0 Poor) and `agrees_with_ai` (1 or 0; not sent when the AI band is Partial). Scores go about 2.5 seconds apart, since Hobby's general API limit is about 30 requests a minute (from Langfuse's pricing page; the Scores endpoint is assumed to count against it).
 - **Unverified until the first real push:** that Langfuse accepts past timestamps on traces sent in a batch; that the attribute names used (from Langfuse's OpenTelemetry mapping table) show model, tokens, input and output as expected; that the Scores endpoint accepts the body used (`id`, `traceId`, `name`, `value`, `dataType`, `comment`). The code was tested only against a fake server. If Langfuse shows nothing or an error appears on the Eval page, send me the message.
 
+
+## Round 17: re-scoring on purpose, and the Eval count panel (built)
+
+### Why
+- Changing the role focus (or model, CV, extra rules) marks every saved AI verdict out of date. Before this round the daily job and each scan then re-scored up to the daily cap of old roles, spending calls and changing ratings without being asked.
+- On the Eval page, clicking a count opened the role list inside the table row, which stretched the row and put the list under the wrong column.
+
+### Decisions
+- **Daily job, scans and `jobscan score`** score only roles with no AI verdict yet. A role whose verdict is out of date keeps its old verdict and its old band, shown as "out of date", so nothing drops out of the Roles tab.
+- **`jobscan score --stale`** also scores again the out-of-date roles. The daily cap and the calls-per-minute pace still apply; leftovers carry over to the next run.
+- **Score button on a role** always re-scores that one role (unchanged).
+- **No "Re-score stale roles" button** on the Eval page (decided against: it would run a long batch from the browser while the app is busy).
+- **A run that leaves out-of-date roles alone says so:** "N role(s) were scored under older settings and are left as they are. Run jobscan score --stale to score them again."
+- **Unchanged:** what makes a verdict out of date (model, CV, role text, role focus, extra rules, word limit). The Eval comparison still counts only roles with a current verdict, so after a role-focus change the Eval table shrinks until those roles are re-scored.
+- **Eval count panel (option A):** clicking a count highlights it and lists its roles in one panel under the table, titled for example "You: Good · AI: Partial (3 roles)", with a close link. Clicking the count again, or close, hides it. Only one panel is open at a time. Counts of 0 are not clickable.
+
+### Built details
+- `AiScorer(rescore_stale=False)`; `AiRunResult.stale_kept` counts the roles left alone. `ai_score(..., rescore_stale)` and `cmd_score(..., rescore_stale)` pass the flag from `--stale`. A single-role run (`only=`) is not affected by the flag.
+- The Config help text and the role-panel note now point to `jobscan score --stale` and the Score button.
+- The panel is `static/cellpanel.js` plus `.cell-panel` styles; without JavaScript all panels stay visible under the table.
+- Legacy (keyword and meaning) scoring is unchanged and still redoes out-of-date scores.
+
+### Key questions discussed
+- **Does the AI's rating drop the wider skills list from "Bad"?** Skills you list as things you can do are meant as a floor (not Bad because of them), not a boost; the exclusions (sales, operations, hands-on engineering, HR or event roles, pure product) still win. This is a prompt instruction, so the model follows it most of the time, not always; check on the Eval page after re-scoring.

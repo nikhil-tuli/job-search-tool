@@ -75,8 +75,11 @@ def store() -> Iterator[Store]:
     conn.close()
 
 
-def scorer(store: Store, client: FakeClient, config: Config | None = None) -> AiScorer:
+def scorer(
+    store: Store, client: FakeClient, config: Config | None = None, *, rescore_stale: bool = False
+) -> AiScorer:
     return AiScorer(
+        rescore_stale=rescore_stale,
         store=store,
         config=config or Config(),
         make_client=lambda _c: client,
@@ -201,7 +204,7 @@ def test_run_scores_eligible_roles_and_saves_fit(store: Store) -> None:
     assert store.ai_calls_since("2026-01-01") == 1
 
 
-def test_second_run_skips_current_and_redoes_stale(store: Store) -> None:
+def test_second_run_skips_current_and_keeps_stale_unless_asked(store: Store) -> None:
     cv = upload_cv(store)
     role = add_role(store, "1", LONG_JD)
     client = FakeClient([GOOD_REPLY])
@@ -210,7 +213,36 @@ def test_second_run_skips_current_and_redoes_stale(store: Store) -> None:
     assert len(client.calls) == 1
     changed = replace(Config(), ai_role_focus="Something else entirely")
     assert inputs_fingerprint(changed, cv, role) != inputs_fingerprint(Config(), cv, role)
-    scorer(store, client, changed).run()
+    result = scorer(store, client, changed).run()
+    assert len(client.calls) == 1  # the old verdict is kept, not redone
+    assert (result.scored, result.stale_kept) == (0, 1)
+    old_row = store.get_ai_fits()["LinkedIn|1"]
+    result = scorer(store, client, changed, rescore_stale=True).run()
+    assert len(client.calls) == 2
+    assert (result.scored, result.stale_kept) == (1, 0)
+    assert store.get_ai_fits()["LinkedIn|1"].inputs != old_row.inputs
+
+
+def test_new_roles_are_scored_while_stale_ones_wait(store: Store) -> None:
+    upload_cv(store)
+    add_role(store, "1", LONG_JD)
+    client = FakeClient([GOOD_REPLY, GOOD_REPLY])
+    scorer(store, client).run()
+    add_role(store, "2", LONG_JD + " extra")
+    changed = replace(Config(), ai_role_focus="Something else entirely")
+    result = scorer(store, client, changed).run()
+    assert (result.scored, result.stale_kept) == (1, 1)
+    assert len(client.calls) == 2
+
+
+def test_scoring_one_role_always_redoes_it(store: Store) -> None:
+    upload_cv(store)
+    role = add_role(store, "1", LONG_JD)
+    client = FakeClient([GOOD_REPLY, GOOD_REPLY])
+    scorer(store, client).run()
+    changed = replace(Config(), ai_role_focus="Something else entirely")
+    result = scorer(store, client, changed).run(only=[role])
+    assert result.scored == 1
     assert len(client.calls) == 2
 
 

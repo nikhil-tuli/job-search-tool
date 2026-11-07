@@ -32,15 +32,23 @@
     <tr><td>{{ name | safe }}</td>
     {% for band in ('good', 'partial', 'bad') %}
       {% set found = ev.pivot[(label, band)] %}
-      <td class="num">{% if found %}<details class="cell"><summary>{{ found | length }}</summary>
-        <ul class="cell-list">{% for r in found %}<li><a href="{{ url_for('role_page', portal=r.portal, job_id=r.job_id) }}" target="_blank" rel="noopener">{{ r.title }}</a> <span class="muted">{{ r.company }}</span></li>{% endfor %}</ul></details>{% else %}0{% endif %}</td>
+      <td class="num">{% if found %}<button type="button" class="cell-btn" data-cell="{{ label }}-{{ band }}" aria-expanded="false">{{ found | length }}</button>{% else %}0{% endif %}</td>
     {% endfor %}
     <td class="num">{{ (ev.rated_good if label == 'good' else ev.rated_bad) }}</td></tr>
   {% endfor %}
   <tr><td>Total</td>{% for band in ('good', 'partial', 'bad') %}<td class="num">{{ (ev.pivot[('good', band)] | length) + (ev.pivot[('bad', band)] | length) }}</td>{% endfor %}<td class="num">{{ ev.rated_scored }}</td></tr>
   </tbody>
 </table>
-<p class="muted">Click a count to list its roles. Agreement is Good with Good, and Poor with Bad. Partial is in between.</p>
+<div id="cell-panels">
+{% for label, name in (('good', 'You: Good'), ('bad', 'You: Poor')) %}{% for band in ('good', 'partial', 'bad') %}{% set found = ev.pivot[(label, band)] %}{% if found %}
+<div class="cell-panel" id="cell-{{ label }}-{{ band }}"><button type="button" class="cell-close" aria-label="Close">&#10005; close</button>
+  <strong>{{ name }} &middot; AI: {{ band | capitalize }} ({{ found | length }} role{{ '' if found | length == 1 else 's' }})</strong>
+  <ul class="cell-list">{% for r in found %}<li><a href="{{ url_for('role_page', portal=r.portal, job_id=r.job_id) }}" target="_blank" rel="noopener">{{ r.title }}</a> <span class="muted">{{ r.company }}</span></li>{% endfor %}</ul>
+</div>
+{% endif %}{% endfor %}{% endfor %}
+</div>
+<script src="{{ url_for('static', filename='cellpanel.js') }}"></script>
+<p class="muted">Click a count to list its roles below the table. Agreement is Good with Good, and Poor with Bad. Partial is in between.</p>
 
 <div class="eval-grid">
   <div>

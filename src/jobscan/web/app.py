@@ -183,7 +183,8 @@ GROUP_INFO = {
         "An AI model reads your CV and each role and labels its must-haves, role type and "
         "domain. The band (Good, Partial, Bad) follows from the labels, so the must-haves "
         "setting applies at once. Role focus, extra rules, model, CV and description changes "
-        "mark scores out of date; they are redone at the next scan or jobscan score."
+        "mark scores out of date. The daily job and scans only score new roles; redo old ones "
+        "with jobscan score --stale or the Score button on a role."
     ),
     "Scoring": (
         "Scores are saved as raw keyword and meaning values. The weights, floors and bands here "

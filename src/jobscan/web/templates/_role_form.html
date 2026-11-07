@@ -27,7 +27,7 @@
     </div>
     {% if score and not ai_mode %}
     <small data-score-detail>Keywords {{ score.keyword }}, meaning {{ score.semantic }}, {{ score.chunks }} chunks, scored {{ score.scored_on | ist }}</small>
-    {% if score.stale %}<small class="stale-note">Out of date: made with an earlier CV or settings. Run jobscan score.</small>{% endif %}
+    {% if score.stale %}<small class="stale-note">Out of date: made with an earlier CV or settings. Run jobscan score --stale, or press Score.</small>{% endif %}
     {% endif %}
   </dd>
   <dt>Your rating</dt>

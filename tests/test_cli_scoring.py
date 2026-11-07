@@ -552,6 +552,27 @@ def test_score_uses_the_ai_by_default(ai_db: Path, monkeypatch: pytest.MonkeyPat
         store.close()
 
 
+def test_score_keeps_stale_roles_unless_stale_flag(
+    ai_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_long(ai_db)
+    client = _AiClient()
+    monkeypatch.setattr(cli, "AI_CLIENT_FACTORY", lambda _c: client)
+    run_cli(ai_db, "score")
+    store = cli.open_store(ai_db)
+    store.set_config_raw({"legacy_scoring": "0", "ai_role_focus": "Something new entirely"})
+    store.close()
+    code, text, _ = run_cli(ai_db, "score")
+    assert code == EXIT_OK
+    assert client.calls == 1
+    assert "left as they are" in text
+    assert "jobscan score --stale" in text
+    code, text, _ = run_cli(ai_db, "score", "--stale")
+    assert code == EXIT_OK
+    assert client.calls == 2
+    assert "AI scoring: 1 scored" in text
+
+
 def test_score_ai_service_trouble_is_partial_or_failed(
     ai_db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
