@@ -80,6 +80,30 @@ read -s MISTRAL_API_KEY && export MISTRAL_API_KEY   # paste the key, press Enter
 - **Email Sync:** it only reads mail; it never sends or deletes. Syncs run while `jobscan serve`
   is open, or on demand with the Sync button.
 
+## Challenges and how they were handled
+
+**Portals offer no job-search API**
+- No portal offers a usable job-search API for individuals, so roles are read from the public pages.
+- **LinkedIn:** guest search, with deliberately slow scans to avoid being blocked.
+- **Naukri:** its captcha blocks plain requests, so it is a manual, semi-automatic run in a visible browser. You may need to watch the window and solve a captcha.
+- **Hosting:** the tool stays local for now. Cloud hosting is postponed.
+
+**Fit scores were not trustworthy**
+- The old keyword-and-meaning score is replaced by an AI rating: Good, Partial or Bad.
+- The AI reads your CV, the role description and your Role focus text, and returns the rating with a reason.
+- The Eval tab compares the AI's rating with your own 👍 and 👎.
+- Tuning is ongoing. The Role focus text and Extra rules are adjusted from roles the AI got wrong.
+
+**Free-tier limits**
+- **Gemini:**
+  - The old scoring used Gemini embeddings: 100 requests and 30,000 tokens a minute, 1,000 requests a day.
+  - For AI scoring, the stronger Flash models allow about 20 requests a day, and Flash-Lite about 500.
+- **Mistral:**
+  - Switched to a Mistral model because of these limits.
+  - `ministral-14b` allows 40,000 tokens a minute and generous daily limits, and is now used for the AI role scoring.
+  - `mistral-large-4` is a reasoning model and failed with errors (HTTP 400), so use a non-reasoning model.
+- **Pacing:** the default is 4 AI calls a minute, one 60-second wait and retry after a rate-limit error, and a daily cap of 150 calls.
+
 ## Privacy
 
 - Your CV, roles and settings stay on your computer in `~/.jobscan/`.
