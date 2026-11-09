@@ -1109,3 +1109,4 @@ Two options, built in this order. Option 1 needs no outside service. Option 2 is
 ### Built details
 - It is an HTML details element in `_role_form.html` (no script). The open state and the label are computed on the server from the saved values and the form errors. Styles: `details.more-details` in `style.css`.
 - Tests in `tests/test_web_followup.py`: collapsed and "Add details" when empty; open and "Edit details" when data exists; open on a field error.
+- **Status change note:** after a status is changed on the Roles list, the row says only "Saved ✓". The extra text "(no longer matches this filter)" is removed. The row is still dimmed when its new status is outside the current status filter.

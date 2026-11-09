@@ -52,7 +52,7 @@
       }
       var outside = filterStatus.length > 0 && filterStatus.indexOf(select.value) < 0;
       row.classList.toggle('stale', !!outside);
-      note(row, outside ? 'Saved ✓ (no longer matches this filter)' : 'Saved ✓', false);
+      note(row, 'Saved ✓', false);
     }).catch(function () {
       select.disabled = false;
       select.value = previous;
