@@ -168,3 +168,37 @@ def test_multi_values_survive_paging_sorting_and_csv(
     assert "jobs/view/3" not in csv
     assert "jobs/view/1" in csv
     assert "jobs/view/2" in csv
+
+
+def details_tag(body: str) -> str:
+    start = body.index('<details class="more-details"')
+    return body[start : body.index(">", start) + 1]
+
+
+def test_details_collapsed_and_labelled_add_when_empty(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1")
+    body = text(client.get("/roles/LinkedIn/1", headers={"X-Panel": "1"}))
+    assert "Add details" in body
+    assert "Edit details" not in body
+    assert " open" not in details_tag(body)
+
+
+def test_details_open_and_labelled_edit_when_data_exists(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1")
+    save(client, "1", contact_person="Asha")
+    body = text(client.get("/roles/LinkedIn/1", headers={"X-Panel": "1"}))
+    assert "Edit details" in body
+    assert "Add details" not in body
+    assert " open" in details_tag(body)
+
+
+def test_details_open_when_a_detail_field_has_an_error(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1")
+    body = text(save(client, "1", follow_up_on="not a date"))
+    assert " open" in details_tag(body)

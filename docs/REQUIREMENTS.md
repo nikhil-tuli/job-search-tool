@@ -1092,3 +1092,20 @@ Two options, built in this order. Option 1 needs no outside service. Option 2 is
 
 ### Key questions discussed
 - **Does the AI's rating drop the wider skills list from "Bad"?** Skills you list as things you can do are meant as a floor (not Bad because of them), not a boost; the exclusions (sales, operations, hands-on engineering, HR or event roles, pure product) still win. This is a prompt instruction, so the model follows it most of the time, not always; check on the Eval page after re-scoring.
+
+## Round 18: Role panel, "Add details" link (built)
+
+### Why
+- The role panel was long. Follow-up, contact and comment fields pushed the Save button off screen and forced vertical scrolling.
+
+### Decisions
+- **Always visible:** Status, Applied On and the Save button.
+- **Collapsed under a link:** Follow-up (Needed and Next follow-up), Contact person, Email, Phone, LinkedIn profile and Comments. Comments is not kept outside the collapse.
+- **Link label:** "Add details" when all of those fields are empty; "Edit details" when any of them has a value.
+- **Default state:** collapsed when empty. The section opens by itself when any of those fields has a value, and when Save fails with an error in one of them, so the message is seen.
+- **Behaviour:** clicking the link opens and closes the section. Save still saves every field, collapsed or not. The mail and LinkedIn icons sit next to their fields and show once the section is open.
+- **Not changed:** the Follow-up filters on the Roles tab, and the layout of the fields once open.
+
+### Built details
+- It is an HTML details element in `_role_form.html` (no script). The open state and the label are computed on the server from the saved values and the form errors. Styles: `details.more-details` in `style.css`.
+- Tests in `tests/test_web_followup.py`: collapsed and "Add details" when empty; open and "Edit details" when data exists; open on a field error.

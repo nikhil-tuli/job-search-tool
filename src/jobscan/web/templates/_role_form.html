@@ -80,6 +80,11 @@
   {% if errors.get('status') %}<p class="error">{{ errors['status'] }}</p>{% endif %}
   {% if errors.get('applied_on') %}<p class="error">{{ errors['applied_on'] }}</p>{% endif %}
 
+  {% set detail_keys = ['follow_up_needed', 'follow_up_on', 'contact_person', 'contact_email', 'contact_phone', 'contact_linkedin', 'comments'] %}
+  {% set d = namespace(filled=false) %}
+  {% for k in detail_keys %}{% if form.get(k) or errors.get(k) %}{% set d.filled = true %}{% endif %}{% endfor %}
+  <details class="more-details" {% if d.filled %}open{% endif %}>
+  <summary>{{ 'Edit details' if d.filled else 'Add details' }}</summary>
   <div class="pair">
   <label class="follow-check"><span>Follow-up</span>
     <span class="inline"><input type="checkbox" name="follow_up_needed" value="1" {% if form.get('follow_up_needed') %}checked{% endif %}> Needed</span>
@@ -113,6 +118,8 @@
     <textarea name="comments" rows="2">{{ form.get('comments', '') }}</textarea>
   </label>
   {% if errors.get('comments') %}<p class="error">{{ errors['comments'] }}</p>{% endif %}
+
+  </details>
 
   <button type="submit">Save</button>
 </form>
