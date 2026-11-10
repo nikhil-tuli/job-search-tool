@@ -1157,3 +1157,36 @@ Two options, built in this order. Option 1 needs no outside service. Option 2 is
 ### Known limit (not yet handled)
 - Groq's free plan shows 30 requests a minute, 1,000 a day, **8,000 tokens a minute** and 200,000 a day for this model (a third-party page that read Groq's table on 6 Nov 2026; check Config limits in the Groq console).
 - A modification request sends the CV and role text (about 3,000 tokens, an estimate) and asks for up to 8,000 tokens in reply, so one request may be refused for size. If so, the reply size for modification requests would need to be capped lower. Not changed yet; to be decided after a first real run.
+
+## Round 21: Read-only role panel on Modification History (requirements agreed, not built)
+
+### Decisions
+- **Where:** Modify CV & Cover Letter, Modification History tab only. No other tab changes.
+- **Trigger:** "open role" in the Role column opens a side panel on the same page. It no longer goes to the role page. The Modification History page stays in place behind the panel.
+- **Panel:** the same side panel as the Roles tab, showing the same role details, but read-only.
+- **Behavior kept from the Roles tab:** row highlight while open; close with ×, Esc or a click outside; Up and Down arrows move to the previous or next row of the history list; the panel scrolls on its own.
+- **A role with several requests:** each row opens the same role. Arrow keys move by row.
+
+### What the panel shows (all as plain text)
+- Title; company, location, portal and job id.
+- Posted (IST), Fetched (IST), Matched phrase, Fit filter, Fit score and verdict (with reason), Your rating (shown as "Good", "Poor" or "Not rated").
+- Seniority, employment type, job function and industries when present.
+- Job description (scrollable).
+- Status, Applied On, Follow-up (Needed or not), Next follow-up, Contact person, Email, Phone, LinkedIn profile, Comments, as text. Empty ones are left out. No "Add details" fold.
+
+### What the panel does not have
+- No inputs, no Save, no "Saved ✓" note, no "unsaved changes" prompt.
+- No Score or Re-score button; no Good, Poor or Clear buttons.
+- No Modify CV or Modify cover letter buttons.
+- No "Open on <portal>" link and no mail or LinkedIn links. Nothing in the panel takes the user to another page.
+
+### Rules
+- Read-only is enforced on the server too: the panel request for this view returns a page without forms, so nothing can be saved from it.
+- The Roles tab panel is unchanged.
+- The role page itself (/role/...) is unchanged; only the link on Modification History stops using it.
+- Without JavaScript the link still opens the role page, as today.
+
+### Tests planned
+- The read-only panel has no form, input, button or external link.
+- The Roles panel still has its forms.
+- "open role" on history carries the panel address and the read-only flag.
