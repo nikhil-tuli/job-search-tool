@@ -955,18 +955,8 @@ M = Must-haves allowed missing (Config, default 2).
 ### Privacy
 - The CV (without name, phone, email and links) and the description go to Mistral. The free Experiment plan requires opting in to data training; you accepted this. Cost: zero.
 
-### Providers checked (public pages, not confirmed in your account)
-Need: about 100 roles a day, about 3,500 tokens a role (estimate), so about 350K tokens a day.
-
-| Option | Free limit seen | Roles a day it allows | Catch | Verdict |
-|---|---|---|---|---|
-| Mistral Small (Experiment plan) | Your console shows 20,000 tokens a minute and 1 request a second for `mistral-small-2603`; no daily limit shown | About 100 a day if paced at 4 calls a minute (about 25 minutes) | Phone verification; data-training opt-in (accepted). The tokens-a-minute limit is the tight one | **Chosen** |
-| Gemini Flash-Lite (3.5 / 3.1) | 500 requests a day | About 500 | Only the Flash-Lite models; 3.8 Flash and 3.6 Flash allow just 20 a day | Workable, not chosen |
-| Cerebras gpt-oss-120b | 1M tokens a day, 5 requests a minute | About 280 by tokens | May be trial credits that expire; also used for Tailoring | Workable, not chosen |
-| Groq gpt-oss-120b | About 200K tokens a day | About 55 | Too small for 100 roles | Rejected |
-
-- Source: the other rows are public pages, not confirmed in your account. The Mistral row is from your console. An earlier note said 500K tokens a minute and 1B a month; that was from a public page and is wrong for your account.
-- Model in use: `mistral-small-2603` (Mistral Small 4, 262K context). `mistral-small-latest` is an alias of it; pinning the dated name stops a silent change. Medium (`mistral-medium-2604`) is the step up if Small scores badly in the Trial.
+### Providers and limits
+- Provider and model limits are kept in `docs/HIGH_LEVEL_DESIGN.html` (section "Model providers and limits").
 
 ### Key questions discussed
 - **Why AI only, not on top of keyword and meaning?** With the AI reading the CV and the posting, the embedding steps were redundant. The old logic scored irrelevant roles high when the must-haves sat only in the description.
