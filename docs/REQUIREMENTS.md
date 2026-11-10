@@ -561,8 +561,8 @@ For a chosen role, propose edits to your Word CV that match the role's descripti
 - **Tested** on your real Word CV: bullet rewording, summary rewording, bullet reordering and competency reordering all kept the layout identical.
 
 ### AI service and privacy
-- Any OpenAI-compatible service. First choice: Cerebras, model gpt-oss-120b. Free limits seen: 5 requests a minute and 1M tokens a day. These may be trial credits that expire, so the address and model are settings.
-- The key is read from a shell variable (default name CEREBRAS_API_KEY). It is never stored by the app.
+- Any OpenAI-compatible service. Default: Groq, model openai/gpt-oss-120b (see Round 20). The address and model are settings.
+- The key is read from a shell variable (default name GROQ_API_KEY). It is never stored by the app.
 - Sent: the role's title, company and description, and your experience text. Not sent: name, phone, email, links.
 - One AI call per request. Reviewing, ticking and generating cost nothing more. Discarding costs nothing more.
 - Runs in the background, so the web app stays usable while it works.
@@ -581,7 +581,7 @@ For a chosen role, propose edits to your Word CV that match the role's descripti
 - Cover letter (template to come), chat modifications, PDF output (only the Word file is kept), tone options.
 
 ### Open points
-- Whether Cerebras's free tier stays free. Switching provider is a setting change.
+- Whether Groq's free tier limits stay as they are. Switching provider is a setting change.
 - Page-length check needs LibreOffice. Without it only the character rule applies.
 
 ## Round 10: Fit is saved when a role is scored (built)
@@ -637,7 +637,7 @@ Read your Gmail and meeting invites, and update the status of roles you applied 
   - Sends only the sender, subject and the first few hundred characters of the body. Never the whole mailbox, and it is not saved.
   - With the switch off, unclear emails go straight to Review needed.
   - The AI only returns the stage it thinks the email shows and how sure it is. That appears as the row's Updated status (proposed) and Confidence. Current status stays "Review needed" until you act.
-  - Model: the same service as resume tailoring (Cerebras, gpt-oss-120b, same key and Config values). No extra key.
+  - Model: the same service as resume tailoring (Groq, openai/gpt-oss-120b, same key and Config values). No extra key.
 - **Confidence values: High, Medium, Low.**
   - **High:** the sender domain or the company name in the email matches exactly one open role, and the email wording is clear (for example an invite, or "we will not be moving forward").
   - **Medium:** the company matches but the role title is not confirmed, or the stage was decided by the AI.

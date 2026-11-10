@@ -63,7 +63,7 @@ Never paste keys into chats or files.
 | Feature | What you need | Variable |
 |---|---|---|
 | Fit scores (AI) | Mistral key (free plan) | `MISTRAL_API_KEY` |
-| Resume and cover letter tailoring | Cerebras key | `CEREBRAS_API_KEY` |
+| Resume and cover letter tailoring | Groq key | `GROQ_API_KEY` |
 | Email Sync | Gmail address (set in Config) and a Gmail app password | `JOBSYNC_APP_PASSWORD` |
 
 ```sh
@@ -109,7 +109,7 @@ read -s MISTRAL_API_KEY && export MISTRAL_API_KEY   # paste the key, press Enter
 - Your CV, roles and settings stay on your computer in `~/.jobscan/`.
 - Name, phone, email and links are never sent to any AI service.
 - Scoring sends CV and role text to Mistral (the free plan allows Mistral to train on it);
-  tailoring sends role and CV experience text to Cerebras.
+  tailoring sends role and CV experience text to Groq.
 
 ## Good to know
 
