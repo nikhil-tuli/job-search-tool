@@ -321,7 +321,7 @@ def test_missing_template_sends_you_to_upload(client: FlaskClient) -> None:
     )
     assert response.headers["Location"].endswith("/cv/cover-letter")
     page = client.get("/cv/cover-letter").get_data(as_text=True)
-    assert "Upload your cover letter template (Word) to tailor a cover letter." in page
+    assert "Upload your cover letter (Word) to modify a cover letter." in page
 
 
 def test_template_upload_checks_the_file(client: FlaskClient) -> None:
@@ -331,14 +331,14 @@ def test_template_upload_checks_the_file(client: FlaskClient) -> None:
     doc.add_paragraph("No greeting here")
     buf = io.BytesIO()
     doc.save(buf)
-    assert "cannot be used as a template" in post_file(
+    assert "cannot be used" in post_file(
         client, "/cv/template", "template", "t.docx", buf.getvalue()
     )
 
 
 def test_whole_flow_through_the_web(client: FlaskClient) -> None:
     post_file(client, "/cv", "cv", "cv.docx", make_cv())
-    assert "Cover letter template saved" in post_file(
+    assert "Cover letter saved" in post_file(
         client, "/cv/template", "template", "Letter.docx", make_letter()
     )
     response = client.post(
@@ -372,5 +372,5 @@ def test_whole_flow_through_the_web(client: FlaskClient) -> None:
 
 def test_panel_has_both_buttons(client: FlaskClient) -> None:
     page = client.get("/roles/LinkedIn/1").get_data(as_text=True)
-    assert "Tailor resume" in page
-    assert "Tailor cover letter" in page
+    assert "Modify CV" in page
+    assert "Modify cover letter" in page

@@ -64,6 +64,16 @@ def post_cv(client: FlaskClient, name: str, data: bytes):  # type: ignore[no-unt
     )
 
 
+CV_PARAGRAPHS = [
+    ("Acme, Pune", False),
+    ("Technical Program Manager", False),
+    ("Led payment gateway migration across engineering teams and vendors", True),
+    ("Drove cloud cost optimization program with platform engineering", True),
+    ("Managed agile delivery with scrum teams and release planning", True),
+]
+CV_DOCX = docx_bytes(CV_PARAGRAPHS)
+
+
 # ---- CV page -------------------------------------------------------------------------------
 
 
@@ -73,26 +83,22 @@ def test_cv_page_before_upload(client: FlaskClient, monkeypatch: pytest.MonkeyPa
     assert "No CV yet" in page
 
 
-def test_cv_page_key_status(
-    client: FlaskClient, store: Store, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cv_page_drops_the_old_rows(client: FlaskClient, store: Store) -> None:
     upload_cv(store)
-    monkeypatch.delenv(API_KEY_ENV, raising=False)
-    missing = body(client.get("/cv"))
-    monkeypatch.setenv(API_KEY_ENV, "not-a-real-key-value")
-    present = body(client.get("/cv"))
-    assert "not set" in missing
-    assert API_KEY_ENV in missing
-    assert "found in this app" in present
-    assert "not-a-real-key-value" not in present
+    page = body(client.get("/cv"))
+    assert "Roles waiting" not in page
+    assert "Gemini key" not in page
+    assert "Gemini embedding service" not in page
 
 
 @pytest.mark.parametrize(
     ("name", "data"),
     [
-        ("cv.txt", CV_TEXT.encode()),
-        ("cv.docx", docx_bytes([("Technical Program Manager", False), ("Led migrations", True)])),
-        ("cv.pdf", pdf_bytes(["Technical Program Manager", "Led payment gateway migration"])),
+        ("cv.docx", CV_DOCX),
+        (
+            "my cv.docx",
+            docx_bytes([("Technical Program Manager", False), ("Led migrations", True)]),
+        ),
     ],
 )
 def test_upload_stores_cv_and_chunks(web: Harness, name: str, data: bytes) -> None:
@@ -105,31 +111,34 @@ def test_upload_stores_cv_and_chunks(web: Harness, name: str, data: bytes) -> No
     page = body(web.client.get("/cv"))
     assert name in page
     assert "CV saved as" in page
+    assert "Download" in page  # the original Word file is kept and can be downloaded
 
 
 def test_same_cv_again_changes_nothing(web: Harness) -> None:
-    post_cv(web.client, "cv.txt", CV_TEXT.encode())
+    post_cv(web.client, "cv.docx", CV_DOCX)
     first = web.store.get_cv()
-    response = post_cv(web.client, "other.txt", CV_TEXT.encode())
+    response = post_cv(web.client, "other.docx", CV_DOCX)
     assert response.status_code == 302
     assert web.store.get_cv() == first
     assert "same CV" in body(web.client.get("/cv"))
 
 
 def test_new_cv_replaces_old(web: Harness) -> None:
-    post_cv(web.client, "a.txt", CV_TEXT.encode())
-    post_cv(web.client, "b.txt", (CV_TEXT + "- Ran vendor negotiations for hosting\n").encode())
+    post_cv(web.client, "a.docx", CV_DOCX)
+    newer = docx_bytes([*CV_PARAGRAPHS, ("Ran vendor negotiations for hosting", True)])
+    post_cv(web.client, "b.docx", newer)
     cv = web.store.get_cv()
     assert cv is not None
-    assert cv.filename == "b.txt"
+    assert cv.filename == "b.docx"
 
 
 @pytest.mark.parametrize(
     ("name", "data", "message"),
     [
-        ("cv.exe", b"MZ", "Upload a"),
-        ("cv.txt", b"   \n  ", ""),
-        ("cv.pdf", b"not a pdf", ""),
+        ("cv.exe", b"MZ", "Upload a Word"),
+        ("cv.txt", CV_TEXT.encode(), "Upload a Word"),
+        ("cv.pdf", pdf_bytes(["Technical Program Manager"]), "Upload a Word"),
+        ("cv.docx", b"not a word file", ""),
     ],
 )
 def test_bad_uploads_explain_and_store_nothing(
@@ -157,8 +166,26 @@ def test_oversized_upload_is_413(client: FlaskClient) -> None:
 
 def test_upload_counts_waiting_roles(web: Harness) -> None:
     add_role(web.store, "1")
-    post_cv(web.client, "cv.txt", CV_TEXT.encode())
+    post_cv(web.client, "cv.docx", CV_DOCX)
     assert "1 roles will be scored" in body(web.client.get("/cv"))
+
+
+def test_ai_mode_upload_points_to_the_stale_command(web: Harness) -> None:
+    web.store.set_config_raw({"legacy_scoring": "0"})
+    post_cv(web.client, "cv.docx", CV_DOCX)
+    page = body(web.client.get("/cv"))
+    assert "jobscan score --stale" in page
+    assert "chunks" not in page  # chunk details belong to the old scoring
+
+
+def test_cv_and_cover_downloads_return_the_original_file(web: Harness) -> None:
+    assert web.client.get("/cv/file").status_code == 404
+    post_cv(web.client, "cv.docx", CV_DOCX)
+    response = web.client.get("/cv/file")
+    assert response.status_code == 200
+    assert response.data == CV_DOCX
+    assert 'filename="cv.docx"' in response.headers["Content-Disposition"]
+    assert web.client.get("/cv/template/file").status_code == 404
 
 
 # ---- scoring a role ------------------------------------------------------------------------

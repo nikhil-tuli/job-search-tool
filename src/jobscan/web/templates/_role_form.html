@@ -60,8 +60,8 @@
   <input type="hidden" name="portal" value="{{ role.portal }}">
   <input type="hidden" name="job_id" value="{{ role.job_id }}">
   <input type="hidden" name="next" value="{{ next }}">
-  <button type="submit" {% if not can_tailor %}disabled{% endif %}>Tailor resume &rarr;</button>
-  <button type="submit" name="kind" value="cover" {% if not can_tailor %}disabled{% endif %}>Tailor cover letter &rarr;</button>
+  <button type="submit" {% if not can_tailor %}disabled{% endif %}>Modify CV &rarr;</button>
+  <button type="submit" name="kind" value="cover" {% if not can_tailor %}disabled{% endif %}>Modify cover letter &rarr;</button>
   {% if not can_tailor %}<span class="muted">Needs a job description first.</span>{% endif %}
 </form>
 

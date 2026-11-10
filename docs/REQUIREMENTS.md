@@ -1110,3 +1110,39 @@ Two options, built in this order. Option 1 needs no outside service. Option 2 is
 - It is an HTML details element in `_role_form.html` (no script). The open state and the label are computed on the server from the saved values and the form errors. Styles: `details.more-details` in `style.css`.
 - Tests in `tests/test_web_followup.py`: collapsed and "Add details" when empty; open and "Edit details" when data exists; open on a field error.
 - **Status change note:** after a status is changed on the Roles list, the row says only "Saved ✓". The extra text "(no longer matches this filter)" is removed. The row is still dimmed when its new status is outside the current status filter.
+
+## Round 19: Modify CV & Cover Letter tidy-up (built)
+
+### Why
+- The Upload CV and Cover letter tabs show text and rows that no longer apply (Gemini, old chunking, roles waiting), need two clicks to upload, and give no way to see or download what was uploaded.
+
+### Decisions
+- **Word files only** for both the CV and the cover letter. PDF, text and Markdown uploads are no longer accepted. Reason: tailoring copies the Word layout, so only Word works for both.
+- **One click to upload:** choosing a file uploads it at once. The separate upload button is removed. A wrong file is fixed by choosing another one.
+- **No hint line:** nothing is shown under the file chooser (no "Uploads as soon as you pick the file" text).
+- **Rename:** the menu item and the page heading change from "Manage CV" to "Modify CV & Cover Letter" on all four pages (Upload CV, Cover letter, Modification History and the review page). Window titles follow, for example "Modify CV & Cover Letter: Modification History". The red review count stays on the menu item.
+- **Tabs:** the History tab is renamed "Modification History" and moves to the first position, so the order is Modification History, Upload CV, Cover letter. The red review count stays on it.
+- **Menu landing:** the "Modify CV & Cover Letter" menu item opens the first tab, Modification History.
+- **Other wording:** visible "Tailor" wording follows the new names: review page titles ("Modify CV", "Modify cover letter"), the "Resume tailoring" row (now "CV modification"), the empty-history text, the back link ("Back to Modification History") and the messages shown when a request cannot start.
+- **Role panel buttons (Roles tab):** "Tailor resume" becomes "Modify CV" and "Tailor cover letter" becomes "Modify cover letter". The arrows and the disabled rule stay as they are.
+- **Upload CV tab, kept:** File (name and Download), Uploaded (IST), Length (word count only), Resume tailoring.
+- **Upload CV tab, removed:**
+  - the sentence "Used to rank roles by fit... Gemini embedding service" (the README's Privacy section covers this);
+  - the Roles waiting row;
+  - the Gemini key row;
+  - "split into N chunks", "How the CV was split" and "Show the N chunks". These belong to the old scoring and appear only when Legacy scoring is on.
+- **Cover letter tab, removed:** the line "Your finished letter as a Word file. Cover letters keep its layout...".
+- **Cover letter tab, kept:** File (name and Download), Uploaded (IST), Cover letters (Available or the reason it cannot be used).
+- **Existing CV:** a CV already uploaded keeps working. If its original Word file was never kept (an older PDF or text upload), the File line shows the name without a Download link until a Word file is uploaded.
+- **Unchanged:** replacing the CV or cover letter still marks existing AI verdicts out of date (they are re-scored only on purpose, as in Round 17).
+
+### Key questions discussed
+- **Why no PDF for the cover letter?** Cover-letter tailoring copies the Word letter's layout, name, greeting and sign-off, which a PDF cannot provide.
+- **Why not keep PDF and text CVs?** Only a Word file serves both scoring and resume tailoring, so one format keeps the page simple.
+
+### Built details, Round 19
+- **Routes:** `GET /cv/file` and `GET /cv/template/file` send the stored original Word file as a download (404 if none). `POST /cv` and `POST /cv/template` accept only `.docx`; other types are refused with "Upload a Word (.docx) file."
+- **One click:** `static/autoupload.js` submits the form when a file is chosen. Without JavaScript the chooser alone would not upload.
+- **CV saved message:** with Legacy scoring off: "CV saved. Roles scored earlier are now out of date. Run jobscan score --stale to score them again." With Legacy scoring on, the old chunk and waiting-role message stays.
+- **CV with no stored original** (older PDF or text upload): the File row shows the name and a note, with no Download link.
+- **README** still says "Manage CV" in two places; it is changed only when you ask.

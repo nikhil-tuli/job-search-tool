@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Tailor resume{% endblock %}
+{% block title %}Modify CV{% endblock %}
 {% block content %}
-<h1>Manage CV</h1>
+<h1>Modify CV &amp; Cover Letter</h1>
 {% set tab = "history" %}{% include "_cvtabs.html" %}
-<p><a href="{{ url_for('cv_history') }}">&larr; Back to History</a></p>
+<p><a href="{{ url_for('cv_history') }}">&larr; Back to Modification History</a></p>
 <h2>{{ row.title }} <span class="muted">at {{ row.company }}</span></h2>
 <p class="muted">Based on {{ row.cv_filename }}.
 {% if ready %}These are the changes that were applied.{% else %}Tick the changes you want. Nothing is added that is not already in your CV.{% endif %}

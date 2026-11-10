@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Manage CV: History{% endblock %}
+{% block title %}Modify CV &amp; Cover Letter: Modification History{% endblock %}
 {% block head %}{% if preparing %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
 {% block content %}
-<h1>Manage CV</h1>
+<h1>Modify CV &amp; Cover Letter</h1>
 {% set tab = "history" %}{% include "_cvtabs.html" %}
-<p class="muted">One row per tailoring request. Times are IST. Nothing changes in your CV file; each request makes a separate Word file.</p>
+<p class="muted">One row per modification request. Times are IST. Nothing changes in your CV file; each request makes a separate Word file.</p>
 {% if rows %}
 <table class="roles history">
   <thead><tr><th>Requested</th><th>Type</th><th>Company</th><th>Role</th><th>Status</th><th>Action</th></tr></thead>
@@ -37,6 +37,6 @@
   </tbody>
 </table>
 {% else %}
-<p class="empty">Nothing tailored yet. Open a role and choose <strong>Tailor resume</strong> or <strong>Tailor cover letter</strong>.</p>
+<p class="empty">Nothing modified yet. Open a role and choose <strong>Modify CV</strong> or <strong>Modify cover letter</strong>.</p>
 {% endif %}
 {% endblock %}

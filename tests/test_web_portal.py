@@ -245,7 +245,7 @@ def test_cover_letter_template_has_its_own_tab(client: FlaskClient) -> None:
     assert "Cover letter template" not in cv
     assert 'href="/cv/cover-letter"' in cv
     cover = client.get("/cv/cover-letter").get_data(as_text=True)
-    assert "No template yet" in cover
+    assert "No cover letter yet" in cover
     assert 'name="template"' in cover
     bad = client.post("/cv/template", data={}, follow_redirects=True)
     assert bad.status_code == 400

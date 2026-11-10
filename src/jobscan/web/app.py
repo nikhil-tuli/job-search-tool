@@ -40,7 +40,7 @@ from ..ai_fit import (
 from ..config import LIST_SETTINGS, Config, ConfigError, split_list
 from ..cover_docx import LIMITS, MAX_BULLETS, analyse_letter
 from ..cv import MAX_UPLOAD_BYTES, CvError, extract_text, sha_of
-from ..embeddings import API_KEY_ENV, Embedder
+from ..embeddings import Embedder
 from ..evaluation import build_report, load_labelled, score_bands
 from ..fit_book import FitBook
 from ..fit_filters import FitResult, FitRules
@@ -1456,23 +1456,39 @@ def create_app(
 
     def render_cv(error: str = "", status: int = 200) -> tuple[str, int]:
         config, cv = current_config(), store.get_cv()
-        pending = plan_scoring(store, config, cv, now_ist()) if cv else None
         return (
             render_template(
                 "cv.html",
                 cv=cv,
+                cv_file=store.get_cv_file(),
                 words=len(cv.text.split()) if cv else 0,
-                chunks=[text for text, _ in store.get_cv_chunks()],
+                legacy_on=bool(config.legacy_scoring),
+                chunks=[text for text, _ in store.get_cv_chunks()] if config.legacy_scoring else [],
                 word_ok=store.get_cv_file() is not None and not word_problem(),
                 word_problem=word_problem(),
-                pending=len(pending.selected) if pending else 0,
-                key_set=bool(os.environ.get(API_KEY_ENV)),
-                key_name=API_KEY_ENV,
                 max_mb=MAX_UPLOAD_BYTES // (1024 * 1024),
                 error=error,
             ),
             status,
         )
+
+    def word_download(saved: CvFile | None) -> Response:
+        if saved is None:
+            abort(404, "No file has been uploaded")
+        safe = saved.filename.replace('"', "").replace("\\", "")
+        return Response(
+            saved.data,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{safe}"'},
+        )
+
+    @app.get("/cv/file")
+    def cv_download() -> Response:
+        return word_download(store.get_cv_file())
+
+    @app.get("/cv/template/file")
+    def cv_template_download() -> Response:
+        return word_download(store.get_cover_template())
 
     def render_cover_template(error: str = "", status: int = 200) -> tuple[str, int]:
         return (
@@ -1500,6 +1516,8 @@ def create_app(
         if upload is None or not upload.filename:
             return render_cv("Choose a file to upload.", 400)
         name = os.path.basename(upload.filename.replace("\\", "/"))[:200]
+        if not name.lower().endswith(".docx"):
+            return render_cv("Upload a Word (.docx) file.", 400)
         data = upload.read(MAX_UPLOAD_BYTES + 1)
         try:
             text = extract_text(name, data)
@@ -1510,54 +1528,53 @@ def create_app(
             return render_cv("No usable text was found in this file.", 400)
         when = to_iso(now_ist())
         word_note = ""
-        word_file: CvFile | None = None
-        if name.lower().endswith(".docx"):
-            word_file = CvFile(name, data, hashlib.sha256(data).hexdigest(), when)
-            try:
-                analyse(data)
-            except DocxError as exc:
-                word_note = f" It cannot be used for tailoring: {exc}"
+        word_file = CvFile(name, data, hashlib.sha256(data).hexdigest(), when)
+        try:
+            analyse(data)
+        except DocxError as exc:
+            word_note = f" It cannot be used for modifying the CV: {exc}"
+        config = current_config()
         existing = store.get_cv()
         if existing is not None and existing.sha == sha_of(text):
-            if word_file is not None:
-                saved = store.get_cv_file()
-                if saved is None or saved.sha != word_file.sha:
-                    store.save_cv_file(word_file)
-                    store.mark_tailor_stale()
-                flash("Word file saved. Resume tailoring is now available.", "ok")
+            saved = store.get_cv_file()
+            if saved is None or saved.sha != word_file.sha:
+                store.save_cv_file(word_file)
+                store.mark_tailor_stale()
+                flash("Word file saved." + word_note, "ok")
             else:
                 flash("This is the same CV as before, so nothing changed." + word_note, "ok")
             return redirect(url_for("cv_page"))
         cv = Cv(filename=name, text=text, sha=sha_of(text), uploaded_on=when)
         store.save_cv(cv, chunks)
         store.mark_tailor_stale()
-        if word_file is not None:
-            store.save_cv_file(word_file)
+        store.save_cv_file(word_file)
+        if config.legacy_scoring:
+            waiting = len(plan_scoring(store, config, cv, now_ist()).selected)
+            message = (
+                f"CV saved as {len(chunks)} chunks. {waiting} roles will be scored at the next "
+                "scan, or run jobscan score in a terminal to do it now."
+            )
         else:
-            store.clear_cv_file()
-        waiting = len(plan_scoring(store, current_config(), cv, now_ist()).selected)
-        flash(
-            f"CV saved as {len(chunks)} chunks. {waiting} roles will be scored at the next scan, "
-            "or run jobscan score in a terminal to do it now." + word_note,
-            "ok",
-        )
+            message = (
+                "CV saved. Roles scored earlier are now out of date. Run jobscan score --stale "
+                "to score them again."
+            )
+        flash(message + word_note, "ok")
         return redirect(url_for("cv_page"))
 
     @app.post("/cv/template")
     def cv_template_upload() -> tuple[str, int] | WerkzeugResponse:
         upload = request.files.get("template")
         if upload is None or not upload.filename:
-            return render_cover_template("Choose a Word file for the cover letter template.", 400)
+            return render_cover_template("Choose a Word file for the cover letter.", 400)
         name = os.path.basename(upload.filename.replace("\\", "/"))[:200]
         if not name.lower().endswith(".docx"):
-            return render_cover_template(
-                "The cover letter template must be a Word (.docx) file.", 400
-            )
+            return render_cover_template("The cover letter must be a Word (.docx) file.", 400)
         data = upload.read(MAX_UPLOAD_BYTES + 1)
         try:
             analyse_letter(data)
         except DocxError as exc:
-            return render_cover_template(f"This letter cannot be used as a template: {exc}", 400)
+            return render_cover_template(f"This cover letter cannot be used: {exc}", 400)
         when = to_iso(now_ist())
         saved = store.get_cover_template()
         sha = hashlib.sha256(data).hexdigest()
@@ -1566,7 +1583,7 @@ def create_app(
             store.mark_tailor_stale(
                 TAILOR_COVER, "Your cover letter template was replaced. Start again."
             )
-        flash("Cover letter template saved. Cover letter tailoring is now available.", "ok")
+        flash("Cover letter saved. You can now modify cover letters.", "ok")
         return redirect(url_for("cv_cover"))
 
     # ---- summary --------------------------------------------------------------------------
@@ -2015,17 +2032,19 @@ def create_app(
         noun = "cover letter" if kind == TAILOR_COVER else "resume"
         problem = word_problem()
         if problem:
-            flash(f"Your Word CV cannot be tailored: {problem}", "error")
+            flash(f"Your Word CV cannot be modified: {problem}", "error")
             return redirect(url_for("cv_page"))
         result = start_request(store, portal, job_id, kind)
         if result.kind == START_NO_CV:
-            flash(f"Upload your CV as a Word (.docx) file to tailor a {noun}.", "error")
+            flash(f"Upload your CV as a Word (.docx) file to modify a {noun}.", "error")
             return redirect(url_for("cv_page"))
         if result.kind == START_NO_TEMPLATE:
-            flash("Upload your cover letter template (Word) to tailor a cover letter.", "error")
+            flash("Upload your cover letter (Word) to modify a cover letter.", "error")
             return redirect(url_for("cv_cover"))
         if result.kind == START_NO_DESCRIPTION:
-            flash("This role has no description yet, so there is nothing to tailor to.", "error")
+            flash(
+                "This role has no description yet, so there is nothing to modify against.", "error"
+            )
             return redirect(back)
         if result.request_id is None:
             abort(404, "Role not found")

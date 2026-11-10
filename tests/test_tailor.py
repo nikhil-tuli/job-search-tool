@@ -35,6 +35,7 @@ from jobscan.tailor_docx import (
 from jobscan.web import create_app
 from jobscan.web.diffs import moved_items, word_diff
 from tests.tailor_fixtures import BULLETS, COMPETENCIES, SUMMARY, make_cv
+from tests.test_cv import docx_bytes
 from tests.test_web import add_role
 
 WHEN = "2026-10-16T09:00:00+05:30"
@@ -376,11 +377,11 @@ def post_cv(client: FlaskClient, name: str, data: bytes) -> str:
     return response.get_data(as_text=True)
 
 
-def test_pdf_or_text_cv_cannot_be_tailored(client: FlaskClient) -> None:
+def test_non_word_cv_is_refused_and_cannot_be_modified(client: FlaskClient) -> None:
     page = post_cv(
         client, "cv.txt", b"Worked at Acme\nLed a launch of a product across teams.\n" * 3
     )
-    assert "Not available" in page
+    assert "Upload a Word" in page
     response = client.post("/tailor/start", data={"portal": "LinkedIn", "job_id": "1"})
     assert response.headers["Location"].endswith("/cv")
 
@@ -425,16 +426,20 @@ def test_discard_then_start_again_makes_a_new_row(client: FlaskClient) -> None:
     assert response.headers["Location"].endswith("#r2")
 
 
+def different_cv() -> bytes:
+    return docx_bytes([("Different CV text with lots of words about delivery work", True)] * 4)
+
+
 def test_new_cv_makes_the_review_stale(client: FlaskClient) -> None:
     post_cv(client, "cv.docx", make_cv())
     client.post("/tailor/start", data={"portal": "LinkedIn", "job_id": "1"})
-    post_cv(client, "cv.txt", b"Different CV text with lots of words about delivery work.\n" * 4)
+    post_cv(client, "other.docx", different_cv())
     assert "CV changed, start again" in client.get("/cv/history").get_data(as_text=True)
 
 
 def test_panel_button_and_missing_description(client: FlaskClient) -> None:
     with_text = client.get("/roles/LinkedIn/1").get_data(as_text=True)
-    assert "Tailor resume" in with_text
+    assert "Modify CV" in with_text
     assert "Needs a job description" not in with_text
     without = client.get("/roles/LinkedIn/2").get_data(as_text=True)
     assert "Needs a job description first" in without
@@ -462,4 +467,4 @@ def test_unreadable_word_file_shows_its_reason(
     start = client.post(
         "/tailor/start", data={"portal": "LinkedIn", "job_id": "1"}, follow_redirects=True
     )
-    assert "cannot be tailored" in start.get_data(as_text=True)
+    assert "cannot be modified" in start.get_data(as_text=True)
