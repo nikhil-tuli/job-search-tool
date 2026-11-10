@@ -47,19 +47,27 @@ def test_roles_list_shows_band_and_reason_in_an_info_icon(seeded: Store) -> None
         [
             GOOD_REPLY,
             reply([("SAP", "Missing", ""), ("Kafka", "Missing", ""), ("Go", "Missing", "")]),
-            reply([("x", "Met", "line")], ok=False),
+            reply([("a", "Missing", ""), ("b", "Missing", ""), ("c", "Missing", "")]),
         ]
     )
     score_all(seeded, fake)
     page = body(make_client(seeded, fake).get("/roles"))
     assert '<span class="band good">Good</span>' in page
     assert '<span class="band bad">Bad</span>' in page
-    assert "Missing: SAP, Kafka, Go." in page  # the reason sits in the info icon
+    assert "Role focus matched" in page  # the reason sits in the info icon
+    assert "Domain: " in page  # the domain tag sits beside the fit score
+    assert "Missing: SAP" not in page
     assert "Strong" not in page
 
 
 def test_score_filter_and_sort_use_ai_bands(seeded: Store) -> None:
-    fake = FakeClient([GOOD_REPLY, reply([("SAP", "Missing", "")]), reply([], ok=False)])
+    fake = FakeClient(
+        [
+            GOOD_REPLY,
+            reply([("SAP", "Missing", "")]),
+            reply([("a", "Missing", ""), ("b", "Missing", ""), ("c", "Missing", "")]),
+        ]
+    )
     score_all(seeded, fake)
     client = make_client(seeded, fake)
     for band, count in (("good", 1), ("partial", 1), ("bad", 1)):
@@ -76,7 +84,7 @@ def test_panel_shows_checklist_and_trim_note(seeded: Store) -> None:
     score_all(seeded, fake)
     page = body(make_client(seeded, fake).get("/roles/LinkedIn/1?partial=1"))
     assert "Must-have checklist (1)" in page
-    assert 'title="Led migration"' in page
+    assert 'data-tip="Led migration"' in page
     assert "Re-score this role" in page
     assert "Keywords" not in page
 
@@ -120,7 +128,13 @@ def test_must_haves_setting_changes_the_band_without_a_new_call(seeded: Store) -
 
 
 def test_eval_page_pivot_and_waiting(seeded: Store) -> None:
-    fake = FakeClient([GOOD_REPLY, reply([("SAP", "Missing", "")]), reply([], ok=False)])
+    fake = FakeClient(
+        [
+            GOOD_REPLY,
+            reply([("SAP", "Missing", "")]),
+            reply([("a", "Missing", ""), ("b", "Missing", ""), ("c", "Missing", "")]),
+        ]
+    )
     score_all(seeded, fake)
     seeded.set_fit_rating("LinkedIn", "1", "good")
     seeded.set_fit_rating("LinkedIn", "2", "good")
@@ -132,9 +146,10 @@ def test_eval_page_pivot_and_waiting(seeded: Store) -> None:
     assert "AI-scored and rated by you</dt><dd>3 (2 Good, 1 Poor)" in page
     assert "No description (or under 100 words): 1" in page
     assert "Good roles AI scored lowest" in page
-    assert "Missing: SAP." in page
+    assert "Role focus matched" in page
     assert "AUC" not in page
-    assert " of 150" in page
+    assert "AI calls in the last 24 hours" in page
+    assert " of 150" not in page
     assert 'data-cell="good-partial"' in page  # a count opens its roles in the panel below
     assert 'id="cell-good-partial"' in page
     assert 'id="cell-good-bad"' in page
@@ -175,3 +190,22 @@ def test_config_saves_the_ai_settings(seeded: Store) -> None:
     assert config.ai_max_missing == 1
     assert config.ai_role_focus == "Roles I want: TPM.\nNot: sales."
     assert json.loads(json.dumps(config.ai_model))
+
+
+def test_role_focus_mismatch_is_partial_with_its_note_as_the_reason(seeded: Store) -> None:
+    fake = FakeClient([reply([("x", "Met", "line")], ok=False, domain="different")])
+    score_all(seeded, fake)
+    client = make_client(seeded, fake)
+    page = body(client.get("/roles"))
+    assert '<span class="band partial">Partial</span>' in page
+    assert "Role focus mismatch: warehouse operations" in page
+    assert "Domain: different" in page  # a tag only; it does not change the fit score
+    assert "Wrong role type" not in page
+
+
+def test_checklist_evidence_uses_the_app_tooltip(seeded: Store) -> None:
+    fake = FakeClient([GOOD_REPLY])
+    score_all(seeded, fake)
+    panel = body(make_client(seeded, fake).get("/roles/LinkedIn/1?partial=1"))
+    assert 'data-tip="Led payment gateway migration"' in panel
+    assert 'title="Led payment gateway migration"' not in panel

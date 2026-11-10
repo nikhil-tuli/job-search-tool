@@ -13,7 +13,7 @@
   <dt>Roles AI-scored and rated by you</dt><dd>{{ ev.rated_scored }} ({{ ev.rated_good }} Good, {{ ev.rated_bad }} Poor)</dd>
   <dt>Waiting to be scored</dt><dd>{{ ev.waiting_total }}{% if ev.waiting %} <span class="muted">({% for reason, n in ev.waiting.items() %}{{ reason }}: {{ n }}{% if not loop.last %}; {% endif %}{% endfor %})</span>{% endif %}</dd>
   <dt>Out of date (will be redone)</dt><dd>{{ ev.stale }}</dd>
-  <dt>AI calls in the last 24 hours</dt><dd>{{ ev.calls_used }} of {{ ev.calls_cap }}</dd>
+  <dt>AI calls in the last 24 hours</dt><dd>{{ ev.calls_used }}</dd>
 </dl>
 
 {% if not has_cv %}

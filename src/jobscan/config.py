@@ -91,7 +91,6 @@ class Config:
     ai_extra_rules: str = ""
     ai_max_missing: int = 2
     ai_max_words: int = 3_000
-    ai_daily_cap: int = 150
     ai_calls_per_minute: int = 4
     langfuse_on: int = 0
     langfuse_base_url: str = "https://cloud.langfuse.com"
@@ -234,7 +233,6 @@ _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
     "ai_scoring": (int, 0, 1),
     "ai_max_missing": (int, 0, 10),
     "ai_max_words": (int, 500, 20_000),
-    "ai_daily_cap": (int, 1, 5_000),
     "ai_calls_per_minute": (int, 1, 600),
     "langfuse_on": (int, 0, 1),
     "langfuse_send_text": (int, 0, 1),
@@ -327,7 +325,9 @@ def _parse_text_fields(
     if _SERVICE_URL.fullmatch(url) and len(url) <= 200:
         values["tailor_base_url"] = url
     else:
-        errors["tailor_base_url"] = "an https:// address, for example https://api.groq.com/openai/v1"
+        errors["tailor_base_url"] = (
+            "an https:// address, for example https://api.groq.com/openai/v1"
+        )
 
     tailor_model = raw.get("tailor_model", defaults.tailor_model).strip()
     if _MODEL_NAME.fullmatch(tailor_model):

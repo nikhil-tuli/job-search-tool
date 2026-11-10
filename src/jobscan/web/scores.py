@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
-from ..ai_fit import BAND_RANK, band_of
+from ..ai_fit import BAND_RANK, band_of, reason_on_read
 from ..ai_fit import inputs_fingerprint as ai_fingerprint
 from ..ai_fit_store import AiCallRow, AiFitRow
 from ..config import Config
@@ -28,6 +28,7 @@ class ScoreView:
     reason: str = ""
     checks: tuple[tuple[str, str, str], ...] = ()
     trimmed: bool = False
+    domain: str = ""  # match, close or different; a tag only
     call_note: str = ""  # "Scored 5 Nov 23:04 by <model> in 3.2 s, ..." from the call log
 
     @property
@@ -107,7 +108,7 @@ def call_note(scored_on: str, call: AiCallRow | None) -> str:
 
 
 def ai_view(config: Config, row: AiFitRow, *, stale: bool) -> ScoreView:
-    band = band_of(row.checks, row.role_type_ok, row.domain, config.ai_max_missing)
+    band = band_of(row.checks, row.role_type_ok, config.ai_max_missing)
     return ScoreView(
         final=BAND_RANK[band],
         band=band,
@@ -117,7 +118,8 @@ def ai_view(config: Config, row: AiFitRow, *, stale: bool) -> ScoreView:
         scored_on=row.scored_on,
         stale=stale,
         ai=True,
-        reason=row.reason,
+        reason=reason_on_read(row.reason, row.role_type_ok),
+        domain=row.domain,
         checks=row.checks,
         trimmed=row.trimmed,
     )

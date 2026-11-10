@@ -62,7 +62,7 @@
   <h2>{{ group }}{% if group in group_info %} <span class="info" tabindex="0" role="note" aria-label="{{ group_info[group] }}">i<span class="tip">{{ group_info[group] }}</span></span>{% endif %}</h2>
   <div class="grid">
     {% for key, label, hint in items %}
-    <label>{{ label }}
+    <label>{{ label }}{% if key in field_info %} <span class="info" tabindex="0" role="note" aria-label="{{ field_info[key] }}">i<span class="tip">{{ field_info[key] }}</span></span>{% endif %}
       {% if key == 'match_mode' %}
         <select name="{{ key }}">
           {% for mode in match_modes %}<option value="{{ mode }}" {% if values.get(key) == mode %}selected{% endif %}>{{ mode }}</option>{% endfor %}

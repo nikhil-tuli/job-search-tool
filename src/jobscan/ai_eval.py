@@ -12,7 +12,17 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from .ai_fit import BAD, BANDS, DAILY_WINDOW, GOOD, MIN_WORDS, PARTIAL, band_of, inputs_fingerprint
+from .ai_fit import (
+    BAD,
+    BANDS,
+    DAILY_WINDOW,
+    GOOD,
+    MIN_WORDS,
+    PARTIAL,
+    band_of,
+    inputs_fingerprint,
+    reason_on_read,
+)
 from .ai_fit_store import AiCallRow
 from .config import Config
 from .evaluation import (
@@ -34,7 +44,6 @@ SHOWN_MISSES = 10
 
 REASON_NO_DESCRIPTION = "No description (or under 100 words)"
 REASON_ERROR = "AI error on the last try"
-REASON_CAP = "Daily cap reached"
 REASON_NEXT = "Waiting for the next run"
 
 
@@ -172,7 +181,6 @@ class AiEval:
     waiting: Counter[str]
     stale: int
     calls_used: int
-    calls_cap: int
     phrases: tuple[PhraseYield, ...] = ()
     suggestions: tuple[Suggestion, ...] = ()
     industry_suggestions: tuple[Suggestion, ...] = ()
@@ -203,7 +211,6 @@ def build_ai_eval(
     errors = store.last_ai_errors()
     rules = FitRules.from_config(config)
     used = store.ai_calls_since(to_iso(now - DAILY_WINDOW))
-    capped = used >= config.ai_daily_cap
     wanted = set(portals)
 
     scored = 0
@@ -221,7 +228,7 @@ def build_ai_eval(
         )
         if row is not None:
             scored += 1
-            by_band[band_of(row.checks, row.role_type_ok, row.domain, config.ai_max_missing)] += 1
+            by_band[band_of(row.checks, row.role_type_ok, config.ai_max_missing)] += 1
         if current:
             continue
         if row is None and not evaluate(role, rules, now).eligible:
@@ -232,8 +239,6 @@ def build_ai_eval(
             waiting[REASON_NO_DESCRIPTION] += 1
         elif role.key in errors:
             waiting[REASON_ERROR] += 1
-        elif capped:
-            waiting[REASON_CAP] += 1
         else:
             waiting[REASON_NEXT] += 1
 
@@ -250,9 +255,9 @@ def build_ai_eval(
         row = saved.get(role.key)
         if row is None:
             continue
-        band = band_of(row.checks, row.role_type_ok, row.domain, config.ai_max_missing)
+        band = band_of(row.checks, row.role_type_ok, config.ai_max_missing)
         pivot[(label, band)].append(role)
-        verdicts[role.key] = Miss(role, band, row.reason)
+        verdicts[role.key] = Miss(role, band, reason_on_read(row.reason, row.role_type_ok))
 
     def misses(label: str, order: tuple[str, str]) -> tuple[Miss, ...]:
         picked = [verdicts[r.key] for band in order for r in pivot[(label, band)]]
@@ -272,7 +277,6 @@ def build_ai_eval(
         waiting=waiting,
         stale=stale,
         calls_used=used,
-        calls_cap=config.ai_daily_cap,
         phrases=phrase_yield(labelled),
         suggestions=suggest_deny_words(labelled, config, phrases),
         industry_suggestions=suggest_excluded_industries(labelled, config),

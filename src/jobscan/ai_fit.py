@@ -217,41 +217,40 @@ def parse_reply(text: str) -> Verdict:
 def band_of(
     checks: Sequence[tuple[str, str, str]],
     role_type_ok: bool,
-    domain: str,
     max_missing: int,
 ) -> str:
-    """The band rules. Applied on read, so the setting needs no new AI call."""
-    if not role_type_ok:
-        return BAD
+    """The fit score rules. Applied on read, so the setting needs no new AI call.
+
+    Bad only when more must-haves are Missing than allowed. Otherwise Partial when the role
+    focus does not match, any must-have is Missing, or any is Partly. Otherwise Good. The
+    domain does not change the fit score; it is shown as a tag.
+    """
     missing = sum(1 for _, status, _ in checks if status == MISSING)
     partly = sum(1 for _, status, _ in checks if status == PARTLY)
     if missing > max_missing:
         return BAD
-    if missing >= 1 or partly >= 2:
+    if not role_type_ok or missing >= 1 or partly >= 1:
         return PARTIAL
-    return PARTIAL if domain == "different" else GOOD
+    return GOOD
 
 
-def reason_of(
-    checks: Sequence[tuple[str, str, str]], role_type_ok: bool, role_type_note: str, domain: str
-) -> str:
-    """One line built from the labels, so it always agrees with the checklist."""
-    if not role_type_ok:
-        return f"Wrong role type: {role_type_note}" if role_type_note else "Wrong role type."
-    parts: list[str] = []
-    missing = [name for name, status, _ in checks if status == MISSING]
-    partly = [name for name, status, _ in checks if status == PARTLY]
-    if missing:
-        parts.append("Missing: " + ", ".join(missing[:4]) + ("..." if len(missing) > 4 else ""))
-    if partly:
-        parts.append("Partly: " + ", ".join(partly[:3]) + ("..." if len(partly) > 3 else ""))
-    if domain == "different":
-        parts.append("Different domain")
-    if parts:
-        return ". ".join(parts) + "."
-    if not checks:
-        return "No stated must-haves; role type and domain fit."
-    return "All must-haves met; role type and domain fit."
+MISMATCH = "Role focus mismatch"
+MATCHED = "Role focus matched"
+_OLD_PREFIX = re.compile(r"^(?:Wrong role type|Role focus mismatch)[:.]?\s*")
+
+
+def reason_of(role_type_ok: bool, role_focus_note: str) -> str:
+    """The reason line: one of two texts, from the role focus match and the AI's note."""
+    if role_type_ok:
+        return MATCHED
+    return f"{MISMATCH}: {role_focus_note}" if role_focus_note else MISMATCH + "."
+
+
+def reason_on_read(stored: str, role_type_ok: bool) -> str:
+    """The reason line for a saved verdict, in today's wording, whichever text was stored."""
+    if role_type_ok:
+        return MATCHED
+    return reason_of(False, _OLD_PREFIX.sub("", stored).rstrip("."))
 
 
 # ---- the service --------------------------------------------------------------------------------
@@ -330,13 +329,6 @@ class AiScorer:
         if not todo:
             self._emit("AI scoring: nothing to score")
             return result
-        used = self._store.ai_calls_since(to_iso(self._clock() - DAILY_WINDOW))
-        remaining = max(self._config.ai_daily_cap - used, 0)
-        if remaining == 0:
-            result.stopped = f"daily cap of {self._config.ai_daily_cap} AI calls reached"
-            result.waiting = len(todo)
-            self._emit(f"AI scoring stopped: {result.stopped}; the rest waits for tomorrow")
-            return result
         try:
             client = self._make_client(self._config)
         except TailorError as exc:
@@ -346,10 +338,6 @@ class AiScorer:
             return result
         rules = FitRules.from_config(self._config)
         for index, role in enumerate(todo):
-            if index >= remaining:
-                result.stopped = f"daily cap of {self._config.ai_daily_cap} AI calls reached"
-                result.waiting = len(todo) - index
-                break
             if not self._score_one(client, cv, role, rules, result):
                 result.waiting = len(todo) - index
                 break
@@ -473,9 +461,7 @@ class AiScorer:
                     checks=verdict.checks,
                     role_type_ok=verdict.role_type_ok,
                     domain=verdict.domain,
-                    reason=reason_of(
-                        verdict.checks, verdict.role_type_ok, verdict.role_type_note, verdict.domain
-                    ),
+                    reason=reason_of(verdict.role_type_ok, verdict.role_type_note),
                     trimmed=trimmed,
                     inputs=inputs,
                     model=config.ai_model,

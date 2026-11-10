@@ -956,7 +956,7 @@ M = Must-haves allowed missing (Config, default 2).
 - The CV (without name, phone, email and links) and the description go to Mistral. The free Experiment plan requires opting in to data training; you accepted this. Cost: zero.
 
 ### Providers and limits
-- Provider and model limits are kept in `docs/HIGH_LEVEL_DESIGN.html` (section "Model providers and limits").
+- Provider and model limits are kept in `docs/HIGH_LEVEL_DESIGN.md` (section "Model providers and limits").
 
 ### Key questions discussed
 - **Why AI only, not on top of keyword and meaning?** With the AI reading the CV and the posting, the embedding steps were redundant. The old logic scored irrelevant roles high when the must-haves sat only in the description.
@@ -1186,3 +1186,32 @@ Two options, built in this order. Option 1 needs no outside service. Option 2 is
 - `GET /roles/<portal>/<job_id>?partial=1&readonly=1` returns `_role_readonly.html` (no forms, inputs, buttons or links). Without `readonly`, the Roles panel is unchanged.
 - `history.html`: each row carries `class="row"`, `data-link-only` and `data-panel`; "open role" has class `row-link`; the panel markup and `panel.js` are included.
 - `panel.js`: a row marked `data-link-only` opens the panel only from its "open role" link, not from a click elsewhere in the row.
+
+## Round 22: Fit score rules, reason line, domain tag, tooltip and pacing (built)
+
+Terms: role focus, must-haves (Met, Partly, Missing), fit score (Good, Partial, Bad). Flowcharts: `docs/FIT_SCORE_LOGIC.md`.
+
+### Decisions
+- **Fit score rules:**
+  - Bad only when must-haves Missing exceed `x` ("Must-haves allowed missing" in Config).
+  - Otherwise Partial when the role focus match is no, any must-have is Missing, or any is Partly.
+  - Otherwise Good.
+  - With `x` = 3, 3 missing is Partial and 4 missing is Bad.
+- **Role focus mismatch:** gives Partial, not Bad. It is no longer a hard gate.
+- **Domain:** no effect on the fit score. Shown as a tag ("Domain: match, close or different") beside the fit score in the Roles list and the role panel.
+- **Reason line:** only two texts:
+  - "Role focus mismatch: <role focus note>" (or "Role focus mismatch." with no note).
+  - "Role focus matched".
+  - Missing and Partly must-haves show only in the must-haves section of the role panel.
+- **Old verdicts:** the fit score and reason line are worked out when a role is shown, so verdicts saved earlier show the new rules and wording at once. No re-scoring and no database change.
+- **Evidence tooltip:** the evidence line of a Met must-have now uses the app's own tooltip, with a dotted underline on the status. The browser's own tooltip did not show.
+- **Daily call cap removed:** the setting "Most AI calls per 24 hours" is gone. A saved value is ignored. The pace limit is "AI calls per minute".
+- **Calls per minute:** an info icon says the value comes from the model's requests-per-minute limit.
+- **Eval:** the "AI calls in the last 24 hours" line shows the count only, with no cap.
+
+### Unchanged
+- The AI prompt, the fingerprint and the rule that a Met with no evidence becomes Partly.
+- Stale verdicts are re-scored only on purpose.
+
+### Not done (option)
+- Checking that the evidence line exists in the CV. Not requested.

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from dataclasses import replace
-from datetime import timedelta
 
 import pytest
 
@@ -19,6 +18,7 @@ from jobscan.ai_fit import (
     inputs_fingerprint,
     parse_reply,
     reason_of,
+    reason_on_read,
     redact_cv,
     trim_description,
 )
@@ -93,32 +93,35 @@ def test_band_rules_cover_every_case() -> None:
     met = ("a", "Met", "x")
     part = ("b", "Partly", "")
     miss = ("c", "Missing", "")
-    assert band_of([met], True, "match", 2) == GOOD
-    assert band_of([met, part], True, "close", 2) == GOOD
-    assert band_of([met, part, part], True, "match", 2) == PARTIAL
-    assert band_of([met, miss], True, "match", 2) == PARTIAL
-    assert band_of([met, miss, miss], True, "match", 2) == PARTIAL
-    assert band_of([met, miss, miss, miss], True, "match", 2) == BAD
-    assert band_of([met, miss], True, "match", 0) == BAD
-    assert band_of([met], False, "match", 2) == BAD
-    assert band_of([met], True, "different", 2) == PARTIAL
-    assert band_of([miss, miss, miss], True, "different", 2) == BAD
-    assert band_of([], True, "match", 2) == GOOD  # no stated must-haves: role type and domain
-    assert band_of([], True, "different", 2) == PARTIAL
+    assert band_of([met], True, 2) == GOOD
+    assert band_of([met, part], True, 2) == PARTIAL  # any Partly gives Partial
+    assert band_of([met, miss], True, 2) == PARTIAL
+    assert band_of([met, miss, miss], True, 2) == PARTIAL  # up to the allowed number
+    assert band_of([met, miss, miss, miss], True, 2) == BAD  # above the allowed number
+    assert band_of([met, miss], True, 0) == BAD
+    assert band_of([miss, miss, miss], True, 3) == PARTIAL
+    assert band_of([miss, miss, miss, miss], True, 3) == BAD
+    assert band_of([met], False, 2) == PARTIAL  # a role focus mismatch is never Bad by itself
+    assert band_of([met, miss, miss, miss], False, 2) == BAD
+    assert band_of([], True, 2) == GOOD  # no stated must-haves
+    assert band_of([], False, 2) == PARTIAL
 
 
-def test_reason_is_built_from_the_labels() -> None:
-    checks = [("SAP", "Missing", ""), ("Kafka", "Partly", ""), ("AWS", "Met", "x")]
-    assert reason_of(checks, True, "", "different") == (
-        "Missing: SAP. Partly: Kafka. Different domain."
+def test_reason_is_one_of_two_texts() -> None:
+    assert reason_of(True, "") == "Role focus matched"
+    assert reason_of(False, "warehouse operations") == ("Role focus mismatch: warehouse operations")
+    assert reason_of(False, "") == "Role focus mismatch."
+
+
+def test_reason_on_read_uses_todays_wording_for_old_verdicts() -> None:
+    assert reason_on_read("Missing: SAP. Partly: Kafka.", True) == "Role focus matched"
+    assert reason_on_read("Wrong role type: warehouse operations", False) == (
+        "Role focus mismatch: warehouse operations"
     )
-    assert reason_of([("AWS", "Met", "x")], True, "", "match") == (
-        "All must-haves met; role type and domain fit."
+    assert reason_on_read("Wrong role type.", False) == "Role focus mismatch."
+    assert reason_on_read("Role focus mismatch: sales work", False) == (
+        "Role focus mismatch: sales work"
     )
-    assert reason_of([], False, "warehouse operations", "match") == (
-        "Wrong role type: warehouse operations"
-    )
-    assert reason_of([], True, "", "match").startswith("No stated must-haves")
 
 
 def test_parse_reply_checks_and_downgrades_unsupported_met() -> None:
@@ -197,7 +200,7 @@ def test_run_scores_eligible_roles_and_saves_fit(store: Store) -> None:
     result = scorer(store, client).run()
     assert (result.scored, result.failed, result.waiting) == (1, 0, 0)
     row = store.get_ai_fits()["LinkedIn|1"]
-    assert row.reason == "All must-haves met; role type and domain fit."
+    assert row.reason == "Role focus matched"
     assert "Nikhil" not in client.calls[0][1]
     assert "Technical Program Manager" in client.calls[0][1]
     assert "LinkedIn|1" in store.get_fits()  # Fit is kept once a role is scored
@@ -309,27 +312,16 @@ def test_missing_key_stops_before_any_call(store: Store) -> None:
     assert "key is missing" in result.stopped
 
 
-def test_daily_cap_leaves_the_rest_for_tomorrow(store: Store) -> None:
+def test_there_is_no_daily_cap(store: Store) -> None:
     upload_cv(store)
     for n in range(3):
         add_role(store, str(n), LONG_JD + f"\n- Extra duty {n}")
-    config = replace(Config(), ai_daily_cap=2)
-    result = scorer(store, FakeClient([GOOD_REPLY]), config).run()
-    assert result.scored == 2
-    assert result.waiting == 1
-    assert "daily cap" in result.stopped
-    again = scorer(store, FakeClient([GOOD_REPLY]), config).run()
-    assert again.scored == 0
-    assert again.waiting == 1
-
-
-def test_calls_older_than_a_day_do_not_count(store: Store) -> None:
-    upload_cv(store)
-    add_role(store, "1", LONG_JD)
-    old = (NOW - timedelta(hours=25)).isoformat()
-    store.log_ai_call("LinkedIn", "x", when=old, ok=True)
-    config = replace(Config(), ai_daily_cap=1)
-    assert scorer(store, FakeClient([GOOD_REPLY]), config).run().scored == 1
+    for n in range(300):
+        store.log_ai_call("LinkedIn", f"old{n}", when=NOW.isoformat(), ok=True)
+    result = scorer(store, FakeClient([GOOD_REPLY]), Config()).run()
+    assert result.scored == 3
+    assert result.waiting == 0
+    assert not result.stopped
 
 
 def test_calls_are_paced(store: Store) -> None:

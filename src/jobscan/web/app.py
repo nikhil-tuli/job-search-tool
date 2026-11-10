@@ -172,6 +172,13 @@ SAFE_SITES = frozenset({"same-origin", "none"})
 # (field, label, hint) in the order they appear on the Config page.
 LEGACY_GROUPS = frozenset({"Scoring", "Embeddings (Gemini)"})
 TEXTAREA_SETTINGS = frozenset({"ai_role_focus", "ai_extra_rules"})
+FIELD_INFO = {
+    "ai_calls_per_minute": (
+        "Set from the model's requests-per-minute limit. For example, a limit of 1.8 a minute "
+        "means 1 or 2 here."
+    ),
+}
+
 GROUP_INFO = {
     "Tracing (Langfuse)": (
         "Optional. jobscan push-traces sends how each AI call went (model, time, tokens, "
@@ -470,11 +477,6 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "Most description words sent",
                 "Only a safety limit. Longer text loses company, benefits and legal parts first; "
                 "requirements are never cut",
-            ),
-            (
-                "ai_daily_cap",
-                "Most AI calls per 24 hours",
-                "One call per role. The rest wait for the next run",
             ),
             (
                 "ai_calls_per_minute",
@@ -1928,6 +1930,7 @@ def create_app(
                 "config.html",
                 sections=CONFIG_SECTIONS,
                 group_info=GROUP_INFO,
+                field_info=FIELD_INFO,
                 list_settings=LIST_SETTINGS,
                 textarea_settings=TEXTAREA_SETTINGS,
                 legacy_groups=LEGACY_GROUPS,

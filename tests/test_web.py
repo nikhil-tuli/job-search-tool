@@ -20,7 +20,7 @@ from jobscan.models import (
 from jobscan.store import RUN_SUCCESS, Store
 from jobscan.timeutil import now_ist, to_iso
 from jobscan.web import create_app
-from jobscan.web.app import GROUP_INFO
+from jobscan.web.app import FIELD_INFO, GROUP_INFO
 
 
 @pytest.fixture
@@ -1099,7 +1099,8 @@ def test_config_save_stores_fit_settings_tidily(client: FlaskClient, store: Stor
 
 def test_config_fit_group_has_info_icon(client: FlaskClient) -> None:
     html = client.get("/config").get_data(as_text=True)
-    assert html.count('class="info"') == len(GROUP_INFO) - 1  # the old Scoring group is hidden
+    # the old Scoring group is hidden; the calls-per-minute field has its own icon
+    assert html.count('class="info"') == len(GROUP_INFO) - 1 + len(FIELD_INFO)
     assert "Status is never part of Fit" in html
 
 

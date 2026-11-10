@@ -21,7 +21,7 @@ from typing import Any
 
 import requests
 
-from .ai_fit import PROMPT_VERSION, band_of
+from .ai_fit import PROMPT_VERSION, band_of, reason_on_read
 from .ai_fit_store import AiCallRow, AiFitRow
 from .config import Config
 from .models import LABEL_GOOD, Role
@@ -191,10 +191,10 @@ def build_span(
         usage = {"input": call.tokens_in, "output": call.tokens_out}
         attributes.append(_attr("langfuse.observation.usage_details", json.dumps(usage)))
     if fit is not None and call.ok:
-        band = band_of(fit.checks, fit.role_type_ok, fit.domain, config.ai_max_missing)
+        band = band_of(fit.checks, fit.role_type_ok, config.ai_max_missing)
         output = {
             "band": band,
-            "reason": fit.reason,
+            "reason": reason_on_read(fit.reason, fit.role_type_ok),
             "role_type_ok": fit.role_type_ok,
             "domain": fit.domain,
             # the must-have and its label only; the CV evidence line is left out
@@ -327,7 +327,7 @@ def _push_ratings(
         if call is None or fit is None or call.id not in pushed or role.fit_rating is None:
             continue
         human = int(role.fit_rating == LABEL_GOOD)
-        band = band_of(fit.checks, fit.role_type_ok, fit.domain, config.ai_max_missing)
+        band = band_of(fit.checks, fit.role_type_ok, config.ai_max_missing)
         agree = agreement(role.fit_rating, band)
         trace = trace_id_of(call)
         if sent_before.get(role.key) == (trace, human, agree):
