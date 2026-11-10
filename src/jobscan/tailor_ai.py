@@ -1,6 +1,6 @@
 """Ask an AI service to propose resume changes for one role, and check what comes back.
 
-The service is any OpenAI-compatible chat endpoint (Cerebras by default). One call is made per
+The service is any OpenAI-compatible chat endpoint (Groq by default). One call is made per
 request. Nothing the AI says is trusted: every proposed text is checked against the rules in
 tailor_docx (no longer than the original, no new numbers, same items, same bullets) and a
 proposal that breaks a rule is dropped.

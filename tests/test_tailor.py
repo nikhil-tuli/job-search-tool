@@ -235,8 +235,8 @@ def test_client_returns_the_reply_text() -> None:
 
 
 def test_missing_key_is_explained() -> None:
-    with pytest.raises(TailorError, match="CEREBRAS_API_KEY"):
-        make_client("https://x/v1", "m", "CEREBRAS_API_KEY", {})
+    with pytest.raises(TailorError, match="GROQ_API_KEY"):
+        make_client("https://x/v1", "m", "GROQ_API_KEY", {})
 
 
 # ---- orchestration ----------------------------------------------------------------------------

@@ -106,9 +106,9 @@ class Config:
     naukri_max_age_hours: int = 24
     naukri_abort_after_captchas: int = 3
     naukri_captcha_wait_seconds: int = 300
-    tailor_base_url: str = "https://api.cerebras.ai/v1"
-    tailor_model: str = "gpt-oss-120b"
-    tailor_key_env: str = "CEREBRAS_API_KEY"
+    tailor_base_url: str = "https://api.groq.com/openai/v1"
+    tailor_model: str = "openai/gpt-oss-120b"
+    tailor_key_env: str = "GROQ_API_KEY"
     sync_email: str = ""
     sync_password_env: str = "JOBSYNC_APP_PASSWORD"
     sync_every_hours: int = 4
@@ -327,7 +327,7 @@ def _parse_text_fields(
     if _SERVICE_URL.fullmatch(url) and len(url) <= 200:
         values["tailor_base_url"] = url
     else:
-        errors["tailor_base_url"] = "an https:// address, for example https://api.cerebras.ai/v1"
+        errors["tailor_base_url"] = "an https:// address, for example https://api.groq.com/openai/v1"
 
     tailor_model = raw.get("tailor_model", defaults.tailor_model).strip()
     if _MODEL_NAME.fullmatch(tailor_model):

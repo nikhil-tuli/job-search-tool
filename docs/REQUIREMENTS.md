@@ -1146,3 +1146,14 @@ Two options, built in this order. Option 1 needs no outside service. Option 2 is
 - **CV saved message:** with Legacy scoring off: "CV saved. Roles scored earlier are now out of date. Run jobscan score --stale to score them again." With Legacy scoring on, the old chunk and waiting-role message stays.
 - **CV with no stored original** (older PDF or text upload): the File row shows the name and a note, with no Download link.
 - **README** still says "Manage CV" in two places; it is changed only when you ask.
+
+## Round 20: CV and cover letter modification on Groq (built)
+
+### Decisions
+- The default provider for modifying the CV and cover letter changes from Cerebras to Groq. Model: `openai/gpt-oss-120b`. Base URL: `https://api.groq.com/openai/v1`. Key variable: `GROQ_API_KEY` (set in the terminal before `jobscan serve`, never stored).
+- The provider, model and key variable stay editable in Config, Tailoring. A value already saved in Config overrides the new defaults.
+- Why Groq: the same gpt-oss-120b model, offered with a free plan.
+
+### Known limit (not yet handled)
+- Groq's free plan shows 30 requests a minute, 1,000 a day, **8,000 tokens a minute** and 200,000 a day for this model (a third-party page that read Groq's table on 6 Nov 2026; check Config limits in the Groq console).
+- A modification request sends the CV and role text (about 3,000 tokens, an estimate) and asks for up to 8,000 tokens in reply, so one request may be refused for size. If so, the reply size for modification requests would need to be capped lower. Not changed yet; to be decided after a first real run.
