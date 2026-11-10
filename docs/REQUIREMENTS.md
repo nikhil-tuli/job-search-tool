@@ -1158,11 +1158,12 @@ Two options, built in this order. Option 1 needs no outside service. Option 2 is
 - Groq's free plan shows 30 requests a minute, 1,000 a day, **8,000 tokens a minute** and 200,000 a day for this model (a third-party page that read Groq's table on 6 Nov 2026; check Config limits in the Groq console).
 - A modification request sends the CV and role text (about 3,000 tokens, an estimate) and asks for up to 8,000 tokens in reply, so one request may be refused for size. If so, the reply size for modification requests would need to be capped lower. Not changed yet; to be decided after a first real run.
 
-## Round 21: Read-only role panel on Modification History (requirements agreed, not built)
+## Round 21: Read-only role panel on Modification History (built)
 
 ### Decisions
 - **Where:** Modify CV & Cover Letter, Modification History tab only. No other tab changes.
 - **Trigger:** "open role" in the Role column opens a side panel on the same page. It no longer goes to the role page. The Modification History page stays in place behind the panel.
+- **Confirmed:** the "Open on portal" link is not kept; the "Read only" tag beside the company line stays.
 - **Panel:** the same side panel as the Roles tab, showing the same role details, but read-only.
 - **Behavior kept from the Roles tab:** row highlight while open; close with ×, Esc or a click outside; Up and Down arrows move to the previous or next row of the history list; the panel scrolls on its own.
 - **A role with several requests:** each row opens the same role. Arrow keys move by row.
@@ -1190,3 +1191,8 @@ Two options, built in this order. Option 1 needs no outside service. Option 2 is
 - The read-only panel has no form, input, button or external link.
 - The Roles panel still has its forms.
 - "open role" on history carries the panel address and the read-only flag.
+
+### Built details, Round 21
+- `GET /roles/<portal>/<job_id>?partial=1&readonly=1` returns `_role_readonly.html` (no forms, inputs, buttons or links). Without `readonly`, the Roles panel is unchanged.
+- `history.html`: each row carries `class="row"`, `data-link-only` and `data-panel`; "open role" has class `row-link`; the panel markup and `panel.js` are included.
+- `panel.js`: a row marked `data-link-only` opens the panel only from its "open role" link, not from a click elsewhere in the row.

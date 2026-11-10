@@ -1229,7 +1229,14 @@ def create_app(
         if role is None:
             abort(404, "Role not found")
         # ?partial=1 returns just the form, for the side panel on the roles list.
-        template = "_role_form.html" if request.args.get("partial") else "role.html"
+        # ?readonly=1 (with partial) returns plain text with no forms or links, for the
+        # panel on Modification History.
+        if request.args.get("partial") and request.args.get("readonly"):
+            template = "_role_readonly.html"
+        elif request.args.get("partial"):
+            template = "_role_form.html"
+        else:
+            template = "role.html"
         return render_template(
             template,
             **role_context(role),

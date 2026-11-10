@@ -393,6 +393,15 @@ def test_whole_flow_through_the_web(client: FlaskClient) -> None:
     history = client.get("/cv/history").get_data(as_text=True)
     assert "Needs your review" in history
     assert 'class="badge"' in history
+    # "open role" opens the read-only panel instead of leaving the page
+    assert 'data-panel="/roles/LinkedIn/1?partial=1&amp;readonly=1"' in history
+    assert 'class="row-link"' in history
+    panel = client.get("/roles/LinkedIn/1?partial=1&readonly=1").get_data(as_text=True)
+    assert "Read only" in panel
+    for forbidden in ("<form", "<input", "<button", "<textarea", "<select", "<a "):
+        assert forbidden not in panel
+    roles_panel = client.get("/roles/LinkedIn/1?partial=1").get_data(as_text=True)
+    assert "<form" in roles_panel
     review = client.get("/cv/tailor/1").get_data(as_text=True)
     assert review.count('name="change"') == 4
     assert "Kubernetes" in review

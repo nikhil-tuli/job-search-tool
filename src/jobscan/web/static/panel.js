@@ -229,6 +229,7 @@
   rows.forEach(function (row, index) {
     row.addEventListener('click', function (event) {
       var link = event.target.closest('a');
+      if (!link && row.hasAttribute('data-link-only')) { return; }
       if (link && !link.classList.contains('row-link')) { return; }
       if (!link && event.target.closest('input, select, button, label, form')) { return; }
       if (link && (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0)) { return; }

@@ -234,3 +234,4 @@ table.pivot td.err { color: var(--err); }
 details.more-details { margin: 8px 0 12px; }
 details.more-details > summary { cursor: pointer; color: var(--link, #2d62d6); display: inline-block; margin-bottom: 6px; }
 details.more-details > summary:hover { text-decoration: underline; }
+.facts dd.pre { white-space: pre-wrap; overflow-wrap: anywhere; }

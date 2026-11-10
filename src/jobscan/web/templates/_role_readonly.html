@@ -1,0 +1,43 @@
+{% import "_fit.html" as fit_html %}
+{% import "_ai_score.html" as ai %}
+<div data-readonly>
+<h1>{{ role.title }}</h1>
+<p class="muted">{{ role.company }} &middot; {{ role.location }} &middot; {{ role.portal }} {{ role.job_id }} <span class="tag">Read only</span></p>
+<dl class="facts">
+  <dt>Posted (IST)</dt><dd>{{ role | posted }}</dd>
+  <dt>Fetched (IST)</dt><dd>{{ role.fetched_on | ist }}</dd>
+  {% if role.matched_phrase %}<dt>Matched phrase</dt><dd>{{ role.matched_phrase }}</dd>{% endif %}
+  {% if fit %}<dt>Fit filter</dt><dd>{{ fit_html.detail(fit) }}</dd>{% endif %}
+  <dt>Fit score</dt>
+  <dd>
+    {% if ai_mode %}
+      {% if score %}{{ ai.pill(score) }} <small class="reason">{{ score.reason }}</small>{% else %}<span class="muted">Not scored</span>{% endif %}
+    {% elif score %}
+      <span class="band {{ score.band }}">{{ score.final }}</span> {{ score.band | capitalize }} fit
+    {% else %}
+      <span class="muted">Not scored</span>
+    {% endif %}
+  </dd>
+  <dt>Your rating</dt>
+  <dd>{% if role.fit_rating == 'good' %}&#128077; Good{% elif role.fit_rating == 'bad' %}&#128078; Poor{% else %}<span class="muted">Not rated</span>{% endif %}</dd>
+  {% if role.possible_duplicate_of %}<dt>Possible duplicate of</dt><dd>{{ role.possible_duplicate_of }}</dd>{% endif %}
+  {% if role.seniority %}<dt>Seniority</dt><dd>{{ role.seniority }}</dd>{% endif %}
+  {% if role.employment_type %}<dt>Employment type</dt><dd>{{ role.employment_type }}</dd>{% endif %}
+  {% if role.job_function %}<dt>Job function</dt><dd>{{ role.job_function }}</dd>{% endif %}
+  {% if role.industries %}<dt>Industries</dt><dd>{{ role.industries }}</dd>{% endif %}
+  <dt>Status</dt><dd>{{ role.status }}</dd>
+  {% if form.get('applied_on') %}<dt>Applied On</dt><dd>{{ form['applied_on'] }}</dd>{% endif %}
+  {% if role.follow_up_needed or role.follow_up_on %}<dt>Follow-up</dt><dd>{% if role.follow_up_needed %}Needed{% endif %}{% if role.follow_up_needed and role.follow_up_on %} &middot; {% endif %}{{ role.follow_up_on or '' }}</dd>{% endif %}
+  {% if role.contact_person %}<dt>Contact person</dt><dd>{{ role.contact_person }}</dd>{% endif %}
+  {% if role.contact_email %}<dt>Email</dt><dd>{{ role.contact_email }}</dd>{% endif %}
+  {% if role.contact_phone %}<dt>Phone</dt><dd>{{ role.contact_phone }}</dd>{% endif %}
+  {% if role.contact_linkedin %}<dt>LinkedIn profile</dt><dd>{{ role.contact_linkedin }}</dd>{% endif %}
+  {% if role.comments %}<dt>Comments</dt><dd class="pre">{{ role.comments }}</dd>{% endif %}
+</dl>
+<h2 class="sub">Job description</h2>
+{% if role.description %}
+<div class="desc" tabindex="0">{{ role.description }}</div>
+{% else %}
+<p class="muted">No description saved for this role.</p>
+{% endif %}
+</div>

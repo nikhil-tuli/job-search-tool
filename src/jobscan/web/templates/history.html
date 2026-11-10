@@ -10,11 +10,11 @@
   <thead><tr><th>Requested</th><th>Type</th><th>Company</th><th>Role</th><th>Status</th><th>Action</th></tr></thead>
   <tbody>
   {% for r in rows %}
-  <tr id="r{{ r.id }}">
+  <tr id="r{{ r.id }}" class="row" data-link-only data-panel="{{ url_for('role_page', portal=r.portal, job_id=r.job_id, partial=1, readonly=1) }}">
     <td>{{ r.created_on | ist }}</td>
     <td>{{ 'Cover letter' if r.kind == 'cover' else 'Resume' }}</td>
     <td>{{ r.company }}</td>
-    <td>{{ r.title }} <span class="muted">({{ r.portal }})</span> <a href="{{ url_for('role_page', portal=r.portal, job_id=r.job_id) }}">open role</a></td>
+    <td>{{ r.title }} <span class="muted">({{ r.portal }})</span> <a class="row-link" href="{{ url_for('role_page', portal=r.portal, job_id=r.job_id) }}">open role</a></td>
     <td>
       {% if r.status == 'preparing' %}<span class="st st-wait">Preparing changes&hellip;</span>
       {% elif r.status == 'review' %}<span class="st st-review">Needs your review</span> <span class="muted">({{ r.proposed_count }} proposed)</span>
@@ -38,5 +38,13 @@
 </table>
 {% else %}
 <p class="empty">Nothing modified yet. Open a role and choose <strong>Modify CV</strong> or <strong>Modify cover letter</strong>.</p>
+{% endif %}
+{% if rows %}
+<div id="scrim" hidden></div>
+<aside id="panel" role="dialog" aria-modal="true" aria-label="Role details" hidden>
+  <button type="button" id="panel-close" class="plain" aria-label="Close">&times;</button>
+  <div id="panel-body"></div>
+</aside>
+<script src="{{ url_for('static', filename='panel.js') }}"></script>
 {% endif %}
 {% endblock %}
