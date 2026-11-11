@@ -96,7 +96,8 @@
         </form>
       </td>
       <td class="nw applied">{{ r.applied_on | ist_date }}</td>
-      <td>{% set link = r.link | safe_link %}{% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer">Open</a>{% endif %}</td>
+      <td>{% set link = r.link | safe_link %}{% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer">Open</a>{% endif %}
+        <a class="nw practice" href="{{ url_for('interview_start', role=r.key) }}">Practice interview</a></td>
     </tr>
   {% endfor %}
   </tbody>

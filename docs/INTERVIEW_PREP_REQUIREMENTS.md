@@ -442,7 +442,11 @@ Validation: scores are integers 0 to 100; every transcript has one item; lists w
 | `GET /interview/<id>/run` | Microphone check and interview screen |
 | `POST /interview/<id>/answer/<n>` | Upload one answer's audio, transcribe, return status |
 | `POST /interview/<id>/finish` | End or complete, start feedback |
-| `GET /interview/<id>` | Feedback page, or Preparing page. `?status=1` returns JSON |
+| `GET /interview/<id>` | Feedback page, or the Preparing, Incomplete or Failed page |
+| `GET /interview/<id>/status` | JSON state for polling (writing questions, preparing) |
+| `POST /interview/<id>/skip/<n>`, `/not-scored/<n>` | Mark an answer skipped or not scored |
+| `POST /interview/<id>/again` | Practice again (same kind, new questions) |
+| `GET /interview/roles?q=` | Role search for the start screen |
 | `POST /interview/<id>/retry` | Get feedback or Try again |
 | `POST /interview/<id>/delete` | Delete |
 | `POST /interview/<id>/thumb` | Save a thumb |
@@ -699,3 +703,13 @@ Every story is served by at least one functional requirement.
 **Your actions before build**
 - Turn off "Anonymous improvement data" in the Mistral Admin Console (checks 6 and 7).
 - Decide on Groq Zero Data Retention.
+
+
+## 16. Build notes (deviations from the text above)
+
+- "kind of" and "sort of" count once, as hedges only, never as fillers.
+- Call pacing (`ai_calls_per_minute`) is kept inside the app process. A 429 is waited out once.
+- Interview AI calls are not written to the `ai_calls` table. Counts per interview (calls, time, tokens, retries, errors) are in `interview.stats`, with no content.
+- If question writing fails, the interview is deleted and the reason is shown once on the next page load. The reason is kept in memory only.
+- The Preparing page polls `/interview/<id>/status` (not `?status=1`).
+- Word times: the speech client asks for `verbose_json` with word and segment times and works without them. The pre-build test in section 11 is still to be run by the user.

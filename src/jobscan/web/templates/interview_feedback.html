@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Interview feedback{% endblock %}
+{% block content %}
+<h1>Interview Prep</h1>
+{% include "_interviewtabs.html" %}
+
+<h2>{{ kind_label }}{% if row.role_title %}: {{ row.role_title }} <span class="muted">{{ row.role_company }}</span>{% elif row.general_title %}: {{ row.general_title }}{% endif %}</h2>
+<p class="muted">{{ row.started_on | ist }} IST &middot; {{ row.answered }} of {{ row.questions }} answered &middot; CV: {{ row.cv_name }}</p>
+
+<div class="rubrics">
+  <section class="card rubric">
+    <h3>Answer feedback
+      <span class="tag" data-tip="{{ answer_tip }}" tabindex="0">AI estimate ?</span></h3>
+    {% if fb.answer_score is not none %}
+    <p class="big">{{ fb.answer_score }}<small> / 100</small>
+      <span class="band {{ answer_band_class }}">{{ answer_band }}</span>
+      {% if answer_change %}<span class="chg {{ answer_change_class }}" data-tip="Compared with your previous Ready interview of the same kind.">{{ answer_change }}</span>{% endif %}</p>
+    {% if weakest %}<p>Weakest across your answers: <strong>{{ weakest }}</strong> ({{ weakest_score }}).</p>{% endif %}
+    {% else %}<p class="muted">No answer could be rated.</p>{% endif %}
+  </section>
+
+  <section class="card rubric">
+    <h3>How you spoke
+      <span class="tag" data-tip="{{ spoken_tip }}" tabindex="0">Measured ?</span></h3>
+    {% if spoken_score is not none %}
+    <p class="big">{{ spoken_score }}<small> / 100</small>
+      <span class="band {{ spoken_band_class }}">{{ spoken_band }}</span>
+      {% if spoken_change %}<span class="chg {{ spoken_change_class }}" data-tip="Compared with your previous Ready interview of the same kind.">{{ spoken_change }}</span>{% endif %}</p>
+    {% if worst %}<p>Work on: <strong>{{ worst.label }}</strong>. {{ worst.tip }}</p>{% else %}<p>Every measure is in the good range.</p>{% endif %}
+    {% else %}<p class="muted">Not enough speech to measure how you spoke. It needs at least {{ min_words }} words across your answers.</p>{% endif %}
+  </section>
+</div>
+
+{% if fb.tips %}
+<h3>Top tips</h3>
+<ul>{% for t in fb.tips %}<li>{{ t }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if cards %}
+<h2>How you spoke</h2>
+<div class="cards">
+  {% for c in cards %}
+  <div class="card spoken-card">
+    <div class="muted">{{ c.label }}</div>
+    <div class="big"><span class="dot {{ c.dot }}" aria-hidden="true"></span>{{ '~' if c.approximate }}{{ c.value }} <small>{{ c.unit }}</small></div>
+    <div><strong>{{ c.rating }}</strong></div>
+    <div class="muted">Good: {{ c.benchmark }}</div>
+    {% if c.tip %}<div>{{ c.tip }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<h2>Your answers</h2>
+{% for b in blocks %}
+<section class="card answer" id="q{{ b.idx }}">
+  <div class="muted">Question {{ b.idx }}{% if b.kind != 'own' %} &middot; {{ b.kind }}{% endif %}{% if b.length %} &middot; {{ b.length }}{% endif %}</div>
+  <p class="question">{{ b.text }}</p>
+  {% set a = b.answer %}
+  {% if b.feedback %}
+    <p class="big">{{ b.feedback.score }}<small> / 100</small> <span class="band {{ b.band_class }}">{{ b.band }}</span></p>
+    <p>{{ b.feedback.verdict }}</p>
+    <table class="bars">
+      {% for r in b.feedback.ratings %}
+      <tr><td class="nw">{{ aspect_label(r.key) }}</td>
+        <td class="barcell"><span class="fill" style="width: {{ r.score }}%"></span></td>
+        <td class="nw">{{ r.score }}{% if r.capped %} <span class="tag warn" data-tip="No quote from your answer was found, so this rating is capped at 60." tabindex="0">capped</span>{% endif %}</td>
+        <td>{{ r.reason }}{% if r.quote and not r.capped %} <span class="muted">&ldquo;{{ r.quote }}&rdquo;</span>{% endif %}</td></tr>
+      {% endfor %}
+    </table>
+    {% if b.feedback.worked %}<h4>What worked</h4><ul>{% for w in b.feedback.worked %}<li>{{ w }}</li>{% endfor %}</ul>{% endif %}
+    {% if b.feedback.next %}<h4>Work on this next</h4>
+    <ol>{% for n in b.feedback.next %}<li><strong>{{ n.title }}.</strong> {{ n.why }} <em>{{ n.fix }}</em></li>{% endfor %}</ol>{% endif %}
+    {% if b.feedback.improved %}
+    <details><summary>Your answer, improved</summary>
+      <p>{{ b.feedback.improved }}</p>
+      {% if b.feedback.numbers_replaced %}<p class="muted">Figures that were not in your CV or your answer are shown as [add figure]. Fill in only what is true.</p>{% endif %}
+    </details>{% endif %}
+  {% elif a and a.status == 'skipped' %}<p class="muted">Skipped.</p>
+  {% elif a and a.status == 'too_short' %}<p class="muted">Too short to score ({{ a.word_count }} words). Answers need at least 10 words.</p>
+  {% elif a and a.status == 'no_speech' %}<p class="muted">No speech was detected.</p>
+  {% elif a and a.status == 'not_scored' %}<p class="muted">Not scored. {{ a.note }}</p>
+  {% elif a and a.status == 'answered' %}<p class="muted">Feedback was not returned for this answer. Use Practice again to try it once more.</p>
+  {% else %}<p class="muted">Not answered.</p>{% endif %}
+  {% if a and a.transcript %}<details><summary>Your transcript</summary><p>{{ a.transcript }}</p></details>{% endif %}
+  {% if b.feedback %}
+  <form method="post" action="{{ url_for('interview_thumb', interview_id=row.id) }}" class="thumbs">
+    <input type="hidden" name="idx" value="{{ b.idx }}">
+    <span class="muted">Was this feedback useful?</span>
+    <button type="submit" name="value" value="{{ 0 if b.thumb == 1 else 1 }}" class="plain" aria-pressed="{{ 'true' if b.thumb == 1 else 'false' }}" aria-label="Useful">&#128077;{% if b.thumb == 1 %} Useful{% endif %}</button>
+    <button type="submit" name="value" value="{{ 0 if b.thumb == -1 else -1 }}" class="plain" aria-pressed="{{ 'true' if b.thumb == -1 else 'false' }}" aria-label="Not useful">&#128078;{% if b.thumb == -1 %} Not useful{% endif %}</button>
+  </form>
+  {% endif %}
+</section>
+{% endfor %}
+
+<details class="examples"><summary>See examples</summary>
+  {% for rubric, title in (('spoken', 'How you spoke'), ('answer', 'Answer feedback')) %}
+  <h4>{{ title }}</h4>
+  {% for e in examples if e.rubric == rubric %}
+  <div class="card example"><strong>{{ e.label }}</strong>
+    <div><span class="tag warn">Weak</span> {{ e.weak }}</div>
+    <div><span class="tag ok">Strong</span> {{ e.strong }}</div>
+    <div class="muted">Why: {{ e.why }}</div></div>
+  {% endfor %}
+  {% endfor %}
+</details>
+
+<div class="buttons">
+  <form method="post" class="inline" action="{{ url_for('interview_again', interview_id=row.id) }}"><button type="submit">Practice again</button></form>
+  <a class="btn" href="{{ url_for('interview_history') }}">Back to history</a>
+</div>
+{% endblock %}

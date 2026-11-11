@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Interview Prep{% endblock %}
+{% block content %}
+<h1>Interview Prep</h1>
+{% include "_interviewtabs.html" %}
+<p class="muted">Practise out loud and get feedback on how you spoke and on what you said.</p>
+
+{% if running %}
+<p class="notice">You have an interview in progress. <a href="{{ url_for('interview_run', interview_id=running.id) }}">Go to your interview</a>. Finish or end it before starting another.</p>
+{% endif %}
+
+{% if cv %}
+<p>Using CV: <strong>{{ cv.filename }}</strong>, <span class="muted">uploaded {{ cv.uploaded_on | ist }}</span></p>
+{% else %}
+<p class="notice">Upload your CV to start. <a href="{{ url_for('cv_page') }}">Upload CV</a></p>
+{% endif %}
+
+<form method="post" action="{{ url_for('interview_create') }}" id="start-form" class="start">
+  <input type="hidden" name="kind" id="kind" value="{{ kind }}">
+  <section class="card pick {% if kind == 'Company role' %}on{% endif %}" data-kind="Company role">
+    <h2>A role you track</h2>
+    <p class="muted">Questions use the role and your CV.</p>
+    <input type="hidden" name="role" id="role" value="{% if selected %}{{ selected.key }}{% endif %}">
+    <input type="search" id="role-search" placeholder="Search by company or title" autocomplete="off" aria-label="Search roles">
+    <ul id="role-list" class="choices" role="listbox" aria-label="Roles">
+      {% if selected %}<li class="on" role="option" aria-selected="true" data-key="{{ selected.key }}"><strong>{{ selected.title }}</strong> <span class="muted">{{ selected.company }}</span></li>{% endif %}
+    </ul>
+  </section>
+
+  <section class="card pick {% if kind == 'General role' %}on{% endif %}" data-kind="General role">
+    <h2>A general role</h2>
+    <p class="muted">Questions fit the job title, with no company.</p>
+    {% if roles %}
+    <select name="general_title" id="general-title" aria-label="Role">
+      <option value="">Choose a role</option>
+      {% for r in roles %}<option value="{{ r }}" {% if r == general_title %}selected{% endif %}>{{ r }}</option>{% endfor %}
+    </select>
+    {% else %}
+    <p class="muted">Add roles in <a href="{{ url_for('config_page') }}">Config</a> (Interview Prep).</p>
+    {% endif %}
+  </section>
+
+  <section class="card pick {% if kind == 'My questions' %}on{% endif %}" data-kind="My questions">
+    <h2>My own questions</h2>
+    <p class="muted">Up to {{ max_questions }}, asked exactly as you type them. {{ own_min }} to {{ own_max }} characters each.</p>
+    <div id="own-list">
+      <input type="text" name="q" maxlength="{{ own_max }}" placeholder="Question 1" aria-label="Question 1">
+    </div>
+    <button type="button" class="plain" id="add-question" data-max="{{ max_questions }}">Add question</button>
+  </section>
+
+  <p><label class="check"><input type="checkbox" name="read_aloud" value="1" {% if read_aloud %}checked{% endif %}> Read questions aloud</label></p>
+  <p class="muted">Your voice is sent for transcription and is not saved.</p>
+  <p><button type="submit" id="start-button" disabled>Start interview</button> <span class="muted" id="start-hint"></span></p>
+</form>
+<script>window.INTERVIEW_START = {{ {'rolesUrl': url_for('interview_roles'), 'hasCv': cv is not none, 'running': running is not none, 'minChars': own_min, 'maxQuestions': max_questions} | tojson }};</script>
+<script src="{{ url_for('static', filename='interview_start.js') }}"></script>
+{% endblock %}

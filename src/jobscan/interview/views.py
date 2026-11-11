@@ -106,3 +106,66 @@ def aspect_label(key: str) -> str:
 def minutes_seconds(seconds: float) -> str:
     whole = round(seconds)
     return f"{whole // 60}:{whole % 60:02d}"
+
+
+@dataclass(frozen=True)
+class Example:
+    rubric: str  # "spoken" or "answer"
+    label: str
+    weak: str
+    strong: str
+    why: str
+
+
+# Fixed text, written once (requirements section 7.3). Not produced by a model.
+EXAMPLES: tuple[Example, ...] = (
+    Example(
+        "spoken",
+        "Pace",
+        "Rushed at 190 words a minute, no breaks.",
+        "About 140 words a minute, with pauses at key points.",
+        "Listeners need time to take in a number or a name.",
+    ),
+    Example(
+        "spoken",
+        "Thinking time",
+        "\u201cUmm, so, let me, yeah\u201d for 8 seconds before the first real word.",
+        "A 2 second pause, then a one-line headline.",
+        "A short silent pause sounds calm. Filling it with noise sounds unsure.",
+    ),
+    Example(
+        "spoken",
+        "Filler words",
+        "\u201cSo basically I like managed the, you know, team.\u201d",
+        "\u201cI managed a team of 12.\u201d",
+        "Fillers hide the point and make the answer longer.",
+    ),
+    Example(
+        "spoken",
+        "Hedging",
+        "\u201cI think I maybe led it.\u201d",
+        "\u201cI led it.\u201d",
+        "Hedges make a clear fact sound doubtful.",
+    ),
+    Example(
+        "spoken",
+        "Ownership (I vs we)",
+        "\u201cWe delivered the launch\u201d for every step.",
+        "\u201cI wrote the brief. We shipped in May.\u201d",
+        "The interviewer is hiring you. They need to hear what you did.",
+    ),
+    Example(
+        "answer",
+        "Structure",
+        "The result comes at the end of a long story.",
+        "\u201cI cut checkout failures by 30%. Here is how.\u201d",
+        "Leading with the result keeps the listener with you.",
+    ),
+    Example(
+        "answer",
+        "Specificity",
+        "\u201cI improved processes.\u201d",
+        "\u201cI moved 14 lender integrations onto one API.\u201d",
+        "A named thing and a number can be checked. A general claim cannot.",
+    ),
+)

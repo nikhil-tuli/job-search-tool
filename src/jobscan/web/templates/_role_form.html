@@ -64,6 +64,7 @@
   <button type="submit" name="kind" value="cover" {% if not can_tailor %}disabled{% endif %}>Modify cover letter &rarr;</button>
   {% if not can_tailor %}<span class="muted">Needs a job description first.</span>{% endif %}
 </form>
+<p><a class="btn" href="{{ url_for('interview_start', role=role.portal ~ '|' ~ role.job_id) }}">Practice interview &rarr;</a></p>
 
 <form method="post" class="edit" action="{{ url_for('role_save', portal=role.portal, job_id=role.job_id) }}">
   <input type="hidden" name="next" value="{{ next }}">

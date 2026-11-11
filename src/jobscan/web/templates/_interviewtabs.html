@@ -1,0 +1,4 @@
+<nav class="tabs" aria-label="Interview Prep">
+  <a href="{{ url_for('interview_start') }}" {% if tab == 'online' %}class="on"{% endif %}>Online Interview</a>
+  <a href="{{ url_for('interview_history') }}" {% if tab == 'history' %}class="on"{% endif %}>Past History</a>
+</nav>

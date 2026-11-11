@@ -44,6 +44,8 @@ from ..embeddings import Embedder
 from ..evaluation import build_report, load_labelled, score_bands
 from ..fit_book import FitBook
 from ..fit_filters import FitResult, FitRules
+from ..interview.service import Pacer, interview_ai_from_env, transcriber_from_env
+from ..interview.stt import Transcriber
 from ..matching import MATCH_MODES
 from ..models import (
     FOLLOW_UP_STATES,
@@ -131,6 +133,7 @@ from .forms import (
     roles_to_csv,
     safe_next,
 )
+from .interview import register as register_interview
 from .scores import ScoreView, score_views
 
 SKIPPED_PREVIEW = 10  # skipped titles shown until someone asks for more
@@ -799,6 +802,9 @@ def create_app(
     sites_reader_factory: ReaderFactory = default_reader_factory,
     tailor_convert: Converter = libreoffice_pdf,
     make_mail_source: MailSourceFactory = default_source_factory,
+    make_interview_ai: Callable[[Config], Completer] = interview_ai_from_env,
+    make_interview_stt: Callable[[Config], Transcriber] = transcriber_from_env,
+    interview_pacer: Pacer | None = None,
 ) -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = secret_key or secrets.token_hex(32)
@@ -806,6 +812,13 @@ def create_app(
     allowed = frozenset(h.lower() for h in allowed_hosts)
     store.fail_stale_tailor()
     launch_tailor = thread_launcher(store, make_tailor_client)
+    register_interview(
+        app,
+        store,
+        make_ai=make_interview_ai,
+        make_transcriber=make_interview_stt,
+        pacer=interview_pacer,
+    )
 
     # ---- request guards -------------------------------------------------------------------
 

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Interview{% endblock %}
+{% block content %}
+<h1>Interview Prep</h1>
+{% include "_interviewtabs.html" %}
+{% if row.note %}<p class="notice">{{ row.note }}</p>{% endif %}
+<div id="run" data-writing="{{ 'yes' if writing else 'no' }}">
+  <div id="writing" {% if not writing %}hidden{% endif %}>
+    <p><span class="spinner" aria-hidden="true"></span> Writing your questions&hellip;</p>
+    <p id="writing-error" class="error" hidden></p>
+    <p id="writing-back" hidden><a href="{{ url_for('interview_start') }}">Back to start</a></p>
+  </div>
+
+  <div id="mic" hidden>
+    <h2>Microphone check</h2>
+    <p>Allow your microphone, then say a few words.</p>
+    <p><button type="button" id="mic-allow">Allow microphone</button></p>
+    <div class="meter" aria-hidden="true"><span id="mic-level"></span></div>
+    <p id="mic-status" class="muted" role="status"></p>
+    <p id="mic-help" class="error" hidden>The microphone is blocked or missing. Click the lock icon in the address bar, allow the microphone for this page, then reload. The interview cannot start without it.</p>
+    <p><button type="button" id="mic-start" disabled>Start</button></p>
+  </div>
+
+  <div id="live" hidden>
+    <p class="muted" id="progress"></p>
+    <p class="question" id="question" aria-live="polite"></p>
+    <p id="read-note" class="muted" hidden>Reading aloud is not available in this browser. Read the question on screen.</p>
+    <div class="meter" aria-hidden="true"><span id="live-level"></span></div>
+    <p><span id="timer" class="timer">0:00</span> <span id="timer-note" class="muted" role="status"></span> <span id="rec-note" class="muted"></span></p>
+    <p class="buttons">
+      <button type="button" id="skip-reading" hidden>Skip reading</button>
+      <button type="button" id="next" disabled>Next question</button>
+      <button type="button" id="skip" class="plain">Skip</button>
+      <button type="button" id="end" class="plain">End interview</button>
+    </p>
+  </div>
+
+  <div id="sending" hidden><p><span class="spinner" aria-hidden="true"></span> Sending your last answers&hellip;</p></div>
+</div>
+<script>window.INTERVIEW = {{ settings | tojson }};</script>
+<script src="{{ url_for('static', filename='interview.js') }}"></script>
+{% endblock %}
