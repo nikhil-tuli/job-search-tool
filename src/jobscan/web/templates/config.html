@@ -68,7 +68,7 @@
           {% for mode in match_modes %}<option value="{{ mode }}" {% if values.get(key) == mode %}selected{% endif %}>{{ mode }}</option>{% endfor %}
         </select>
       {% elif key in textarea_settings %}
-        <textarea name="{{ key }}" rows="7" class="wide">{{ values.get(key, '') }}</textarea>
+        <textarea name="{{ key }}" rows="7" class="wide">{{ values.get(key, '').replace(', ', '\n') if key == 'interview_roles' else values.get(key, '') }}</textarea>
       {% else %}
         {% if key in list_settings %}
         <input type="text" name="{{ key }}" value="{{ values.get(key, '') }}" class="wide">

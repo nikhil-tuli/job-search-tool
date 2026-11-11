@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 
 from .ai_fit_store import AiFitStoreMixin
 from .fit_store import FitStoreMixin
+from .interview.store import InterviewStoreMixin
 from .models import (
     DEFAULT_STATUS,
     FOLLOW_UP_DUE,
@@ -182,7 +183,14 @@ def _run(row: sqlite3.Row) -> RunSummary:
     )
 
 
-class Store(AiFitStoreMixin, TailorStoreMixin, FitStoreMixin, SyncStoreMixin, SitesStoreMixin):
+class Store(
+    AiFitStoreMixin,
+    InterviewStoreMixin,
+    TailorStoreMixin,
+    FitStoreMixin,
+    SyncStoreMixin,
+    SitesStoreMixin,
+):
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
         self._depth = 0

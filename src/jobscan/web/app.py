@@ -171,7 +171,7 @@ SAFE_SITES = frozenset({"same-origin", "none"})
 
 # (field, label, hint) in the order they appear on the Config page.
 LEGACY_GROUPS = frozenset({"Scoring", "Embeddings (Gemini)"})
-TEXTAREA_SETTINGS = frozenset({"ai_role_focus", "ai_extra_rules"})
+TEXTAREA_SETTINGS = frozenset({"ai_role_focus", "ai_extra_rules", "interview_roles"})
 FIELD_INFO = {
     "ai_calls_per_minute": (
         "Set from the model's requests-per-minute limit. For example, a limit of 1.8 a minute "
@@ -358,6 +358,67 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "tailor_key_env",
                 "Key variable name",
                 "Name of the terminal variable holding the key. The key itself is never stored",
+            ),
+        ),
+    ),
+    (
+        "Interview Prep",
+        (
+            (
+                "interview_roles",
+                "Allowed roles",
+                "One per line. The General role list on the start screen shows these",
+            ),
+            (
+                "interview_stt_base_url",
+                "Speech to text: service address",
+                "Any OpenAI-compatible transcription service. Your voice is sent here, not saved",
+            ),
+            ("interview_stt_model", "Speech to text: model", "Groq whisper-large-v3 by default"),
+            (
+                "interview_stt_key_env",
+                "Speech to text: key variable name",
+                "Name of the terminal variable holding the key. The key itself is never stored",
+            ),
+            (
+                "interview_ai_base_url",
+                "Questions and feedback: service address",
+                "Leave empty to use Fit scoring (AI)",
+            ),
+            (
+                "interview_ai_model",
+                "Questions and feedback: model",
+                "Leave empty to use Fit scoring (AI)",
+            ),
+            (
+                "interview_ai_key_env",
+                "Questions and feedback: key variable name",
+                "Leave empty to use Fit scoring (AI)",
+            ),
+            (
+                "interview_reply_cap",
+                "Feedback reply cap (tokens)",
+                "The most the model may write for one interview's feedback",
+            ),
+            (
+                "interview_amber_s",
+                "Time guide: wrap up at (s)",
+                "The timer turns amber and says 'Time to wrap up'",
+            ),
+            (
+                "interview_over_s",
+                "Time guide: over time at (s)",
+                "The timer says 'Over 3 minutes'. Recording goes on",
+            ),
+            (
+                "interview_stop_s",
+                "Time guide: stop at (s)",
+                "The answer ends by itself and the next question starts",
+            ),
+            (
+                "interview_read_aloud",
+                "Read questions aloud",
+                "1 reads each question out. 0 shows it only. You can switch it on the start screen",
             ),
         ),
     ),
@@ -663,6 +724,7 @@ GROUP_SECTION = {
     "Fit filters": "Common",
     "Tailoring": "Common",
     "Email Sync": "Common",
+    "Interview Prep": "Interview Prep",
     "Fit scoring (AI)": "Common",
     "Tracing (Langfuse)": "Common",
     "Scoring": "Common",
@@ -682,6 +744,7 @@ SECTION_NOTES = {
     "LinkedIn": "Used only by the LinkedIn scan (jobscan scan, and the daily schedule).",
     "Naukri": "Used only by the Naukri run (jobscan naukri).",
     "Company sites": "Used only by the company sites run (jobscan sites, and the daily schedule).",
+    "Interview Prep": "Used only by the Interview Prep tab: allowed roles, models, time guide.",
 }
 CONFIG_SECTIONS = tuple(
     (name, SECTION_NOTES[name], tuple(g for g in SETTING_GROUPS if GROUP_SECTION[g[0]] == name))

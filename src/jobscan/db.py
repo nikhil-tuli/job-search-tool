@@ -641,6 +641,88 @@ def _migration_18(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_19(conn: sqlite3.Connection) -> None:
+    """Interview Prep: interviews with their questions, answers (text only), feedback, thumbs."""
+    conn.execute(
+        """
+        CREATE TABLE interview (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            role_portal TEXT NOT NULL DEFAULT '',
+            role_job_id TEXT NOT NULL DEFAULT '',
+            role_company TEXT NOT NULL DEFAULT '',
+            role_title TEXT NOT NULL DEFAULT '',
+            general_title TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL,
+            started_on TEXT NOT NULL,
+            updated_on TEXT NOT NULL,
+            cv_name TEXT NOT NULL DEFAULT '',
+            cv_uploaded_on TEXT NOT NULL DEFAULT '',
+            read_aloud INTEGER NOT NULL DEFAULT 1,
+            question_model TEXT NOT NULL DEFAULT '',
+            feedback_model TEXT NOT NULL DEFAULT '',
+            prompt_version TEXT NOT NULL DEFAULT '',
+            stage TEXT NOT NULL DEFAULT '',
+            error TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            stats TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    conn.execute("CREATE INDEX interview_started_on ON interview (started_on)")
+    conn.execute(
+        """
+        CREATE TABLE interview_question (
+            interview_id INTEGER NOT NULL REFERENCES interview (id) ON DELETE CASCADE,
+            idx INTEGER NOT NULL,
+            slot INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            text TEXT NOT NULL,
+            PRIMARY KEY (interview_id, idx)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE interview_answer (
+            interview_id INTEGER NOT NULL REFERENCES interview (id) ON DELETE CASCADE,
+            idx INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            transcript TEXT NOT NULL DEFAULT '',
+            duration_s REAL NOT NULL DEFAULT 0,
+            word_count INTEGER NOT NULL DEFAULT 0,
+            measure TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (interview_id, idx)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE interview_feedback (
+            interview_id INTEGER PRIMARY KEY REFERENCES interview (id) ON DELETE CASCADE,
+            spoken TEXT NOT NULL,
+            answers TEXT NOT NULL,
+            spoken_score INTEGER,
+            answer_score INTEGER,
+            tips TEXT NOT NULL,
+            missing TEXT NOT NULL DEFAULT '[]',
+            created_on TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE interview_thumb (
+            interview_id INTEGER NOT NULL REFERENCES interview (id) ON DELETE CASCADE,
+            idx INTEGER NOT NULL,
+            value INTEGER NOT NULL CHECK (value IN (-1, 1)),
+            PRIMARY KEY (interview_id, idx)
+        )
+        """
+    )
+
+
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_1,
     _migration_2,
@@ -660,6 +742,7 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_16,
     _migration_17,
     _migration_18,
+    _migration_19,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 

@@ -15,6 +15,14 @@ from .matching import MATCH_MODES
 
 VERIFIED_WINDOW_SECONDS = 86_400  # Only this value has been confirmed against LinkedIn.
 MAX_FOCUS_CHARS = 4_000
+DEFAULT_INTERVIEW_ROLES = (
+    "Backend Engineer, Frontend Engineer, Full-stack Engineer, Mobile Engineer, "
+    "Data Engineer, Data Scientist, ML / AI Engineer, DevOps / SRE Engineer, QA Engineer, "
+    "Security Engineer, Engineering Manager, Technical Program Manager, Program Manager, "
+    "Project Manager, Product Manager, Business Analyst, Designer"
+)
+MAX_INTERVIEW_ROLES = 50
+MAX_INTERVIEW_ROLE_CHARS = 60
 DEFAULT_ROLE_FOCUS = (
     "Roles I want: Technical Program Manager, Senior Program Manager or Delivery Manager in a "
     "technology company. The work is owning cross-team technical delivery: planning, "
@@ -105,6 +113,18 @@ class Config:
     naukri_max_age_hours: int = 24
     naukri_abort_after_captchas: int = 3
     naukri_captcha_wait_seconds: int = 300
+    interview_roles: str = DEFAULT_INTERVIEW_ROLES
+    interview_stt_base_url: str = "https://api.groq.com/openai/v1"
+    interview_stt_model: str = "whisper-large-v3"
+    interview_stt_key_env: str = "GROQ_API_KEY"
+    interview_ai_base_url: str = ""  # empty: the same as Fit scoring (AI)
+    interview_ai_model: str = ""
+    interview_ai_key_env: str = ""
+    interview_reply_cap: int = 6_000
+    interview_amber_s: int = 120
+    interview_over_s: int = 180
+    interview_stop_s: int = 300
+    interview_read_aloud: int = 1
     tailor_base_url: str = "https://api.groq.com/openai/v1"
     tailor_model: str = "openai/gpt-oss-120b"
     tailor_key_env: str = "GROQ_API_KEY"
@@ -130,6 +150,22 @@ class Config:
     def embed_space(self) -> str:
         """Names the vector space. Vectors from different spaces are never compared."""
         return f"{self.embed_model}@{self.embed_dims}"
+
+    @property
+    def interview_role_list(self) -> tuple[str, ...]:
+        return split_list(self.interview_roles)
+
+    @property
+    def interview_ai(self) -> tuple[str, str, str]:
+        """(address, model, key variable) for interview questions and feedback.
+
+        Each one left empty in Interview Prep follows Fit scoring (AI).
+        """
+        return (
+            self.interview_ai_base_url or self.ai_base_url,
+            self.interview_ai_model or self.ai_model,
+            self.interview_ai_key_env or self.ai_key_env,
+        )
 
     @property
     def window_is_verified(self) -> bool:
@@ -234,6 +270,11 @@ _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
     "ai_max_missing": (int, 0, 10),
     "ai_max_words": (int, 500, 20_000),
     "ai_calls_per_minute": (int, 1, 600),
+    "interview_reply_cap": (int, 1_000, 16_000),
+    "interview_amber_s": (int, 30, 600),
+    "interview_over_s": (int, 30, 600),
+    "interview_stop_s": (int, 30, 600),
+    "interview_read_aloud": (int, 0, 1),
     "langfuse_on": (int, 0, 1),
     "langfuse_send_text": (int, 0, 1),
     "schedule_timeout_minutes": (int, 5, 240),
@@ -255,6 +296,8 @@ _ORDERED_PAIRS = (
     ("score_kw_floor", "score_kw_ceiling"),
     ("score_sem_floor", "score_sem_ceiling"),
     ("score_partial_min", "score_strong_min"),
+    ("interview_amber_s", "interview_over_s"),
+    ("interview_over_s", "interview_stop_s"),
 )
 _CLOCK_TIME = re.compile(r"(?:[01]?\d|2[0-3]):[0-5]\d")
 _PLACE = re.compile(r"[a-z][a-z -]{0,59}")
@@ -359,6 +402,8 @@ def _parse_text_fields(
     else:
         errors["ai_key_env"] = "a variable name: letters, digits and underscores"
 
+    _parse_interview_fields(raw, defaults, values, errors)
+
     lf_url = raw.get("langfuse_base_url", defaults.langfuse_base_url).strip().rstrip("/")
     if _SERVICE_URL.fullmatch(lf_url) and len(lf_url) <= 200:
         values["langfuse_base_url"] = lf_url
@@ -406,6 +451,42 @@ def _parse_text_fields(
             errors[key] = str(exc)
         else:
             values[key] = ", ".join(items)
+
+
+def _parse_interview_fields(
+    raw: Mapping[str, str],
+    defaults: Config,
+    values: dict[str, object],
+    errors: dict[str, str],
+) -> None:
+    try:
+        roles = split_list(raw.get("interview_roles", defaults.interview_roles))
+        if len(roles) > MAX_INTERVIEW_ROLES:
+            raise ValueError(f"at most {MAX_INTERVIEW_ROLES} roles")
+        if any(len(r) > MAX_INTERVIEW_ROLE_CHARS for r in roles):
+            raise ValueError(f"each role can have at most {MAX_INTERVIEW_ROLE_CHARS} characters")
+    except ValueError as exc:
+        errors["interview_roles"] = str(exc)
+    else:
+        values["interview_roles"] = ", ".join(roles)
+
+    for prefix, may_be_empty in (("interview_stt", False), ("interview_ai", True)):
+        url_key, model_key, env_key = f"{prefix}_base_url", f"{prefix}_model", f"{prefix}_key_env"
+        url = raw.get(url_key, getattr(defaults, url_key)).strip().rstrip("/")
+        if (may_be_empty and not url) or (_SERVICE_URL.fullmatch(url) and len(url) <= 200):
+            values[url_key] = url
+        else:
+            errors[url_key] = "an https:// address, for example https://api.groq.com/openai/v1"
+        model = raw.get(model_key, getattr(defaults, model_key)).strip()
+        if (may_be_empty and not model) or _MODEL_NAME.fullmatch(model):
+            values[model_key] = model
+        else:
+            errors[model_key] = "letters, digits, dots, dashes, slashes and underscores only"
+        env = raw.get(env_key, getattr(defaults, env_key)).strip()
+        if (may_be_empty and not env) or _ENV_NAME.fullmatch(env):
+            values[env_key] = env
+        else:
+            errors[env_key] = "a variable name: letters, digits and underscores"
 
 
 def split_list(text: str) -> tuple[str, ...]:
