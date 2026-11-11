@@ -36,6 +36,7 @@
   // ---- level meter --------------------------------------------------------------------------
 
   function level() {
+    if (!analyser) { return 0; }
     var data = new Uint8Array(analyser.fftSize);
     analyser.getByteTimeDomainData(data);
     var sum = 0;
@@ -56,26 +57,52 @@
 
   // ---- microphone check ---------------------------------------------------------------------
 
+  function micProblem(err) {
+    var name = (err && err.name) || '';
+    if (name === 'NotAllowedError' || name === 'SecurityError') {
+      return 'Microphone is blocked. Click the lock icon in the address bar and allow the microphone for this page. On a Mac, also check System Settings > Privacy & Security > Microphone and switch on your browser. Then try again.';
+    }
+    if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+      return 'No microphone was found. Connect one or choose an input in your system sound settings, then try again.';
+    }
+    if (name === 'NotReadableError' || name === 'AbortError') {
+      return 'The microphone is being used by another app or tab. Close it, then try again.';
+    }
+    return 'The microphone could not be started (' + (name || 'unknown error') + (err && err.message ? ': ' + err.message : '') + ').';
+  }
+
+  function showMicProblem(text) {
+    $('mic-help-text').textContent = text;
+    $('mic-help').hidden = false;
+  }
+
   function requestMic() {
     $('mic-help').hidden = true;
-    if (!navigator.mediaDevices || !window.MediaRecorder) {
-      $('mic-help').firstChild.textContent = 'This browser cannot record audio. Use a current Chrome, Edge, Firefox or Safari. ';
-      $('mic-help').hidden = false;
+    $('mic-status').textContent = '';
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+      showMicProblem('This browser cannot record audio here. Use a current Chrome, Edge, Firefox or Safari, and open the app at http://127.0.0.1:5000 or http://localhost:5000.');
       return;
     }
-    var loud = 0;
     navigator.mediaDevices.getUserMedia({audio: true}).then(function (s) {
+      // The permission was given. Only the permission call is reported as a microphone
+      // problem. The level meter is a nicety and must not block the interview.
       stream = s;
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 1024;
-      audioCtx.createMediaStreamSource(stream).connect(analyser);
       $('mic-start').disabled = false;
-      startMeter([$('mic-level')], function (l) {
-        loud = l > SPEAK_LEVEL ? loud + 80 : 0;
-        if (loud >= 500) { $('mic-status').textContent = '\u2713 Voice detected'; }
-      });
-    }).catch(function () { $('mic-help').hidden = false; });
+      try {
+        var loud = 0;
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 1024;
+        audioCtx.createMediaStreamSource(stream).connect(analyser);
+        startMeter([$('mic-level')], function (l) {
+          loud = l > SPEAK_LEVEL ? loud + 80 : 0;
+          if (loud >= 500) { $('mic-status').textContent = '\u2713 Voice detected'; }
+        });
+      } catch (e) {
+        analyser = null;
+        $('mic-status').textContent = 'Microphone allowed. The level meter is not available in this browser.';
+      }
+    }, function (err) { showMicProblem(micProblem(err)); });
   }
 
   function micCheck() {
