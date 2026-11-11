@@ -2,64 +2,66 @@
 {% block title %}Interview Prep: Past History{% endblock %}
 {% block head %}{% if preparing %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
 {% block content %}
+<div class="ip">
 <h1>Interview Prep</h1>
 {% include "_interviewtabs.html" %}
-<form method="get" class="filters">
-  <label>Interview type
-    <select name="type" onchange="this.form.submit()">
-      <option value="">All</option>
-      {% for k in kinds %}<option value="{{ k }}" {% if k == kind %}selected{% endif %}>{{ kinds[k] }}</option>{% endfor %}
-    </select></label>
+<form method="get" class="irow" style="margin-bottom: 8px">
+  <select name="type" onchange="this.form.submit()" style="width: auto" aria-label="Interview type">
+    <option value="">All interview types</option>
+    {% for k in kinds %}<option value="{{ k }}" {% if k == kind %}selected{% endif %}>{{ kinds[k] }}</option>{% endfor %}
+  </select>
   <noscript><button type="submit">Filter</button></noscript>
 </form>
 
 {% if items %}
-<table class="roles history">
-  <thead><tr><th>Date</th><th>Interview type</th><th>Details</th><th>Answered</th><th>Scores <span class="muted">(Spoke &middot; Answer)</span></th><th>Status</th><th>Feedback</th><th></th></tr></thead>
+<table>
+  <thead><tr><th>Date</th><th>Interview type</th><th>Details</th><th>Answered</th><th>Scores (Spoke · Answer)</th><th>Status</th><th>Feedback</th><th></th></tr></thead>
   <tbody>
   {% for i in items %}{% set r = i.row %}
-  <tr id="i{{ r.id }}" {% if r.kind == 'Company role' and i.role_exists %}class="row" data-link-only data-panel="{{ url_for('role_page', portal=r.role_portal, job_id=r.role_job_id, partial=1, readonly=1) }}"{% endif %}>
-    <td class="nw">{{ r.started_on | ist }}</td>
+  <tr id="i{{ r.id }}">
+    <td>{{ r.started_on | nice_datetime }}</td>
     <td>{{ kinds[r.kind] }}</td>
     <td>
       {% if r.kind == 'Company role' %}
-        {{ r.role_company }} &middot; {{ r.role_title }}
-        {% if i.role_exists %}<a class="row-link" href="{{ url_for('role_page', portal=r.role_portal, job_id=r.role_job_id) }}">open role</a>{% else %}<span class="muted">role removed</span>{% endif %}
+        {% if i.role_exists %}<a href="{{ url_for('role_page', portal=r.role_portal, job_id=r.role_job_id) }}" data-panel="{{ url_for('role_page', portal=r.role_portal, job_id=r.role_job_id, partial=1, readonly=1) }}">open role</a>{% else %}<span class="muted" data-tip="{{ r.role_title }}" tabindex="0">role removed</span>{% endif %}
+        <small>{{ r.role_company }}</small>
       {% elif r.kind == 'General role' %}{{ r.general_title }}
-      {% else %}<span data-tip="{{ i.questions | join(' | ') }}" tabindex="0">{{ i.questions | length }} custom question{{ 's' if i.questions | length != 1 }}</span>{% endif %}
+      {% else %}<span data-tip="{% for q in i.questions %}{{ loop.index }}. {{ q }}{{ '\n' if not loop.last }}{% endfor %}" tabindex="0" style="border-bottom: 1px dotted var(--muted)">{{ i.questions | length }} custom question{{ 's' if i.questions | length != 1 }}</span>{% endif %}
     </td>
-    <td class="nw">{{ r.answered }} of {{ r.questions }}</td>
-    <td class="nw">{% if r.status == 'Ready' %}{{ r.spoken_score if r.spoken_score is not none else '–' }} &middot; {{ r.answer_score if r.answer_score is not none else '–' }}{% else %}<span class="muted">&ndash;</span>{% endif %}</td>
-    <td><span class="st {{ i.status_class }}">{{ r.status }}</span>{% if r.status == 'Failed' and r.error %}<div class="muted">{{ r.error }}</div>{% endif %}</td>
+    <td>{{ r.answered }} of {{ r.questions }}</td>
+    <td>{% if r.status == 'Ready' %}{{ r.spoken_score if r.spoken_score is not none else '–' }} · {{ r.answer_score if r.answer_score is not none else '–' }}{% else %}–{% endif %}</td>
+    <td><span class="{{ i.status_class }}" {% if r.status == 'Failed' and r.error %}data-tip="{{ r.error }}" tabindex="0"{% endif %}>{{ r.status }}</span></td>
     <td>
-      {% if r.status == 'Ready' %}<a class="btn" href="{{ url_for('interview_page', interview_id=r.id) }}">View feedback</a>
-      {% elif r.status == 'Incomplete' %}<form method="post" class="inline" action="{{ url_for('interview_retry', interview_id=r.id) }}"><button type="submit">Get feedback</button></form>
-      {% elif r.status == 'Failed' %}<form method="post" class="inline" action="{{ url_for('interview_retry', interview_id=r.id) }}"><button type="submit">Try again</button></form>
-      {% elif r.status == 'Preparing' %}<a href="{{ url_for('interview_page', interview_id=r.id) }}">Preparing&hellip;</a>
-      {% else %}<a href="{{ url_for('interview_run', interview_id=r.id) }}">Go to interview</a>{% endif %}
+      {% if r.status == 'Ready' %}<a class="btn sec" href="{{ url_for('interview_page', interview_id=r.id) }}">View feedback</a>
+      {% elif r.status == 'Incomplete' %}<form method="post" class="inline" action="{{ url_for('interview_retry', interview_id=r.id) }}"><button type="submit" class="sec">Get feedback</button></form>
+      {% elif r.status == 'Failed' %}<form method="post" class="inline" action="{{ url_for('interview_retry', interview_id=r.id) }}"><button type="submit" class="sec">Try again</button></form>
+      {% elif r.status == 'Preparing' %}<a class="btn sec" href="{{ url_for('interview_page', interview_id=r.id) }}">Preparing…</a>
+      {% else %}<a class="btn sec" href="{{ url_for('interview_run', interview_id=r.id) }}">Go to interview</a>{% endif %}
     </td>
     <td>
-      {% if r.status in ('Preparing', 'In progress') %}<span class="muted">&ndash;</span>
-      {% else %}<form method="post" class="inline" action="{{ url_for('interview_delete', interview_id=r.id) }}" onsubmit="return confirm('Delete this interview permanently? Its questions, transcripts and feedback will be removed.')"><button type="submit" class="plain" aria-label="Delete interview" title="Delete">&#128465;</button></form>{% endif %}
+      {% if r.status in ('Preparing', 'In progress') %}
+      {% else %}<form method="post" class="inline" action="{{ url_for('interview_delete', interview_id=r.id) }}" onsubmit="return confirm('Delete this interview permanently? Its questions, transcripts and feedback will be removed.')"><button type="submit" class="icon" aria-label="Delete interview" title="Delete">&#128465;</button></form>{% endif %}
     </td>
   </tr>
   {% endfor %}
   </tbody>
 </table>
 {% if pages > 1 %}
-<p class="pager">
+<p class="irow" style="margin-top: 8px">
   {% if page > 1 %}<a href="{{ url_for('interview_history', type=kind or None, page=page - 1) }}">&larr; Newer</a>{% endif %}
-  <span class="muted">Page {{ page }} of {{ pages }} &middot; {{ total }} interviews</span>
+  <span class="muted">Page {{ page }} of {{ pages }} · {{ total }} interviews</span>
   {% if page < pages %}<a href="{{ url_for('interview_history', type=kind or None, page=page + 1) }}">Older &rarr;</a>{% endif %}
 </p>
 {% endif %}
 <div id="scrim" hidden></div>
 <aside id="panel" role="dialog" aria-modal="true" aria-label="Role details" hidden>
-  <button type="button" id="panel-close" class="plain" aria-label="Close">&times;</button>
+  <button type="button" id="panel-close" class="icon" aria-label="Close">&times;</button>
   <div id="panel-body"></div>
 </aside>
 <script src="{{ url_for('static', filename='panel.js') }}"></script>
 {% else %}
-<p class="empty">No interviews yet. <a class="btn" href="{{ url_for('interview_start') }}">Start an interview</a></p>
+<p>No interviews yet.</p>
+<p><a class="btn" href="{{ url_for('interview_start') }}">Start an interview</a></p>
 {% endif %}
+</div>
 {% endblock %}

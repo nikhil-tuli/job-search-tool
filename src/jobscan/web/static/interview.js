@@ -56,32 +56,40 @@
 
   // ---- microphone check ---------------------------------------------------------------------
 
+  function requestMic() {
+    $('mic-help').hidden = true;
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      $('mic-help').firstChild.textContent = 'This browser cannot record audio. Use a current Chrome, Edge, Firefox or Safari. ';
+      $('mic-help').hidden = false;
+      return;
+    }
+    var loud = 0;
+    navigator.mediaDevices.getUserMedia({audio: true}).then(function (s) {
+      stream = s;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 1024;
+      audioCtx.createMediaStreamSource(stream).connect(analyser);
+      $('mic-start').disabled = false;
+      startMeter([$('mic-level')], function (l) {
+        loud = l > SPEAK_LEVEL ? loud + 80 : 0;
+        if (loud >= 500) { $('mic-status').textContent = '\u2713 Voice detected'; }
+      });
+    }).catch(function () { $('mic-help').hidden = false; });
+  }
+
   function micCheck() {
     showOnly('mic');
-    var loud = 0;
-    $('mic-allow').addEventListener('click', function () {
-      $('mic-help').hidden = true;
-      if (!navigator.mediaDevices || !window.MediaRecorder) {
-        $('mic-help').textContent = 'This browser cannot record audio. Use a current Chrome, Edge, Firefox or Safari.';
-        $('mic-help').hidden = false;
-        return;
-      }
-      navigator.mediaDevices.getUserMedia({audio: true}).then(function (s) {
-        stream = s;
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 1024;
-        audioCtx.createMediaStreamSource(stream).connect(analyser);
-        $('mic-allow').disabled = true;
-        $('mic-start').disabled = false;
-        $('mic-status').textContent = 'Say a few words.';
-        startMeter([$('mic-level')], function (l) {
-          loud = l > SPEAK_LEVEL ? loud + 80 : 0;
-          if (loud >= 500) { $('mic-status').textContent = 'Voice detected.'; }
-        });
-      }).catch(function () { $('mic-help').hidden = false; });
-    });
+    requestMic();
+    $('mic-retry').addEventListener('click', requestMic);
     $('mic-start').addEventListener('click', function () { stopMeter(); begin(); });
+    $('mic-back').addEventListener('click', function () {
+      // Nothing was answered, so leaving drops the interview.
+      finished = true;
+      stopMeter();
+      if (navigator.sendBeacon) { navigator.sendBeacon(cfg.urls.abandon); }
+      location.href = cfg.urls.start;
+    });
   }
 
   // ---- the interview ------------------------------------------------------------------------
@@ -127,7 +135,7 @@
     $('timer').textContent = '0:00';
     $('timer').className = 'timer';
     $('timer-note').textContent = '';
-    $('rec-note').textContent = '';
+    $('rec-tag').hidden = true;
     $('skip-reading').hidden = true;
     setNext(false);
     if (cfg.readAloud && 'speechSynthesis' in window && window.SpeechSynthesisUtterance) {
@@ -178,7 +186,7 @@
     current = {recorder: rec, chunks: parts, startedAt: performance.now(), mime: rec.mimeType || mime || 'audio/webm'};
     rec.ondataavailable = function (e) { if (e.data && e.data.size) { parts.push(e.data); } };
     rec.start(1000);
-    $('rec-note').textContent = 'Recording';
+    $('rec-tag').hidden = false;
     startMeter([$('live-level')]);
     nextTimer = setTimeout(function () { setNext(true); }, NEXT_AFTER_MS);
     tick = setInterval(onTick, 200);
@@ -205,7 +213,7 @@
     stopMeter();
     var c = current;
     current = null;
-    $('rec-note').textContent = '';
+    $('rec-tag').hidden = true;
     if (!c) { return Promise.resolve(null); }
     return new Promise(function (resolve) {
       var seconds = (performance.now() - c.startedAt) / 1000;
@@ -295,7 +303,7 @@
     }).catch(function () {
       finishing = false;
       showOnly('live');
-      $('rec-note').textContent = 'Could not finish. Try End interview again.';
+      $('timer-note').textContent = 'Could not finish. Try End interview again.';
     });
   }
 

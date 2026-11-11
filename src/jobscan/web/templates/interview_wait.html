@@ -1,35 +1,45 @@
 {% extends "base.html" %}
 {% block title %}Interview{% endblock %}
 {% block content %}
-<h1>Interview Prep</h1>
-{% include "_interviewtabs.html" %}
-<h2>{{ kind_label }}{% if row.role_title %}: {{ row.role_title }}{% elif row.general_title %}: {{ row.general_title }}{% endif %}</h2>
-<p class="muted">{{ row.started_on | ist }} IST &middot; {{ row.answered }} of {{ row.questions }} answered</p>
-
+<div class="ip">
 {% if row.status == 'Preparing' %}
-<p id="state"><span class="spinner" aria-hidden="true"></span> <span id="stage">{{ 'Writing your feedback' if row.stage == 'writing' else 'Scoring your answers' }}</span>&hellip; This page updates by itself.</p>
+<h1>Preparing your feedback</h1>
+<div class="card" style="max-width: 520px">
+  <p id="steps">&#10003; Transcribing answers ({{ row.answered }} of {{ row.questions }})<br>
+    <span id="step-scoring">{{ '&#10003;'|safe if row.stage == 'writing' else '…' }} Scoring</span><br>
+    <span id="step-writing">… Writing feedback</span></p>
+  <div class="bar"><i id="progress-bar" style="width: {{ 72 if row.stage == 'writing' else 40 }}%"></i></div>
+  <p class="muted">Usually under a minute. You can leave. It will show in Past History.</p>
+  <div class="irow"><a class="btn sec" href="{{ url_for('interview_history') }}">Go to Past History</a></div>
+</div>
 <script>
 (function () {
   var url = {{ status_url | tojson }};
-  var label = {scoring: 'Scoring your answers', writing: 'Writing your feedback'};
+  function paint(stage) {
+    var writing = stage === 'writing';
+    document.getElementById('step-scoring').textContent = (writing ? '✓' : '…') + ' Scoring';
+    document.getElementById('progress-bar').style.width = (writing ? 72 : 40) + '%';
+  }
   function poll() {
     fetch(url, {headers: {Accept: 'application/json'}}).then(function (r) { return r.json(); }).then(function (d) {
-      if (d.state === 'preparing') {
-        document.getElementById('stage').textContent = label[d.stage] || 'Scoring your answers';
-        setTimeout(poll, 3000);
-      } else { location.reload(); }
+      if (d.state === 'preparing') { paint(d.stage); setTimeout(poll, 3000); } else { location.reload(); }
     }).catch(function () { setTimeout(poll, 5000); });
   }
   setTimeout(poll, 3000);
 })();
 </script>
 {% elif row.status == 'Incomplete' %}
+<h1>Interview not finished</h1>
+<p class="muted">{{ interview_label(row) }} · {{ row.started_on | nice_full }} · {{ row.answered }} of {{ row.questions }} answered</p>
 <p>This interview was left before the end. Your answers were saved as text. No feedback has been made yet.</p>
 <form method="post" action="{{ url_for('interview_retry', interview_id=row.id) }}"><button type="submit">Get feedback</button></form>
 {% elif row.status == 'Failed' %}
-<p class="error">Feedback could not be made. {{ row.error }}</p>
+<h1>Feedback could not be made</h1>
+<p class="muted">{{ interview_label(row) }} · {{ row.started_on | nice_full }} · {{ row.answered }} of {{ row.questions }} answered</p>
+<p class="error">{{ row.error }}</p>
 <p class="muted">Your answers are saved. Trying again does not record anything again.</p>
 <form method="post" action="{{ url_for('interview_retry', interview_id=row.id) }}"><button type="submit">Try again</button></form>
 {% endif %}
-<p><a href="{{ url_for('interview_history') }}">Back to history</a></p>
+{% if row.status != 'Preparing' %}<p><a href="{{ url_for('interview_history') }}">Back to history</a></p>{% endif %}
+</div>
 {% endblock %}

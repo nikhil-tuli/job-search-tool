@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from . import rules as r
 
 SAME_UNDER_POINTS = 5
 
-_DOT = {r.GOOD: "ok", r.NEEDS_WORK: "warn", r.WEAK: "err"}
-_BAND_CLASS = {r.STRONG: "ok", r.GOOD: "lok", r.NEEDS_WORK: "warn", r.WEAK: "err"}
+_DOT = {r.GOOD: "d-g", r.NEEDS_WORK: "d-a", r.WEAK: "d-r"}
+_BAND_CLASS = {r.STRONG: "strong", r.GOOD: "good", r.NEEDS_WORK: "nw", r.WEAK: "weak"}
 
 SPOKEN_LABEL_TIP = (
     "Measured: the app counted these from your transcript. They can be wrong only if the "
@@ -90,9 +91,10 @@ def change_text(current: int | None, earlier: int | None) -> str:
 
 
 def change_class(text: str) -> str:
+    """ "" for up (green), "dn" for down (red) and "same" for no real change."""
     if text.startswith("▲"):
-        return "ok"
-    return "err" if text.startswith("▼") else ""
+        return ""
+    return "dn" if text.startswith("▼") else "same"
 
 
 def answer_band(score: int) -> str:
@@ -169,3 +171,32 @@ EXAMPLES: tuple[Example, ...] = (
         "A named thing and a number can be checked. A general claim cannot.",
     ),
 )
+
+
+def nice_date(iso: str) -> str:
+    """ "3 Nov 2026"."""
+    try:
+        d = datetime.fromisoformat(iso)
+    except ValueError:
+        return iso
+    return f"{d.day} {d:%b %Y}"
+
+
+def nice_datetime(iso: str) -> str:
+    """ "11 Nov, 5:20 pm"."""
+    try:
+        d = datetime.fromisoformat(iso)
+    except ValueError:
+        return iso
+    hour = d.hour % 12 or 12
+    return f"{d.day} {d:%b}, {hour}:{d:%M} {'am' if d.hour < 12 else 'pm'}"
+
+
+def nice_full(iso: str) -> str:
+    """ "11 Nov 2026, 5:20 pm"."""
+    try:
+        d = datetime.fromisoformat(iso)
+    except ValueError:
+        return iso
+    hour = d.hour % 12 or 12
+    return f"{d.day} {d:%b %Y}, {hour}:{d:%M} {'am' if d.hour < 12 else 'pm'}"

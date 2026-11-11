@@ -124,7 +124,7 @@ def test_general_roles_come_from_config(client: FlaskClient) -> None:
 def test_start_page_warns_when_an_interview_is_running(client: FlaskClient, store: Store) -> None:
     interview_id = run_own(client, store)
     page = text(client.get("/interview"))
-    assert "in progress" in page
+    assert "Finish or end your current interview first" in page
     assert f"/interview/{interview_id}/run" in page
 
 
@@ -142,7 +142,7 @@ def test_my_questions_go_straight_to_the_run_page(client: FlaskClient, store: St
     assert "One here?" in page
     assert "Two!!" in page
     assert "Microphone check" in page
-    assert 'data-writing="no"' in page
+    assert 'id="mic"' in page
 
 
 def test_a_general_role_writes_questions_then_runs(
@@ -320,7 +320,8 @@ def test_the_preparing_page_polls(
     upload(client, interview_id, 1)
     store.set_interview_status(interview_id, st.PREPARING, now=T0, stage="scoring")
     page = text(client.get(f"/interview/{interview_id}"))
-    assert "Scoring your answers" in page
+    assert "Preparing your feedback" in page
+    assert "Scoring" in page
     assert f"/interview/{interview_id}/status" in page
     assert client.get(f"/interview/{interview_id}/status").get_json() == {
         "state": "preparing", "stage": "scoring", "error": "",
@@ -392,7 +393,7 @@ def finished_general(
 def test_feedback_page_shows_both_rubrics(client: FlaskClient, store: Store, fakes: Fakes) -> None:
     interview_id = finished_general(client, store, fakes)
     page = text(client.get(f"/interview/{interview_id}"))
-    assert "General role: Designer" in page
+    assert "General role · Designer" in page
     assert "1 of 5 answered" in page
     assert "Answer feedback" in page
     assert "How you spoke" in page
@@ -435,7 +436,8 @@ def test_my_questions_are_never_compared(client: FlaskClient, store: Store, fake
     page = text(client.get(f"/interview/{second}"))
     assert "▲" not in page
     assert "▼" not in page
-    assert "about the same" not in page
+    assert "since last time" not in page
+    assert "as last time" not in page
 
 
 def test_thumbs_can_be_saved_and_cleared(client: FlaskClient, store: Store, fakes: Fakes) -> None:
@@ -521,7 +523,8 @@ def test_history_shows_removed_roles_and_custom_questions(
     own = run_own(client, store, "Alpha question?", "Beta question?")
     page = text(client.get("/interview/history"))
     assert "2 custom questions" in page
-    assert "Alpha question? | Beta question?" in page
+    assert "1. Alpha question?" in page
+    assert "2. Beta question?" in page
     assert own
 
 
@@ -613,3 +616,50 @@ def test_the_page_script_json_is_valid(client: FlaskClient, store: Store) -> Non
     assert settings["id"] == interview_id
     assert settings["stop"] == 300
     assert settings["urls"]["answer"].endswith("/answer/0")
+
+
+def test_start_page_matches_the_mock(client: FlaskClient, store: Store) -> None:
+    upload_cv(store)
+    page = text(client.get("/interview"))
+    for heading in ("1. A role you track", "2. A general role", "3. My own questions"):
+        assert heading in page
+    assert "Picks from the roles already fetched into the Roles tab." in page
+    assert "Questions use the role, your CV and the must-haves." in page
+    assert "Questions use the title and your CV." in page
+    assert "1 to 5. Asked exactly as typed." in page
+    assert "+ Add question" in page
+    assert "Read questions aloud" in page
+    assert "Your voice is sent for transcription and is not saved." in page
+    assert page.count('name="q"') == 2
+
+
+def test_role_list_shows_three_until_you_search(client: FlaskClient, store: Store) -> None:
+    for n in range(6):
+        add_role(store, str(100 + n))
+    assert len(client.get("/interview/roles").get_json()["roles"]) == 3
+    assert len(client.get("/interview/roles?q=Acme").get_json()["roles"]) == 5
+
+
+def test_dates_are_shown_like_the_mock() -> None:
+    from jobscan.interview import views as vw
+
+    assert vw.nice_date("2026-11-03T10:00:00+05:30") == "3 Nov 2026"
+    assert vw.nice_datetime("2026-11-11T17:20:00+05:30") == "11 Nov, 5:20 pm"
+    assert vw.nice_full("2026-11-11T00:05:00+05:30") == "11 Nov 2026, 12:05 am"
+    assert vw.nice_date("junk") == "junk"
+
+
+def test_feedback_follows_the_mock_order(client: FlaskClient, store: Store, fakes: Fakes) -> None:
+    interview_id = finished_general(client, store, fakes)
+    page = text(client.get(f"/interview/{interview_id}"))
+    order = [
+        "Interview feedback",
+        "Your answers",
+        "How you spoke</h2>",
+        "See examples",
+        "Top 3 tips for next time",
+    ]
+    positions = [page.index(x) for x in order]
+    assert positions == sorted(positions)
+    assert "Top finding" in page
+    assert "Was this useful?" in page

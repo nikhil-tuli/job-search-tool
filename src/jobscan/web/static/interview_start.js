@@ -40,12 +40,8 @@
 
   function refresh() {
     var kind = kindInput.value;
-    cards.forEach(function (c) {
-      var on = c.getAttribute('data-kind') === kind;
-      c.classList.toggle('on', on);
-    });
-    var ok = cfg.hasCv && !cfg.running && valid();
-    button.disabled = !ok;
+    cards.forEach(function (c) { c.classList.toggle('on', c.getAttribute('data-kind') === kind); });
+    button.disabled = !(cfg.hasCv && !cfg.running && valid());
     hint.textContent = !cfg.hasCv ? 'Upload your CV first.' : cfg.running ? 'Finish your current interview first.' : (!kind ? 'Choose one of the three.' : '');
     add.disabled = ownBoxes().length >= cfg.maxQuestions;
   }
@@ -53,65 +49,99 @@
   function choose(kind) { kindInput.value = kind; refresh(); }
 
   cards.forEach(function (c) {
-    c.addEventListener('click', function () { if (kindInput.value !== c.getAttribute('data-kind')) { choose(c.getAttribute('data-kind')); } });
-    c.addEventListener('focusin', function () { if (kindInput.value !== c.getAttribute('data-kind')) { choose(c.getAttribute('data-kind')); } });
+    function activate() { if (kindInput.value !== c.getAttribute('data-kind')) { choose(c.getAttribute('data-kind')); } }
+    c.addEventListener('click', activate);
+    c.addEventListener('focusin', activate);
   });
 
-  function pick(li) {
-    list.querySelectorAll('li').forEach(function (x) { x.classList.remove('on'); x.setAttribute('aria-selected', 'false'); });
-    li.classList.add('on');
-    li.setAttribute('aria-selected', 'true');
-    roleInput.value = li.getAttribute('data-key');
+  function pick(el) {
+    list.querySelectorAll('.choice').forEach(function (x) { x.classList.remove('on'); x.setAttribute('aria-selected', 'false'); });
+    el.classList.add('on');
+    el.setAttribute('aria-selected', 'true');
+    roleInput.value = el.getAttribute('data-key');
     refresh();
   }
 
   list.addEventListener('click', function (e) {
-    var li = e.target.closest('li');
-    if (li) { pick(li); }
+    var el = e.target.closest('.choice');
+    if (el) { pick(el); }
   });
 
   function showRoles(roles) {
     var current = roleInput.value;
     list.textContent = '';
     roles.forEach(function (r) {
-      var li = document.createElement('li');
-      li.setAttribute('role', 'option');
-      li.setAttribute('data-key', r.key);
+      var el = document.createElement('div');
+      el.className = 'choice';
+      el.setAttribute('role', 'option');
+      el.setAttribute('data-key', r.key);
       var strong = document.createElement('strong');
-      strong.textContent = r.title;
-      var muted = document.createElement('span');
-      muted.className = 'muted';
-      muted.textContent = ' ' + r.company;
-      li.appendChild(strong);
-      li.appendChild(muted);
-      if (r.key === current) { li.classList.add('on'); li.setAttribute('aria-selected', 'true'); }
-      list.appendChild(li);
+      strong.textContent = r.company;
+      var small = document.createElement('small');
+      small.textContent = r.title;
+      el.appendChild(strong);
+      el.appendChild(document.createElement('br'));
+      el.appendChild(small);
+      if (r.key === current) { el.classList.add('on'); el.setAttribute('aria-selected', 'true'); }
+      list.appendChild(el);
     });
-    if (!roles.length) { list.textContent = 'No roles match.'; }
+    if (!roles.length) {
+      var none = document.createElement('small');
+      none.textContent = 'No roles match.';
+      list.appendChild(none);
+    }
   }
 
-  search.addEventListener('input', function () {
-    clearTimeout(timer);
-    timer = setTimeout(function () {
-      fetch(cfg.rolesUrl + '?q=' + encodeURIComponent(search.value.trim()), {headers: {Accept: 'application/json'}})
-        .then(function (r) { return r.json(); }).then(function (d) { showRoles(d.roles); }).catch(function () {});
-    }, 250);
-  });
+  function loadRoles() {
+    fetch(cfg.rolesUrl + '?q=' + encodeURIComponent(search.value.trim()), {headers: {Accept: 'application/json'}})
+      .then(function (r) { return r.json(); }).then(function (d) { showRoles(d.roles); }).catch(function () {});
+  }
 
+  search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(loadRoles, 250); });
   if (title) { title.addEventListener('change', refresh); }
   ownList.addEventListener('input', refresh);
 
-  add.addEventListener('click', function () {
-    var n = ownBoxes().length;
-    if (n >= cfg.maxQuestions) { return; }
+  function renumber() {
+    var boxes = ownBoxes();
+    for (var i = 0; i < boxes.length; i++) {
+      boxes[i].placeholder = 'Question ' + (i + 1);
+      boxes[i].setAttribute('aria-label', 'Question ' + (i + 1));
+    }
+  }
+
+  function newRow() {
+    var row = document.createElement('div');
+    row.className = 'irow own-row';
+    row.style.marginTop = '6px';
     var box = document.createElement('input');
     box.type = 'text';
     box.name = 'q';
     box.maxLength = 300;
-    box.placeholder = 'Question ' + (n + 1);
-    box.setAttribute('aria-label', 'Question ' + (n + 1));
-    ownList.appendChild(box);
-    box.focus();
+    var x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'icon remove';
+    x.setAttribute('aria-label', 'Remove question');
+    x.textContent = '✕';
+    row.appendChild(box);
+    row.appendChild(x);
+    return row;
+  }
+
+  add.addEventListener('click', function () {
+    if (ownBoxes().length >= cfg.maxQuestions) { return; }
+    var row = newRow();
+    ownList.appendChild(row);
+    renumber();
+    row.querySelector('input').focus();
+    refresh();
+  });
+
+  ownList.addEventListener('click', function (e) {
+    var x = e.target.closest('.remove');
+    if (!x) { return; }
+    var row = x.closest('.own-row');
+    if (ownBoxes().length > 1) { row.remove(); } else { row.querySelector('input').value = ''; }
+    renumber();
     refresh();
   });
 
@@ -132,8 +162,6 @@
     button.textContent = 'Starting…';
   });
 
-  if (!list.children.length) {
-    fetch(cfg.rolesUrl, {headers: {Accept: 'application/json'}}).then(function (r) { return r.json(); }).then(function (d) { showRoles(d.roles); }).catch(function () {});
-  }
+  if (!list.querySelector('.choice')) { loadRoles(); }
   refresh();
 })();

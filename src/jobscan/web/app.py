@@ -369,33 +369,33 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
         (
             (
                 "interview_roles",
-                "Allowed roles",
+                "Allowed roles (one per line)",
                 "One per line. The General role list on the start screen shows these",
             ),
             (
                 "interview_stt_base_url",
-                "Speech to text: service address",
+                "Transcription service address",
                 "Any OpenAI-compatible transcription service. Your voice is sent here, not saved",
             ),
-            ("interview_stt_model", "Speech to text: model", "Groq whisper-large-v3 by default"),
+            ("interview_stt_model", "Transcription model", "Groq whisper-large-v3 by default"),
             (
                 "interview_stt_key_env",
-                "Speech to text: key variable name",
+                "Transcription key variable",
                 "Name of the terminal variable holding the key. The key itself is never stored",
             ),
             (
                 "interview_ai_base_url",
-                "Questions and feedback: service address",
+                "Question and feedback service address",
                 "Leave empty to use Fit scoring (AI)",
             ),
             (
                 "interview_ai_model",
-                "Questions and feedback: model",
+                "Question and feedback model",
                 "Leave empty to use Fit scoring (AI)",
             ),
             (
                 "interview_ai_key_env",
-                "Questions and feedback: key variable name",
+                "Question and feedback key variable",
                 "Leave empty to use Fit scoring (AI)",
             ),
             (
@@ -405,22 +405,22 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
             ),
             (
                 "interview_amber_s",
-                "Time guide: wrap up at (s)",
+                "Amber at (s)",
                 "The timer turns amber and says 'Time to wrap up'",
             ),
             (
                 "interview_over_s",
-                "Time guide: over time at (s)",
+                '"Over" at (s)',
                 "The timer says 'Over 3 minutes'. Recording goes on",
             ),
             (
                 "interview_stop_s",
-                "Time guide: stop at (s)",
+                "Hard stop at (s)",
                 "The answer ends by itself and the next question starts",
             ),
             (
                 "interview_read_aloud",
-                "Read questions aloud",
+                "Read questions aloud by default",
                 "1 reads each question out. 0 shows it only. You can switch it on the start screen",
             ),
         ),

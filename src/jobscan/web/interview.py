@@ -32,19 +32,36 @@ from ..models import RoleFilter
 from ..store import Store
 from ..timeutil import now_ist, to_iso
 
-ROLE_SEARCH_LIMIT = 20
+ROLE_SEARCH_LIMIT = 5
+ROLE_DEFAULT_LIMIT = 3
 KIND_LABELS = {
     qs.COMPANY_ROLE: "Company role",
     qs.GENERAL_ROLE: "General role",
     qs.MY_QUESTIONS: "My questions",
 }
 STATUS_CLASS = {
-    st.IN_PROGRESS: "st-acc",
-    st.PREPARING: "st-wait",
-    st.READY: "st-ready",
-    st.INCOMPLETE: "st-review",
-    st.FAILED: "st-fail",
+    st.IN_PROGRESS: "muted",
+    st.PREPARING: "muted",
+    st.READY: "b-strong",
+    st.INCOMPLETE: "b-nw",
+    st.FAILED: "b-weak",
 }
+
+
+def describe(row: st.InterviewRow) -> str:
+    """ "Company role · Netspend · Senior Technical Program Manager"."""
+    parts = [KIND_LABELS[row.kind]]
+    if row.kind == qs.COMPANY_ROLE:
+        parts += [row.role_company, row.role_title]
+    elif row.kind == qs.GENERAL_ROLE:
+        parts.append(row.general_title)
+    return " · ".join(p for p in parts if p)
+
+
+def describe_short(row: st.InterviewRow) -> str:
+    if row.kind == qs.COMPANY_ROLE:
+        return f"{row.role_company} · {row.role_title}"
+    return row.general_title or KIND_LABELS[row.kind]
 
 
 def _role_key(value: str) -> tuple[str, str]:
@@ -70,6 +87,11 @@ def register(
     # so this is the only place the reason survives. Memory only; it holds no interview content.
     failures: dict[int, str] = {}
     store.fail_stale_interviews(clock())
+    app.add_template_filter(vw.nice_date, "nice_date")
+    app.add_template_filter(vw.nice_datetime, "nice_datetime")
+    app.add_template_filter(vw.nice_full, "nice_full")
+    app.add_template_global(describe, "interview_label")
+    app.add_template_global(describe_short, "interview_short")
 
     def config() -> Config:
         return sv.load_config(store)
@@ -147,6 +169,7 @@ def register(
         return render_template(
             "interview_start.html",
             cv=cv if cv is not None and cv.text.strip() else None,
+            cv_date=vw.nice_date(cv.uploaded_on) if cv is not None else "",
             selected=selected,
             kind=kind if kind in qs.INTERVIEW_TYPES else "",
             general_title=request.args.get("title", ""),
@@ -161,7 +184,8 @@ def register(
     @app.get("/interview/roles")
     def interview_roles() -> Response:
         query = request.args.get("q", "").strip()
-        roles = store.list_roles(RoleFilter(query=query), limit=ROLE_SEARCH_LIMIT)
+        limit = ROLE_SEARCH_LIMIT if query else ROLE_DEFAULT_LIMIT
+        roles = store.list_roles(RoleFilter(query=query), limit=limit)
         return jsonify(
             roles=[
                 {"key": f"{r.portal}|{r.job_id}", "title": r.title, "company": r.company}
@@ -386,18 +410,21 @@ def register(
             cards=cards,
             spoken_score=spoken_score,
             spoken_band=rl.band_of(spoken_score) if spoken_score is not None else "",
-            spoken_band_class=vw.band_class(rl.band_of(spoken_score))
+            spoken_class=vw.band_class(rl.band_of(spoken_score))
             if spoken_score is not None
             else "",
             spoken_change=spoken_change,
             spoken_change_class=vw.change_class(spoken_change),
             answer_band=rl.band_of(fb.answer_score) if fb.answer_score is not None else "",
-            answer_band_class=vw.band_class(rl.band_of(fb.answer_score))
+            answer_class=vw.band_class(rl.band_of(fb.answer_score))
             if fb.answer_score is not None
             else "",
             answer_change=answer_change,
             answer_change_class=vw.change_class(answer_change),
             worst=worst,
+            answer_before=previous.answer_score if previous else None,
+            spoken_before=previous.spoken_score if previous else None,
+            top_tips=fb.tips[:3],
             weakest=vw.aspect_label(weakest) if weakest else "",
             weakest_score=round(averages[weakest]) if weakest else 0,
             blocks=blocks,
