@@ -329,3 +329,14 @@ def test_user_message_has_cv_role_and_answers() -> None:
     assert "Title: TPM" in msg
     assert "[Question 1]" in msg
     assert "[Answer 1] " + TRANSCRIPT in msg
+
+
+def test_raw_line_break_and_trailing_comma_are_read() -> None:
+    reply = _reply().replace('"verdict": "', '"verdict": "line one\nline two ', 1)
+    reply = reply.rstrip()[:-1] + ",}"
+    assert fb.parse_feedback(reply, ANSWERS, CV).answers
+
+
+def test_invalid_json_message_gives_position_only() -> None:
+    with pytest.raises(fb.FeedbackError, match=r"at character \d+ of \d+"):
+        fb.extract_json('{"a": "x" "b"}')

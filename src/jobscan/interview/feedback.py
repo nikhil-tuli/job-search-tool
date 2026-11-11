@@ -42,10 +42,18 @@ def extract_json(text: str) -> dict[str, Any]:
     start, end = cleaned.find("{"), cleaned.rfind("}")
     if start < 0 or end <= start:
         raise FeedbackError("The reply has no JSON object.")
+    body = cleaned[start : end + 1]
     try:
-        data = json.loads(cleaned[start : end + 1])
+        # strict=False allows raw line breaks inside text. Models often write them.
+        data = json.loads(body, strict=False)
     except ValueError:
-        raise FeedbackError("The reply is not valid JSON.") from None
+        try:  # a trailing comma before } or ] is another common slip
+            data = json.loads(re.sub(r",\s*([}\]])", r"\1", body), strict=False)
+        except ValueError as exc:
+            raise FeedbackError(
+                f"The reply is not valid JSON: {exc.msg} at character {getattr(exc, 'pos', '?')} "
+                f"of {len(body)}."
+            ) from None
     if not isinstance(data, dict):
         raise FeedbackError("The reply is not a JSON object.")
     return data
