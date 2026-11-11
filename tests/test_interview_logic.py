@@ -295,10 +295,17 @@ def test_unusable_replies_raise(reply: str) -> None:
 
 
 def test_rating_out_of_range_or_not_a_number_raises() -> None:
-    for bad in (101, -1, "90", True):
+    for bad in (101, -1, "ninety", True):
         ratings = {k: {"score": bad, "reason": "x", "quote": "I led"} for k in r.ANSWER_ASPECT_KEYS}
         with pytest.raises(fb.FeedbackError):
             fb.parse_feedback(_reply(ratings=ratings), ANSWERS, CV)
+
+
+def test_quoted_numbers_are_accepted() -> None:
+    ratings = {k: {"score": "90", "reason": "x", "quote": "I led"} for k in r.ANSWER_ASPECT_KEYS}
+    reply = _reply(ratings=ratings).replace('"q": 1', '"q": "1"')
+    result = fb.parse_feedback(reply, ANSWERS, CV)
+    assert result.answers[0].idx == 1
 
 
 def test_reply_in_a_code_fence_is_read() -> None:

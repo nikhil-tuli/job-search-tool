@@ -467,9 +467,10 @@ def build_feedback(store: Store, env: Env, config: Config, interview_id: int) ->
                     raise
     except TailorError as exc:
         return _fail(store, env, interview_id, str(exc))
-    except fb.FeedbackError:
+    except fb.FeedbackError as exc:
+        # The parser's reason names the problem only. It never carries any answer text.
         return _fail(
-            store, env, interview_id, "The AI reply could not be used. Try again in a minute."
+            store, env, interview_id, f"The AI reply could not be used ({exc}) Try again."
         )
     assert result is not None
     store.save_feedback(

@@ -181,6 +181,11 @@ def _text(value: Any, limit: int, what: str) -> str:
 
 
 def _score(value: Any) -> int:
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())  # some models quote the number
+        except ValueError:
+            raise FeedbackError("A rating is not a number.") from None
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise FeedbackError("A rating is not a number.")
     if not 0 <= value <= 100:
@@ -243,6 +248,8 @@ def parse_feedback(reply: str, answers: Sequence[AnswerText], cv_text: str) -> F
         if not isinstance(item, dict):
             continue
         q = item.get("q")
+        if isinstance(q, str) and q.strip().isdigit():
+            q = int(q)  # some models quote the number
         if isinstance(q, bool) or not isinstance(q, int) or q not in by_idx or q in done:
             continue
         sent = by_idx[q]
