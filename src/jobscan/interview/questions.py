@@ -17,7 +17,8 @@ INTERVIEW_TYPES = (COMPANY_ROLE, GENERAL_ROLE, MY_QUESTIONS)
 QUESTION_COUNT = 5
 MAX_QUESTION_WORDS = 30
 MIN_OWN_CHARS = 5
-MAX_OWN_CHARS = 300
+MAX_OWN_WORDS = MAX_QUESTION_WORDS  # same 30-word limit as the written questions
+MAX_OWN_CHARS = 400  # a safety cap on the input box only
 MAX_OWN_QUESTIONS = 5
 
 # slot -> (kind, what it draws on)
@@ -62,6 +63,8 @@ def clean_own_questions(raw: Sequence[str]) -> tuple[list[str], str]:
             continue
         if len(text) < MIN_OWN_CHARS:
             return [], f"A question needs at least {MIN_OWN_CHARS} characters."
+        if len(text.split()) > MAX_OWN_WORDS:
+            return [], f"A question can have at most {MAX_OWN_WORDS} words."
         if len(text) > MAX_OWN_CHARS:
             return [], f"A question can have at most {MAX_OWN_CHARS} characters."
         if text.casefold() in seen:

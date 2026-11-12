@@ -105,7 +105,7 @@ Each requirement has an ID and the stories it serves.
 | FR-B1 | Show "Using CV: <file name>, uploaded <date>". If no CV is linked, show "Upload your CV to start", link to the Upload CV tab, and disable Start. | US-4 |
 | FR-B2 | Card 1, **A role you track**: search by company or title over all roles in the Roles tab. List shows company and title. Selected role is highlighted. | US-1 |
 | FR-B3 | Card 2, **A general role**: a drop-down of the allowed roles from Config. If the list is empty, the card is disabled with "Add roles in Config". | US-2, US-19 |
-| FR-B4 | Card 3, **My own questions**: 1 to 5 text boxes. Each question is 5 to 300 characters. Blank rows are ignored. Exact duplicates are removed. "Add question" is disabled at 5. | US-3 |
+| FR-B4 | Card 3, **My own questions**: 1 to 5 text boxes. Each question is 5 characters or more and at most 30 words, the same limit as the written questions. Blank rows are ignored. Exact duplicates are removed. "Add question" is disabled at 5. | US-3 |
 | FR-B5 | Only one card is active. Choosing one clears the others. Start is enabled only when the active card is valid. | US-1, US-2, US-3 |
 | FR-B6 | Switch **Read questions aloud**. Default comes from Config. | US-6 |
 | FR-B7 | Show: "Your voice is sent for transcription and is not saved." | US-18 |
@@ -591,7 +591,7 @@ Audio exists only in browser memory, about 1.5 MB for a 3-minute answer.
 | 5 | Role has no fit verdict | Gap question uses a common gap for the title. |
 | 6 | Role deleted after interview | Details shows "role removed". Feedback stays. |
 | 7 | Allowed roles list empty | General role card disabled with "Add roles in Config". |
-| 8 | My questions: blank, duplicate, over 300 characters | Blank ignored. Duplicates removed. Over-length shows an error. |
+| 8 | My questions: blank, duplicate, over 30 words | Blank ignored. Duplicates removed. Over-length shows an error. |
 | 9 | Second interview started while one is running | Blocked with a link to the running one. |
 | 10 | Role chosen on the start screen is hidden or removed meanwhile | "Role not found. Pick another." |
 

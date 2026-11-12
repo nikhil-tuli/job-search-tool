@@ -32,7 +32,8 @@ def test_own_questions_drop_blanks_and_repeats() -> None:
         ([], "at least one"),
         (["", "  "], "at least one"),
         (["abcd"], "at least 5"),
-        (["x" * 301], "at most 300"),
+        (["word " * 31], "at most 30 words"),
+        (["x" * 401], "at most 400"),
         ([f"Question number {i}" for i in range(6)], "at most 5"),
     ],
 )
