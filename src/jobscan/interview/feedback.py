@@ -351,9 +351,17 @@ Reply format:
 
 
 def build_user_message(
-    *, cv_text: str, role_lines: Sequence[str], answers: Sequence[AnswerText]
+    *,
+    cv_text: str,
+    role_lines: Sequence[str],
+    answers: Sequence[AnswerText],
+    must_haves: Sequence[tuple[str, str]] = (),
 ) -> str:
-    lines = ["CANDIDATE CV:", cv_text.strip(), "", "ROLE:", *role_lines, "", "ANSWERS:"]
+    lines = ["CANDIDATE CV:", cv_text.strip(), "", "ROLE:", *role_lines]
+    if must_haves:
+        lines += ["", "MUST-HAVES (status against the CV):"]
+        lines += [f"- {item}: {status}" for item, status in must_haves]
+    lines += ["", "ANSWERS:"]
     for a in answers:
         lines += [f"[Question {a.idx}] {a.question}", f"[Answer {a.idx}] {a.transcript}", ""]
     return "\n".join(lines).strip()

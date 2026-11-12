@@ -121,6 +121,7 @@ class Config:
     interview_ai_model: str = ""
     interview_ai_key_env: str = ""
     interview_reply_cap: int = 6_000
+    interview_repeat_window: int = 5  # do not repeat questions from this many past interviews
     interview_amber_s: int = 120
     interview_over_s: int = 180
     interview_stop_s: int = 300
@@ -271,6 +272,7 @@ _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
     "ai_max_words": (int, 500, 20_000),
     "ai_calls_per_minute": (int, 1, 600),
     "interview_reply_cap": (int, 1_000, 16_000),
+    "interview_repeat_window": (int, 0, 50),
     "interview_amber_s": (int, 30, 600),
     "interview_over_s": (int, 30, 600),
     "interview_stop_s": (int, 30, 600),

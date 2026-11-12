@@ -16,8 +16,6 @@ WEAK = "Weak"
 POINTS = {GOOD: 100, NEEDS_WORK: 60, WEAK: 25}
 RATING_ORDER = {WEAK: 0, NEEDS_WORK: 1, GOOD: 2}  # worst first
 
-STRONG = "Strong"
-BAND_STRONG_MIN = 80
 BAND_GOOD_MIN = 65
 BAND_NEEDS_WORK_MIN = 50
 
@@ -33,8 +31,6 @@ def round_half_up(value: float) -> int:
 
 def band_of(score: int) -> str:
     """The word for a rubric or answer score."""
-    if score >= BAND_STRONG_MIN:
-        return STRONG
     if score >= BAND_GOOD_MIN:
         return GOOD
     if score >= BAND_NEEDS_WORK_MIN:

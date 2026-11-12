@@ -26,7 +26,7 @@ Changes from v2
 | Sub-aspect | One rated item in a rubric (for example Pace) |
 | Rating | The value of a sub-aspect: Good, Needs work, Weak (spoken) or 0 to 100 (answer) |
 | Rubric score | The 0 to 100 score of one rubric for one interview |
-| Band | Word for a score: Strong, Good, Needs work, Weak |
+| Band | Word for a score: Good, Needs work, Weak |
 | Role, must-haves, role focus | As in fit scoring |
 
 **Shape of the feature**
@@ -127,12 +127,12 @@ Each requirement has an ID and the stories it serves.
 
 | ID | Requirement | Stories |
 |---|---|---|
-| FR-C2 | Input to the model: CV text, role title, company, role description, must-haves with status (Company role only), allowed question types, the last 5 question lists for the same kind. | US-1, US-2, US-4 |
+| FR-C2 | Input to the model: CV text, role title, company, role description, must-haves with status (Company role only), allowed question types, the question lists of the last N interviews for the same kind (N is a Config setting, default 5). | US-1, US-2, US-4 |
 | FR-C3 | Before sending, remove phone numbers, email addresses and links from the CV text. | US-18 |
 | FR-C4 | The model may use only facts in the CV. It must not invent employers, titles or numbers. | US-4 |
 | FR-C5 | Each question is one sentence of at most 30 words. One question per slot. | US-4 |
 | FR-C6 | Reply must be valid JSON (section 8.1). If invalid, retry once. If still invalid, show "Could not write questions. Try again." and keep the interview unsaved. | US-22 |
-| FR-C7 | Questions already asked in the last 5 interviews of the same kind are avoided. | US-21 |
+| FR-C7 | Questions already asked in the last N interviews of the same kind and role are avoided. N is "Do not repeat questions from the last (interviews)" in Config, default 5, 0 allows repeats. | US-21 |
 | FR-C8 | Role with no description: use title and company only. Show a note on the start of the interview. | US-1 |
 | FR-C9 | Role with no fit verdict: slots 2, 3 and 5 use role needs and a common gap for the title. | US-1 |
 | FR-C10 | My questions: no model call. Questions are asked exactly as typed. | US-3 |
@@ -309,7 +309,7 @@ Word lists (starting set, in code)
 
 Rubric score and band
 - Rubric score = average of the sub-aspect points, rounded.
-- Bands: Strong 80 to 100, Good 65 to 79, Needs work 50 to 64, Weak under 50.
+- Bands: Good 65 to 100, Needs work 50 to 64, Weak under 50. The same three words rate each spoken measure.
 
 Worked example
 
@@ -713,3 +713,5 @@ Every story is served by at least one functional requirement.
 - If question writing fails, the interview is deleted and the reason is shown once on the next page load. The reason is kept in memory only.
 - The Preparing page polls `/interview/<id>/status` (not `?status=1`).
 - Word times: the speech client asks for `verbose_json` with word and segment times and works without them. The pre-build test in section 11 is still to be run by the user.
+- Feedback also receives the must-haves with their Met, Partly or Missing labels (Company role only), so Role fit can be judged against them.
+- Bands are three: Good, Needs work, Weak (Strong was merged into Good).

@@ -404,6 +404,12 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "The most the model may write for one interview's feedback",
             ),
             (
+                "interview_repeat_window",
+                "Do not repeat questions from the last (interviews)",
+                "Questions from this many past interviews of the same type and role are not asked "
+                "again. 0 allows repeats",
+            ),
+            (
                 "interview_amber_s",
                 "Amber at (s)",
                 "The timer turns amber and says 'Time to wrap up'",

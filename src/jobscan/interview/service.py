@@ -251,7 +251,11 @@ def write_questions(store: Store, env: Env, config: Config, interview_id: int) -
             ]
             must_haves = []
             compare = row.compare_key
-        recent = store.recent_questions(row.kind, compare)
+        recent = (
+            store.recent_questions(row.kind, compare, config.interview_repeat_window)
+            if config.interview_repeat_window > 0
+            else []
+        )
         user = qs.build_user_message(
             cv_text=redact_cv(cv.text),
             role_lines=role_lines,
@@ -440,15 +444,19 @@ def build_feedback(store: Store, env: Env, config: Config, interview_id: int) ->
     )
     sent = [fb.AnswerText(a.idx, questions[a.idx].text, a.transcript) for a in answers]
     cv_text = redact_cv(cv.text)
+    must_haves: list[tuple[str, str]] = []
     if row.kind == qs.COMPANY_ROLE:
-        role_lines = role_material(
+        material = role_material(
             store, config, row.role_portal, row.role_job_id, row.role_company, row.role_title
-        ).lines
+        )
+        role_lines, must_haves = material.lines, material.must_haves
     elif row.kind == qs.GENERAL_ROLE:
         role_lines = [f"Title: {row.general_title}", "No specific company."]
     else:
         role_lines = ["These are the candidate's own practice questions. No specific role."]
-    user = fb.build_user_message(cv_text=cv_text, role_lines=role_lines, answers=sent)
+    user = fb.build_user_message(
+        cv_text=cv_text, role_lines=role_lines, answers=sent, must_haves=must_haves
+    )
     store.set_interview_status(interview_id, st.PREPARING, now=env.now(), stage="writing")
     store.set_interview_models(interview_id, config.interview_ai[1])
     result: fb.FeedbackResult | None = None
@@ -469,9 +477,7 @@ def build_feedback(store: Store, env: Env, config: Config, interview_id: int) ->
         return _fail(store, env, interview_id, str(exc))
     except fb.FeedbackError as exc:
         # The parser's reason names the problem only. It never carries any answer text.
-        return _fail(
-            store, env, interview_id, f"The AI reply could not be used ({exc}) Try again."
-        )
+        return _fail(store, env, interview_id, f"The AI reply could not be used ({exc}) Try again.")
     assert result is not None
     store.save_feedback(
         interview_id,

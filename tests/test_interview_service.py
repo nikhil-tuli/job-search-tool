@@ -289,6 +289,23 @@ def test_recent_questions_are_sent_so_they_are_not_repeated(store: Store) -> Non
     assert "- Question 1?" in ai.calls[0][1]
 
 
+def test_repeat_window_zero_sends_no_recent_questions(store: Store) -> None:
+    from dataclasses import replace
+
+    cv = upload_cv(store)
+    first = sv.create_interview(
+        store, config(), cv, kind=GENERAL_ROLE, now=T0, general_title="Product Manager"
+    )
+    sv.write_questions(store, make_env(FakeAi(questions_reply())), config(), first)
+    store.set_interview_status(first, st.READY, now=T0)
+    second = sv.create_interview(
+        store, config(), cv, kind=GENERAL_ROLE, now=T1, general_title="Product Manager"
+    )
+    ai = FakeAi(questions_reply())
+    sv.write_questions(store, make_env(ai), replace(config(), interview_repeat_window=0), second)
+    assert "ALREADY ASKED" not in ai.calls[0][1]
+
+
 # ---- answers --------------------------------------------------------------------------------
 
 

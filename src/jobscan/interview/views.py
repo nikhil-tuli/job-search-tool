@@ -11,7 +11,7 @@ from . import rules as r
 SAME_UNDER_POINTS = 5
 
 _DOT = {r.GOOD: "d-g", r.NEEDS_WORK: "d-a", r.WEAK: "d-r"}
-_BAND_CLASS = {r.STRONG: "strong", r.GOOD: "good", r.NEEDS_WORK: "nw", r.WEAK: "weak"}
+_BAND_CLASS = {r.GOOD: "good", r.NEEDS_WORK: "nw", r.WEAK: "weak"}
 
 SPOKEN_LABEL_TIP = (
     "Measured: the app counted these from your transcript. They can be wrong only if the "

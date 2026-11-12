@@ -40,7 +40,7 @@ def test_spoken_rating_boundaries(key: str, value: float, expected: str) -> None
 
 def test_bands_and_rounding() -> None:
     assert [r.band_of(s) for s in (100, 80, 79, 65, 64, 50, 49, 0)] == [
-        "Strong", "Strong", "Good", "Good", "Needs work", "Needs work", "Weak", "Weak",
+        "Good", "Good", "Good", "Good", "Needs work", "Needs work", "Weak", "Weak",
     ]  # fmt: skip
     assert r.average_score([70, 82, 64, 55]) == 68  # the worked example in the requirements
     assert r.average_score([]) is None
@@ -340,3 +340,14 @@ def test_raw_line_break_and_trailing_comma_are_read() -> None:
 def test_invalid_json_message_gives_position_only() -> None:
     with pytest.raises(fb.FeedbackError, match=r"at character \d+ of \d+"):
         fb.extract_json('{"a": "x" "b"}')
+
+
+def test_must_haves_are_sent_with_their_status_for_feedback() -> None:
+    text = fb.build_user_message(
+        cv_text=CV, role_lines=["Title: PM"], answers=ANSWERS, must_haves=[("Agile", "Partly")]
+    )
+    assert "MUST-HAVES (status against the CV):" in text
+    assert "- Agile: Partly" in text
+    assert "MUST-HAVES" not in fb.build_user_message(
+        cv_text=CV, role_lines=["Title: PM"], answers=ANSWERS
+    )

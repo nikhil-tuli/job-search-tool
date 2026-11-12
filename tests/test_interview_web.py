@@ -398,7 +398,7 @@ def test_feedback_page_shows_both_rubrics(client: FlaskClient, store: Store, fak
     assert "Answer feedback" in page
     assert "How you spoke" in page
     assert "80" in page
-    assert "Strong" in page
+    assert "Good" in page
     assert "Filler words" in page
     assert "Ownership" in page
     assert "Questions that were not answered" not in page

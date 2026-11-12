@@ -15,6 +15,7 @@ your own computer.
 - **Updates statuses:** reads your Gmail for rejections, interview invites and closures, and
   proposes status changes.
 - **Tracks everything:** status, date applied, contact and comments for every role.
+- **Practises interviews:** speak your answers to questions written from your CV and a role, then get scored feedback on what you said and how you said it.
 - **Tracks follow-ups:** mark a role as needing a follow-up with a recruiter or hiring manager,
   set the next date, and filter for what is due, upcoming or overdue. No key needed.
 
@@ -24,8 +25,29 @@ your own computer.
 - **Summary:** roles per day and where they stand.
 - **Eval:** compares the AI's rating with your own 👍 and 👎 on roles.
 - **Manage CV:** upload your CV and cover letter template; History lists tailored documents.
+- **Interview Prep:** a spoken practice interview on a role you track, a general role or your own questions, with feedback and Past History.
 - **Email Sync:** status changes found in your mail, waiting for review or applied.
 - **Config:** titles, filters, scan speed, the company list for Company sites and other settings.
+
+## Screenshots
+
+All data below is made up.
+
+**Roles** with the AI fit rating and a Practice interview button on every row.
+
+![Roles list](docs/screenshots/roles.png)
+
+**Interview Prep:** pick a role you track, a general role or your own questions.
+
+![Interview Prep start](docs/screenshots/interview-start.png)
+
+**Feedback:** an AI rating of each answer plus measured speech scores (pace, filler words and more).
+
+![Interview feedback](docs/screenshots/interview-feedback.png)
+
+**Past History** keeps every interview and lets you finish or retry one.
+
+![Past History](docs/screenshots/interview-history.png)
 
 ## Get started
 
