@@ -37,6 +37,14 @@ All data below is made up.
 
 ![Roles list](docs/screenshots/roles.png)
 
+**Modify CV & Cover Letter** keeps one row per request, with the Word file, the changes and a Start again button.
+
+![Modification History](docs/screenshots/cv-history.png)
+
+**Email Sync** proposes status changes from your mail. Clear ones apply by themselves. The rest wait for Accept or Discard.
+
+![Email Sync](docs/screenshots/email-sync.png)
+
 **Interview Prep:** pick a role you track, a general role or your own questions.
 
 ![Interview Prep start](docs/screenshots/interview-start.png)
@@ -147,6 +155,8 @@ read -s MISTRAL_API_KEY && export MISTRAL_API_KEY   # paste the key, press Enter
 ## More detail
 
 - Full requirements and decisions: `docs/REQUIREMENTS.md`.
+- System design: `docs/HIGH_LEVEL_DESIGN.md`.
+- Interview Prep: `docs/INTERVIEW_PREP_REQUIREMENTS.md` (rules) and `docs/INTERVIEW_PREP_AI_FLOW.md` (what each AI model does).
 - Commands (all start with `jobscan`):
   - `serve`: open the app
   - `scan`: fetch LinkedIn roles
