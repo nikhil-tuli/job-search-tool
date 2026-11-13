@@ -9,7 +9,7 @@ How one practice interview runs, which model does what, and every check in betwe
 | Groq Whisper | Speech to text, once per answer | One recording (25 MB max) | Transcript, word times | `whisper-large-v3`, English, temperature 0, `GROQ_API_KEY` |
 | Mistral, call 1 | Write 5 questions (not for My questions) | CV, role, must-haves, recent questions | 5 questions | Fit scoring model unless Config overrides. Temperature 0.5, 1,500 tokens |
 | Mistral, call 2 | Rate answers, write feedback. One call per interview | CV, role, must-haves, questions, transcripts | Ratings, quotes, advice | Same model. Temperature 0.2, 6,000 tokens |
-| App code | Measure speech, check replies, average, store | Transcripts, replies | Both scores, bands | No AI |
+| App code | Measure speech from the transcript. Check Mistral replies (valid JSON, quotes, numbers). Average. Store | Transcripts, replies | Both scores (0 to 100) and their band: Good, Needs work or Weak | No AI |
 
 Colour key in the charts: blue is Mistral, orange is Groq, green is app code, grey is a stop.
 
