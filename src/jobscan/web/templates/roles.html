@@ -20,7 +20,7 @@
   {{ multi.pick('portal', 'Portal', portal_options, filters.get('portal', [])) }}
   <input type="search" name="q" value="{{ filters.get('q', '') }}" placeholder="Search title, company, location, notes, description" aria-label="Search">
   {{ multi.pick('status', 'Status', status_options, filters.get('status', [])) }}
-  <label class="check"><input type="checkbox" name="dup" value="1" {% if filters.get('dup') %}checked{% endif %}> Possible duplicates only</label>
+  {{ multi.pick('fetched', 'Fetched', fetch_options, filters.get('fetched', [])) }}
   <button type="submit">Filter</button>
   <a href="{{ url_for('roles') }}">Clear</a>
   <a href="{{ url_for('export_csv', **filters) }}">Export CSV</a>
@@ -33,7 +33,7 @@
       {{ multi.pick('fit', 'Fit', fit_options, filters.get('fit', [])) }}
       {{ multi.pick('score', 'Score', score_options, filters.get('score', [])) }}
       {{ multi.pick('followup', 'Follow-up', follow_options, filters.get('followup', [])) }}
-      {{ multi.pick('fetched', 'Fetched', fetch_options, filters.get('fetched', [])) }}
+      <label class="check"><input type="checkbox" name="dup" value="1" {% if filters.get('dup') %}checked{% endif %}> Possible duplicates only</label>
     </div>
   </details>
 </form>

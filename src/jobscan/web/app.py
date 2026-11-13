@@ -1147,7 +1147,7 @@ def create_app(
                 pages=pages,
                 filters=active,
                 advanced_open=any(
-                    k in active for k in ("fit", "score", "followup", "fetched", "title")
+                    k in active for k in ("fit", "score", "followup", "dup", "title")
                 ),
                 title_options=[
                     *[(t, t) for t in title_phrases()],
