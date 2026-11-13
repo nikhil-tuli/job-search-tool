@@ -172,18 +172,20 @@ flowchart TD
 4. Groq keeps what its own policy says. The app cannot delete it there.
 5. Only the transcript, length and measures stay in SQLite.
 
-**Measures from the transcript (no AI).**
+**Measures from the transcript (no AI).** Each measure gets a rating: Good, Needs work or Weak.
 
-| Measure | Meaning | Good |
-|---|---|---|
-| Words | How much you said | 10 or more to be scored |
-| Pace | Words per speaking minute. Silences over 2 s excluded | 120 to 160 |
-| Thinking time | Seconds before the first word | Up to 3 |
-| Long pauses | Silences over 3 s | None |
-| Filler words | "um", "uh", "like" per 100 words | Under 3 |
-| Hedging | "I think", "maybe", "kind of" per 100 words | Under 2 |
-| Ownership | "I" as a share of "I" plus "we" | 50% or more |
-| Answer length | Seconds recorded, capped at 900 | 60 to 120 |
+| Measure | Meaning | Good | Needs work | Weak |
+|---|---|---|---|---|
+| Words | How much you said | 10 or more to be scored | Under 10: not scored | Under 10: not scored |
+| Pace | Words per speaking minute. Silences over 2 s excluded | 120 to 160 | 100 to 119, or 161 to 180 | Under 100, or over 180 |
+| Thinking time | Seconds before the first word | Up to 3 | Over 3 to 6 | Over 6 |
+| Long pauses | Silences over 3 s | 0 | 1 to 2 | 3 or more |
+| Filler words | "um", "uh", "like" per 100 words | Under 3 | 3 to 5 | Over 5 |
+| Hedging | "I think", "maybe", "kind of" per 100 words | Under 2 | 2 to 4 | Over 4 |
+| Ownership | "I" as a share of "I" plus "we" | 50% or more | 30% to 49% | Under 30% |
+| Answer length | Seconds recorded, capped at 900 | 60 to 120 | 30 to 59, or 121 to 180 | Under 30, or over 180 |
+
+Words is a gate, not a rated measure. The other seven are rated.
 
 Without word times from Groq, pace and pauses are approximate and show "~".
 
@@ -319,6 +321,8 @@ Example. Answer 1: 70, 60, 50 (capped from 80), 40, 50. Sum 270, score 54. Answe
 1. Rate each of the 7 measures Good, Needs work or Weak.
 2. Points: Good 100, Needs work 60, Weak 25.
 3. Score is the average of the 7, rounded half up.
+
+Points are only used to average the measures. The band comes from the final score.
 
 Example. 100, 100, 60, 100, 25, 60, 100. Sum 545, score 78. Band: Good.
 
