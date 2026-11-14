@@ -1,6 +1,5 @@
 {% macro pill(sc) -%}
 <span class="band {{ sc.band }}{% if sc.stale %} stale{% endif %}">{{ sc.band | capitalize }}</span><span class="info" tabindex="0" role="note" aria-label="{{ sc.reason }}">i<span class="tip">{{ sc.reason }}{% if sc.stale %} (out of date){% endif %}</span></span>
-{% if sc.domain %}<span class="tag domain" title="Domain of the role against your role focus">Domain: {{ sc.domain }}</span>{% endif %}
 {%- endmacro %}
 {% macro result(sc) -%}
 {{ pill(sc) }}

@@ -54,6 +54,8 @@ small { color: var(--muted); }
 td.bar { width: 40%; } .bar .fill { display: block; height: 10px; background: var(--accent); border-radius: 3px; }
 .brand { letter-spacing: .02em; }
 td.nw { white-space: nowrap; }
+.row-links { display: inline-flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; }
+.row-links a { white-space: nowrap; }
 tr.row { cursor: pointer; }
 tr.row:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 #scrim { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, .25); }

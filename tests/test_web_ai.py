@@ -55,7 +55,7 @@ def test_roles_list_shows_band_and_reason_in_an_info_icon(seeded: Store) -> None
     assert '<span class="band good">Good</span>' in page
     assert '<span class="band bad">Bad</span>' in page
     assert "Role focus matched" in page  # the reason sits in the info icon
-    assert "Domain: " in page  # the domain tag sits beside the fit score
+    assert "Domain: " not in page  # no domain tag beside the fit score
     assert "Missing: SAP" not in page
     assert "Strong" not in page
 
@@ -199,7 +199,7 @@ def test_role_focus_mismatch_is_partial_with_its_note_as_the_reason(seeded: Stor
     page = body(client.get("/roles"))
     assert '<span class="band partial">Partial</span>' in page
     assert "Role focus mismatch: warehouse operations" in page
-    assert "Domain: different" in page  # a tag only; it does not change the fit score
+    assert "Domain: " not in page  # the domain is not shown as a tag
     assert "Wrong role type" not in page
 
 
@@ -209,3 +209,9 @@ def test_checklist_evidence_uses_the_app_tooltip(seeded: Store) -> None:
     panel = body(make_client(seeded, fake).get("/roles/LinkedIn/1?partial=1"))
     assert 'data-tip="Led payment gateway migration"' in panel
     assert 'title="Led payment gateway migration"' not in panel
+
+
+def test_open_and_practice_links_sit_in_one_spaced_group(seeded: Store) -> None:
+    page = body(make_client(seeded, FakeClient([])).get("/roles"))
+    assert '<span class="row-links">' in page
+    assert 'class="practice"' in page
