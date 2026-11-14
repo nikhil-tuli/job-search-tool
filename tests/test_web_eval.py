@@ -231,15 +231,15 @@ def test_fit_score_and_sort_live_in_a_collapsed_advanced_section(web: Harness) -
     head, _, advanced = page.partition('<details class="advanced"')
     inside, _, _ = advanced.partition("</form>")
     assert advanced.startswith(">")  # no open attribute
-    for name in ('name="fit"', 'name="score"', 'name="followup"', 'name="fetched"'):
+    for name in ('name="fit"', 'name="score"', 'name="followup"', 'name="dup"'):
         assert name in inside
         assert name not in head
     assert 'name="q"' in head
     assert 'name="status"' in head
-    assert 'name="dup"' in head
+    assert 'name="fetched"' in head
 
 
-@pytest.mark.parametrize("query", ["fit=eligible", "score=weak"])
+@pytest.mark.parametrize("query", ["fit=eligible", "score=weak", "dup=1"])
 def test_the_section_opens_when_an_advanced_filter_is_on(web: Harness, query: str) -> None:
     add_role(web.store, "1")
     page = body(web.client.get(f"/roles?{query}"))
@@ -249,7 +249,7 @@ def test_the_section_opens_when_an_advanced_filter_is_on(web: Harness, query: st
 
 def test_basic_filters_leave_the_section_collapsed(web: Harness) -> None:
     add_role(web.store, "1")
-    page = body(web.client.get("/roles?status=Not+Applied&q=manager&dup=1"))
+    page = body(web.client.get("/roles?status=Not+Applied&q=manager&fetched=today"))
     assert '<details class="advanced">' in page
     assert "Advanced filters <span" not in page
 
