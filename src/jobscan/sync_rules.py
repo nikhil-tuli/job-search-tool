@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import cache
 
 from .mailbox import Mail
 from .models import (
@@ -15,6 +16,9 @@ from .models import (
     CONFIDENCE_MEDIUM,
     Role,
 )
+
+# How much of the email is read, for the stage and for the company. Same as the mail reader keeps.
+TEXT_CHARS = 3000
 
 STAGE_INTERVIEW = "interview"
 STAGE_REJECTED = "rejected"
@@ -136,6 +140,10 @@ _COMPANY_NOISE = frozenset(
         "corporation",
         "technologies",
         "technology",
+        "pte",
+        "pty",
+        "gmbh",
+        "plc",
         "india",
         "solutions",
         "services",
@@ -147,17 +155,26 @@ _COMPANY_NOISE = frozenset(
         "the",
     }
 )
+# Words that may sit next to the company name in a recruiting domain: careers-acme.com, acmejobs.com
+_DOMAIN_EXTRAS = ("careers", "jobs", "hr", "talent", "recruit", "recruiting", "hiring")
 _TITLE_NOISE = frozenset({"and", "the", "of", "for", "to", "in", "at", "a", "an"})
 _WORD = re.compile(r"[a-z0-9]+")
 _APOSTROPHE = chr(0x2019)
 
 
 def _text(mail: Mail) -> str:
-    return f"{mail.subject}\n{mail.body[:1500]}".lower().replace(_APOSTROPHE, "'")
+    return f"{mail.subject}\n{mail.body[:TEXT_CHARS]}".lower().replace(_APOSTROPHE, "'")
+
+
+@cache
+def _phrases_pattern(phrases: tuple[str, ...]) -> re.Pattern[str]:
+    """Matches a phrase only as whole words: "round 1" is not found inside "around 10"."""
+    body = "|".join(re.escape(p) for p in phrases)
+    return re.compile(rf"(?<![a-z0-9])(?:{body})(?![a-z0-9])")
 
 
 def _has(text: str, phrases: Sequence[str]) -> bool:
-    return any(p in text for p in phrases)
+    return _phrases_pattern(tuple(phrases)).search(text) is not None
 
 
 def detect_stage(mail: Mail) -> str | None:
@@ -209,12 +226,17 @@ def _mentions(text: str, name: str) -> bool:
 
 
 def _domain_matches(address: str, name: str) -> bool:
+    """The company name is a whole part of the sender domain (jobs.youtrip.com), or that part with
+    a recruiting word next to it (careers-youtrip.com). "ola" does not match viola.com."""
     domain = sender_domain(address)
     key = company_key(name)
     if not domain or domain in GENERIC_DOMAINS or len(key) < 3:
         return False
-    label = domain.replace("-", "").replace(".", "")
-    return key in label
+    for part in domain.split(".")[:-1]:  # the last part is the ending, such as com
+        label = part.replace("-", "")
+        if label == key or any(label in (key + extra, extra + key) for extra in _DOMAIN_EXTRAS):
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -226,7 +248,7 @@ class Candidate:
 def candidates(mail: Mail, roles: Sequence[Role]) -> list[Candidate]:
     """Roles the email could be about, by company. The strongest signal found is kept."""
     subject = mail.subject.lower()
-    body = mail.body[:2000].lower()
+    body = mail.body[:TEXT_CHARS].lower()
     found: list[Candidate] = []
     for role in roles:
         if _domain_matches(mail.sender, role.company):
@@ -254,6 +276,7 @@ def title_score(title: str, mail: Mail) -> float:
 class Match:
     role: Role
     confidence: str
+    tied: int = 0  # how many roles matched the email equally well, when more than one
 
 
 def pick_role(
@@ -271,7 +294,8 @@ def pick_role(
     best, second = scored[0][0], scored[1][0]
     if best >= 0.8 and best - second >= 0.2:
         return Match(scored[0][1].role, _after_ai(CONFIDENCE_MEDIUM, decided_by_ai, ai_sure))
-    return Match(scored[0][1].role, CONFIDENCE_LOW)
+    tied = sum(1 for score, _ in scored if score == best)
+    return Match(scored[0][1].role, CONFIDENCE_LOW, tied if tied > 1 else 0)
 
 
 def _after_ai(level: str, decided_by_ai: bool, ai_sure: bool) -> str:

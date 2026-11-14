@@ -656,3 +656,177 @@ def test_reread_button_starts_a_sync(store: Store, client: FlaskClient) -> None:
     reply = client.post("/sync/reread")
     assert reply.status_code == 302
     assert "Re-read last 30 days" in client.get("/sync").get_data(as_text=True)
+
+
+# ---- accuracy changes: Round 17 ---------------------------------------------------------------
+
+
+def test_a_phrase_is_matched_as_whole_words() -> None:
+    assert detect_stage(mail("Update", "We can talk around 10 am tomorrow")) is None
+    assert detect_stage(mail("Update", "Meet around 2 pm or around 3 pm")) is None
+    assert detect_stage(mail("Update", "Round 10 of the lottery")) is None
+    assert detect_stage(mail("Update", "Round 1 is on Monday")) == STAGE_INTERVIEW
+    assert detect_stage(mail("Update", "First round: Monday.")) == STAGE_INTERVIEW
+
+
+@pytest.mark.parametrize(
+    ("company", "sender", "expected"),
+    [
+        ("YouTrip Pte Ltd", "hr@jobs.youtrip.com", True),
+        ("Acme Pvt Ltd", "hr@acme.com", True),
+        ("Angel One", "hr@angel-one.in", True),
+        ("YouTrip", "no-reply@careers-youtrip.com", True),
+        ("YouTrip", "no-reply@youtripjobs.com", True),
+        ("Ola", "hr@viola.com", False),
+        ("Tesco India", "hr@tescobank.com", False),
+        ("Stripe", "jobs@greenhouse.io", False),
+        ("Acme", "hr@acme.example.com", True),
+    ],
+)
+def test_company_matching_by_sender_domain(company: str, sender: str, expected: bool) -> None:
+    from jobscan.sync_rules import _domain_matches
+
+    assert _domain_matches(sender, company) is expected
+
+
+def test_the_stage_and_the_company_are_read_from_the_same_3000_characters() -> None:
+    far = "x " * 1400 + "We will not be moving forward."  # starts after character 2800
+    assert detect_stage(mail("Update", far)) == STAGE_REJECTED
+
+
+def test_company_far_down_the_body_is_still_found(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Acme")
+    m = mail("Update", "x " * 1200 + "your application to Acme", sender="no-reply@greenhouse.io")
+    assert [c.signal for c in candidates(m, store.list_roles())] == ["body"]
+
+
+def test_a_rejection_after_interview_cleared_waits_for_review(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", status="Interview cleared", company="Acme")
+    result = sync(store, mail("Update", "We will not be moving forward"))
+    assert (result.applied, result.review) == (0, 1)
+    row = store.list_sync_updates()[0]
+    assert (row.previous_status, row.new_status, row.state) == (
+        "Interview cleared",
+        "Interview phase rejected",
+        SYNC_REVIEW,
+    )
+    assert status_of(store, "1") == "Interview cleared"
+
+
+def test_a_closure_after_interview_cleared_waits_for_review(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", status="Interview cleared", company="Acme")
+    sync(store, mail("Update", "The position has been closed"))
+    assert store.list_sync_updates()[0].new_status == "Closed"
+
+
+@pytest.mark.parametrize("body", ["Please schedule an interview", "We are pleased to offer you"])
+def test_interview_and_offer_mail_do_not_touch_interview_cleared(
+    store: Store, run_id: int, body: str
+) -> None:
+    applied(store, run_id, "1", status="Interview cleared", company="Acme")
+    assert sync(store, mail("Update", body)).ignored == 1
+    assert store.list_sync_updates() == []
+
+
+def test_an_invite_goes_to_the_applied_role_not_the_cleared_one(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", status="Interview cleared", company="Acme", title="Chef")
+    applied(store, run_id, "2", company="Acme", title="Pilot")
+    sync(store, mail("Interview scheduled", "Round 1 on Monday"))
+    assert status_of(store, "2") == "Interview Ongoing"
+    assert status_of(store, "1") == "Interview cleared"
+
+
+def test_target_for_interview_cleared() -> None:
+    assert target_status(STAGE_REJECTED, "Interview cleared") == "Interview phase rejected"
+    assert target_status(STAGE_CLOSED, "Interview cleared") == "Closed"
+    assert target_status(STAGE_INTERVIEW, "Interview cleared") is None
+    assert target_status(STAGE_OFFER, "Interview cleared") is None
+
+
+def test_roles_with_equal_titles_get_a_note(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Acme", title="Chef")
+    applied(store, run_id, "2", company="Acme", title="Chef")
+    sync(store, mail("Update", "We will not be moving forward"))
+    row = store.list_sync_updates()[0]
+    assert row.confidence == CONFIDENCE_LOW
+    assert "2 roles at this company match equally. Check the role." in row.note
+
+
+def test_a_clear_title_winner_has_no_tie_note(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Acme", title="Technical Program Manager")
+    applied(store, run_id, "2", company="Acme", title="Pilot")
+    sync(store, mail("Technical Program Manager update", "We will not be moving forward"))
+    assert store.list_sync_updates()[0].note == ""
+
+
+def test_mail_without_stage_wording_is_asked_to_the_ai(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Acme")
+    ai = FakeAI('{"stage": "rejected", "sure": true}')
+    sync(store, mail("About your profile", "We have decided to go another way."), ai=ai)
+    row = store.list_sync_updates()[0]
+    assert (row.new_status, row.state, row.confidence) == (
+        "Initial screening rejected",
+        SYNC_REVIEW,
+        CONFIDENCE_MEDIUM,
+    )
+    assert len(ai.sent) == 1
+
+
+def test_an_ai_interview_answer_for_unworded_mail_is_never_automatic(
+    store: Store, run_id: int
+) -> None:
+    applied(store, run_id, "1", company="Acme")
+    sync(store, mail("Hello", "Can we speak?"), ai=FakeAI('{"stage": "interview", "sure": true}'))
+    assert status_of(store, "1") == "Applied"
+    assert store.list_sync_updates()[0].state == SYNC_REVIEW
+
+
+@pytest.mark.parametrize(
+    "reply",
+    ['{"stage": "none", "sure": true}', '{"stage": "rejected", "sure": false}', "hm"],
+)
+def test_unworded_mail_the_ai_is_not_sure_about_is_left_alone(
+    store: Store, run_id: int, reply: str
+) -> None:
+    applied(store, run_id, "1", company="Acme")
+    result = sync(store, mail("Hello", "Newsletter"), ai=FakeAI(reply))
+    assert (result.ignored, store.list_sync_updates()) == (1, [])
+
+
+def test_only_mail_that_matches_a_role_and_has_no_wording_reaches_the_ai(
+    store: Store, run_id: int
+) -> None:
+    applied(store, run_id, "1", company="Acme")
+    ai = FakeAI('{"stage": "none", "sure": true}')
+    sync(
+        store,
+        mail("Hello", "Hi", sender="x@other.com", message_id="a"),  # no company match
+        mail("Thanks", "Thank you for applying to Acme", message_id="b"),  # received
+        mail("Update", "We will not be moving forward", message_id="c"),  # clear wording
+        mail("Hello", "Hi", message_id="d"),  # the one that qualifies
+        ai=ai,
+    )
+    assert len(ai.sent) == 1
+
+
+def test_unworded_mail_with_the_ai_off_is_ignored(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Acme")
+    off = Config.from_raw({"sync_use_ai": "0"})
+    ai = FakeAI('{"stage": "rejected", "sure": true}')
+    result = sync(store, mail("Hello", "Hi"), config=off, ai=ai)
+    assert (result.ignored, ai.sent) == (1, [])
+
+
+def test_unclear_mail_the_ai_says_is_nothing_is_ignored(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Acme")
+    ai = FakeAI('{"stage": "none", "sure": true}')
+    result = sync(store, mail("Update", "not moving forward but schedule an interview"), ai=ai)
+    assert (result.ignored, store.list_sync_updates()) == (1, [])
+
+
+def test_unclear_mail_the_ai_is_unsure_about_keeps_a_low_row(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Acme")
+    ai = FakeAI('{"stage": "none", "sure": false}')
+    sync(store, mail("Update", "not moving forward but schedule an interview"), ai=ai)
+    row = store.list_sync_updates()[0]
+    assert (row.new_status, row.confidence, row.state) == ("", CONFIDENCE_LOW, SYNC_REVIEW)

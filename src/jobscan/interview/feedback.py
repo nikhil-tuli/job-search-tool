@@ -49,10 +49,9 @@ def extract_json(text: str) -> dict[str, Any]:
     except ValueError:
         try:  # a trailing comma before } or ] is another common slip
             data = json.loads(re.sub(r",\s*([}\]])", r"\1", body), strict=False)
-        except ValueError as exc:
+        except json.JSONDecodeError as exc:
             raise FeedbackError(
-                f"The reply is not valid JSON: {exc.msg} at character {getattr(exc, 'pos', '?')} "
-                f"of {len(body)}."
+                f"The reply is not valid JSON: {exc.msg} at character {exc.pos} of {len(body)}."
             ) from None
     if not isinstance(data, dict):
         raise FeedbackError("The reply is not a JSON object.")

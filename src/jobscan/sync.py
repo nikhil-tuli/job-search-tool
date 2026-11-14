@@ -2,7 +2,7 @@
 
 Only moves into Interview Ongoing are applied without asking, and only when the match and the
 wording are both clear. Everything else waits in the Email Sync tab. A role is never moved
-backwards. See docs/REQUIREMENTS.md, Round 11.
+backwards. See docs/REQUIREMENTS.md, Round 11, and docs/EMAIL_SYNC_REQUIREMENTS.md.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from .sync_rules import (
     STAGE_REJECTED,
     STAGE_UNCLEAR,
     STAGES,
+    Match,
     candidates,
     detect_stage,
     pick_role,
@@ -46,6 +47,9 @@ from .tailor_ai import TailorError
 from .timeutil import from_iso, now_ist, to_iso
 
 OPEN_STATUSES = ("Applied", "Interview Ongoing")
+# Roles that mail can be matched to. "Interview cleared" only reacts to a rejection or a closure.
+CLEARED = "Interview cleared"
+TRACKED_STATUSES = (*OPEN_STATUSES, CLEARED)
 STUCK_AFTER = timedelta(minutes=30)
 SNIPPET_CHARS = 400
 CHECK_EVERY = 5
@@ -102,6 +106,8 @@ def default_source_factory(config: Config) -> MailSource:
 
 def target_status(stage: str, current: str) -> str | None:
     """The status a stage leads to from the current one, or None when nothing should change."""
+    if current == CLEARED:
+        return {STAGE_REJECTED: "Interview phase rejected", STAGE_CLOSED: "Closed"}.get(stage)
     if current not in OPEN_STATUSES:
         return None
     if stage == STAGE_INTERVIEW:
@@ -135,6 +141,7 @@ class _Decision:
     stage: str  # a stage, or "" when the email could not be understood
     role: Role
     confidence: str
+    note: str = ""
 
 
 def _decide(
@@ -144,24 +151,46 @@ def _decide(
     get_client: Callable[[], object | None],
 ) -> _Decision | None:
     stage = detect_stage(mail)
-    if stage is None or stage == STAGE_RECEIVED:
+    if stage == STAGE_RECEIVED:
         return None
     found = candidates(mail, roles)
-    if not found:
+    if not found or (stage is None and not use_ai):
         return None
     decided_by_ai, sure = False, True
-    if stage == STAGE_UNCLEAR:
+    if stage is None:
+        # No stage wording, but the company matches a role: ask the AI. Only a stage it is sure
+        # of is kept. "none", an unsure answer or a failed call leaves the email alone.
+        client = get_client()
+        if client is None:
+            return None
+        answer, sure = ask_ai(client, mail)
+        if answer is None or not sure:
+            return None
+        decided_by_ai, stage = True, answer
+    elif stage == STAGE_UNCLEAR:
         client = get_client() if use_ai else None
-        answer: str | None = None
+        answer = None
         if client is not None:
             decided_by_ai = True
             answer, sure = ask_ai(client, mail)
+            if answer is None and sure:  # the AI says the email changes nothing
+                return None
         if answer is None:
             match = pick_role(mail, found, decided_by_ai=False, ai_sure=True)
-            return _Decision(mail, "", match.role, CONFIDENCE_LOW)
+            return _Decision(mail, "", match.role, CONFIDENCE_LOW, _tie_note(match))
         stage = answer
+    if stage not in (STAGE_REJECTED, STAGE_CLOSED):
+        found = [c for c in found if c.role.status != CLEARED]
+        if not found:
+            return None
     match = pick_role(mail, found, decided_by_ai=decided_by_ai, ai_sure=sure)
-    return _Decision(mail, stage, match.role, match.confidence)
+    return _Decision(mail, stage, match.role, match.confidence, _tie_note(match))
+
+
+def _tie_note(match: Match) -> str:
+    if match.tied < 2:
+        return ""
+    return f"{match.tied} roles at this company match equally. Check the role."
 
 
 # ---- one sync --------------------------------------------------------------------------------
@@ -193,7 +222,7 @@ def run_sync(
     seen = store.seen_messages([m.message_id for m in mails])
     fresh = sorted((m for m in mails if m.message_id not in seen), key=lambda m: m.date)
     result = SyncResult(checked=len(fresh))
-    roles = store.list_roles(RoleFilter(statuses=OPEN_STATUSES))
+    roles = store.list_roles(RoleFilter(statuses=TRACKED_STATUSES))
 
     client_box: list[object | None] = []
 
@@ -224,7 +253,7 @@ def run_sync(
 def _apply_decision(store: Store, decision: _Decision, when: str, result: SyncResult) -> bool:
     """Record one decision. False when there was nothing to record."""
     role = store.get_role(decision.role.portal, decision.role.job_id)
-    if role is None or role.status not in OPEN_STATUSES:
+    if role is None or role.status not in TRACKED_STATUSES:
         return False
     new_status = target_status(decision.stage, role.status) if decision.stage else ""
     if new_status is None:
@@ -232,7 +261,8 @@ def _apply_decision(store: Store, decision: _Decision, when: str, result: SyncRe
     if new_status and store.has_pending_sync(role.portal, role.job_id, new_status):
         return False
     automatic = new_status == "Interview Ongoing" and decision.confidence == CONFIDENCE_HIGH
-    note = "" if decision.stage else "The email could not be understood. Please check it."
+    unread = "" if decision.stage else "The email could not be understood. Please check it."
+    note = " ".join(part for part in (unread, decision.note) if part)
     update_id = store.create_sync_update(
         portal=role.portal,
         job_id=role.job_id,
