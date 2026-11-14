@@ -388,3 +388,18 @@ def test_the_eval_page_offers_the_export_only_when_there_are_ratings(web: Harnes
     page = body(web.client.get("/eval"))
     assert "Export rated roles (CSV)" in page
     assert "/eval/rated.csv" in page
+
+
+def test_tabs_are_in_the_agreed_order(web: Harness) -> None:
+    page = body(web.client.get("/roles"))
+    nav = page[page.index("<nav>") : page.index("</nav>")]
+    labels = re.findall(r">([^<>]+?)(?: <span[^>]*>\d+</span>)?</a>", nav)
+    assert [x.replace("&amp;", "&").strip() for x in labels] == [
+        "Roles",
+        "Modify CV & Cover Letter",
+        "Interview Prep",
+        "Email Sync",
+        "Summary",
+        "Eval",
+        "Config",
+    ]
