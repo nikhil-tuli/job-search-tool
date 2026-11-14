@@ -979,7 +979,7 @@ M = Must-haves allowed missing (Config, default 2).
 - A maximum-years filter in the Fit filters (a role asking 20+ years still passes today).
 - Batching several roles in one call.
 
-## Round 16: AI call log and Langfuse push (built; the live Langfuse part is not yet tested against Langfuse)
+## Round 16: AI call log and Langfuse push (built; first live push confirmed on Langfuse Cloud, Nov 2026)
 
 Two options, built in this order. Option 1 needs no outside service. Option 2 is opt-in and off by default. Agreed: default 4 calls a minute, one wait-and-retry on a rate-limit error in batch runs only (not on the single-role Score button, because the app serves one request at a time and a minute's wait would freeze it), and no description text sent to Langfuse by default.
 
@@ -1042,6 +1042,34 @@ Two options, built in this order. Option 1 needs no outside service. Option 2 is
 **Privacy:** Langfuse is a third party. With the defaults, only labels, titles, companies, numbers and your ratings leave your computer.
 
 **Not included:** live per-call tracing, Phoenix, trajectory and convergence measures (the scanner has no agent loop to measure), tailoring calls, and sending the CV.
+
+### Ratings sent as scores (Langfuse)
+Two numeric scores (0 or 1) are attached to a role's scoring trace.
+
+**`human_rating`: what you rated**
+- 1 = you rated the role Good.
+- 0 = you rated the role Poor.
+- Sent for every rated role that has a sent trace.
+
+**`agrees_with_ai`: did you and the AI band agree**
+
+| You rated | AI band | Value |
+|---|---|---|
+| Good | Good | 1 (agree) |
+| Poor | Bad | 1 (agree) |
+| Good | Bad | 0 (disagree) |
+| Poor | Good | 0 (disagree) |
+| Either | Partial | No score. The trace and `human_rating` are still sent. |
+
+**Rules**
+- The name is fixed. The outcome is in the Value and Comment columns, for example "You rated it Good; the AI said Bad". One name keeps the average value equal to your agreement rate.
+- A rating needs a role with a current AI score and a sent trace. No AI score, or only failed calls, means nothing is sent for that role. It is sent on a later push once the role is scored.
+- A score is sent again only if your rating or the AI band changes.
+- Timestamps on scores are the time they were sent, not the time you rated.
+
+**Where to look in Langfuse:** Evaluation, Scores. Or the Tracing search bar, for example `scores.agrees_with_ai:0` to list disagreements.
+
+**Errors:** a failed call is sent as a trace with the error text (300 characters) as its status message and the HTTP status as metadata `http_status`.
 
 ### Key questions discussed
 - **What does "104 traces" mean after `jobscan push-traces`?** 104 AI calls, not 104 roles. Each call is one trace, and the log counts every call: failed ones (the 429 and 400 errors), re-scores, and the retry of an unreadable reply. Roles with a score are on the Eval tab ("Roles AI-scored"); calls are in its "AI calls" section.
