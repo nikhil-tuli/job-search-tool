@@ -1227,4 +1227,5 @@ Full logic, flowcharts and state diagrams: `docs/EMAIL_SYNC_REQUIREMENTS.md`.
 - **Equal titles:** the row says "N roles at this company match equally. Check the role."
 - **No stage wording:** mail from a company you applied to goes to the AI. Only a stage the AI is sure of creates a review row. "none", unsure and failed calls create nothing.
 - **Unclear mail:** an AI answer of "none" and sure is ignored. "none" but unsure, or a failed call, keeps a Low review row.
+- **One retry:** a failed AI call or an unreadable reply is tried once more after 5 seconds. A refused key or wrong address is not retried.
 - **Unchanged:** only a High confidence move into Interview Ongoing is automatic. The AI never applies a change by itself.

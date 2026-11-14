@@ -195,6 +195,7 @@ The AI is a second opinion. It never sees the whole mailbox.
   - Unclear mail (two or more stages).
   - Mail from a company you applied to with no stage wording at all.
 - **Not used for:** mail from companies you did not apply to, and thanks-for-applying mail.
+- **Retry:** a failed call or an unreadable reply is tried once more after 5 seconds. A refused key (401, 403) or a wrong address (404) is not retried. After two failures the call counts as failed.
 - **Switch:** Config `sync_use_ai`. Off means unclear mail goes straight to review, and mail with no wording is ignored.
 - **Model:** the same service as resume tailoring (same key and Config values).
 
@@ -317,7 +318,7 @@ Acceptance rules:
 - Stage wording is a fixed list (appendix). Other wordings are missed unless the AI step catches them.
 - HTML mail is turned into text by removing tags. HTML entities such as `&nbsp;` are not decoded.
 - Mail with no stage wording and no company match is ignored and never looked at again, except with Re-read.
-- A failed AI call on mail with no stage wording is not retried, except with Re-read.
+- A mail whose AI calls both fail (on mail with no stage wording) is ignored and marked as seen. Only Re-read looks at it again.
 - There is no cap on AI calls per sync. A first sync over 30 days could make many calls if many mails mention a company you applied to.
 - The AI sees 400 characters. A stage far down the body can be missed. Raising this to about 1000 is possible later.
 - Other statuses (Not Applied, Skipped, Not relevant, Closed and the rejected ones) never react to mail.

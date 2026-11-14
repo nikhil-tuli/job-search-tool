@@ -38,6 +38,7 @@ from jobscan.sync_rules import (
     detect_stage,
     pick_role,
 )
+from jobscan.tailor_ai import TailorError
 from jobscan.timeutil import now_ist, to_iso
 from jobscan.web import create_app
 from tests.test_web import add_role
@@ -75,6 +76,26 @@ class FakeAI:
     def complete(self, system: str, user: str) -> str:
         self.sent.append(user)
         return self.reply
+
+
+@pytest.fixture(autouse=True)
+def no_retry_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("jobscan.sync.RETRY_WAIT_SECONDS", 0)
+
+
+class FlakyAI:
+    """Answers from a list in order. An exception in the list is raised."""
+
+    def __init__(self, *answers: object) -> None:
+        self.answers = list(answers)
+        self.calls = 0
+
+    def complete(self, system: str, user: str) -> str:
+        self.calls += 1
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return str(answer)
 
 
 @pytest.fixture
@@ -830,3 +851,47 @@ def test_unclear_mail_the_ai_is_unsure_about_keeps_a_low_row(store: Store, run_i
     sync(store, mail("Update", "not moving forward but schedule an interview"), ai=ai)
     row = store.list_sync_updates()[0]
     assert (row.new_status, row.confidence, row.state) == ("", CONFIDENCE_LOW, SYNC_REVIEW)
+
+
+GOOD = '{"stage": "rejected", "sure": true}'
+
+
+def test_a_failed_ai_call_is_tried_once_more(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Acme")
+    ai = FlakyAI(TailorError("busy", status=429), GOOD)
+    sync(store, mail("Hello", "Hi"), ai=ai)  # type: ignore[arg-type]
+    assert ai.calls == 2
+    assert store.list_sync_updates()[0].new_status == "Initial screening rejected"
+
+
+def test_an_unreadable_ai_reply_is_tried_once_more(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Acme")
+    ai = FlakyAI("hm", GOOD)
+    sync(store, mail("Hello", "Hi"), ai=ai)  # type: ignore[arg-type]
+    assert ai.calls == 2
+    assert len(store.list_sync_updates()) == 1
+
+
+def test_the_ai_is_tried_only_twice(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Acme")
+    ai = FlakyAI(TailorError("down"), TailorError("down"), GOOD)
+    result = sync(store, mail("Hello", "Hi"), ai=ai)  # type: ignore[arg-type]
+    assert ai.calls == 2
+    assert (result.ignored, store.list_sync_updates()) == (1, [])
+
+
+def test_a_refused_ai_key_is_not_retried(store: Store, run_id: int) -> None:
+    applied(store, run_id, "1", company="Acme")
+    ai = FlakyAI(TailorError("refused", status=401), GOOD)
+    sync(store, mail("Hello", "Hi"), ai=ai)  # type: ignore[arg-type]
+    assert ai.calls == 1
+
+
+def test_an_unclear_mail_whose_ai_calls_both_fail_keeps_a_low_row(
+    store: Store, run_id: int
+) -> None:
+    applied(store, run_id, "1", company="Acme")
+    ai = FlakyAI(TailorError("down"), TailorError("down"))
+    sync(store, mail("Update", "not moving forward but schedule an interview"), ai=ai)  # type: ignore[arg-type]
+    assert ai.calls == 2
+    assert store.list_sync_updates()[0].new_status == ""

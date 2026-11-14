@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -53,6 +54,8 @@ TRACKED_STATUSES = (*OPEN_STATUSES, CLEARED)
 STUCK_AFTER = timedelta(minutes=30)
 SNIPPET_CHARS = 400
 CHECK_EVERY = 5
+RETRY_WAIT_SECONDS = 5  # pause before the one retry of a failed AI call
+NO_RETRY_STATUSES = (401, 403, 404)  # a refused key or a wrong address will not mend itself
 
 AI_PROMPT = """You read one email about a job application. Reply with a single JSON object and \
 nothing else: {"stage": "interview" | "rejected" | "offer" | "closed" | "none", "sure": true or \
@@ -122,17 +125,27 @@ def target_status(stage: str, current: str) -> str | None:
 
 
 def ask_ai(client: object, mail: Mail) -> tuple[str | None, bool]:
-    """(stage or None, sure). Only the sender, subject and a short snippet are sent."""
+    """(stage or None, sure). Only the sender, subject and a short snippet are sent.
+
+    A failed call or an unreadable reply is tried once more after a short pause.
+    """
     complete = getattr(client, "complete")  # noqa: B009
     message = f"From: {mail.sender}\nSubject: {mail.subject}\nSnippet: {mail.body[:SNIPPET_CHARS]}"
-    try:
-        reply = complete(AI_PROMPT, message)
-        start, end = reply.find("{"), reply.rfind("}")
-        data = json.loads(reply[start : end + 1])
-        stage = data.get("stage")
-        return (stage if stage in STAGES else None), bool(data.get("sure"))
-    except (TailorError, ValueError, TypeError, AttributeError):
-        return None, False
+    for attempt in range(2):
+        try:
+            reply = complete(AI_PROMPT, message)
+            start, end = reply.find("{"), reply.rfind("}")
+            data = json.loads(reply[start : end + 1])
+            stage = data.get("stage")
+            return (stage if stage in STAGES else None), bool(data.get("sure"))
+        except TailorError as exc:
+            if exc.status in NO_RETRY_STATUSES:
+                break
+        except (ValueError, TypeError, AttributeError):
+            pass
+        if attempt == 0:
+            time.sleep(RETRY_WAIT_SECONDS)
+    return None, False
 
 
 @dataclass
