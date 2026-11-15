@@ -77,7 +77,7 @@ A sync is one pass over new mail. Each mail goes through the decision in section
 
 ```mermaid
 flowchart TD
-    A(["Sync starts: schedule or Sync now"]) --> B{"Address and password set?"}
+    A(["Sync starts (timer or Sync now button)"]) --> B{"Address and password set?"}
     B -- No --> B1["Stop. The tab says what is missing"]
     B -- Yes --> C{"Another sync running?"}
     C -- Yes --> C1["Do nothing"]
@@ -107,15 +107,22 @@ Rules for reading:
 
 ## 5. How one email is decided
 
-Each email passes five questions, in this order. Each question has its own chart.
+Each email goes through five checks, in this order. Each check has its own chart.
 
 1. What stage does the email show?
 2. Does it mention a role I applied to?
-3. Do I need the AI?
+3. Is the AI needed to settle the stage?
 4. Which role is it, and how sure am I?
 5. Does the status change, and does it need my review?
 
-If any answer is "no", the email is ignored: no update is made.
+Only some answers stop the email (it is ignored and no update is made):
+
+- Check 1: only thanks-for-applying wording.
+- Check 2: no company matches.
+- Check 3: the AI gives no usable stage.
+- Check 5: nothing would change, or the same update already exists.
+
+An email with no stage wording is not stopped by check 1. It continues, and the AI may supply the stage.
 
 ### 5.1 What stage does the email show?
 
@@ -140,7 +147,8 @@ flowchart TD
 ### 5.2 Does it mention a role I applied to?
 
 Each tracked role is checked, using only the company name.
-The title is not used here.
+The job title is not used here. Many companies share the same title, so it cannot say which company wrote.
+The title is used only in check 4, to choose between several candidate roles.
 
 ```mermaid
 flowchart TD
@@ -189,7 +197,7 @@ flowchart TD
     D -- No --> X2["Ignore"]
 ```
 
-"No" covers three answers: the AI says none, the AI is unsure, or both tries failed.
+"No" covers three answers: the AI says none, the AI is unsure, or both tries failed. In all three, no update is made. The mail is still marked as seen.
 
 **Situation B: the email is unclear.**
 The rules saw two or more stages.
@@ -224,18 +232,23 @@ flowchart TD
     B -- "One" --> C{"Signal"}
     C -- "domain or subject" --> H["High"]
     C -- "body" --> M["Medium"]
-    B -- "Two or more" --> D["Score each title by how many of its words are in the email"]
-    D --> E{"Best score at least 0.8 and 0.2 ahead of the next?"}
+    B -- "Two or more" --> D["Score each role title"]
+    D --> E{"Clear winner?"}
     E -- Yes --> M2["Medium. Use the winner"]
     E -- No --> L["Low. Use the first of the best roles"]
 ```
 
-When several roles tie, the one at Interview Ongoing is preferred, then the first in the list.
+- **Title score:** the share of the title's words that appear in the subject or body. Example: "Technical Program Manager" with 2 of 3 words found scores 0.67. It is exact word matching, not a semantic search.
+- **Clear winner:** the best score is at least 0.8, and at least 0.2 above the next role.
+- **Tie:** the role at Interview Ongoing is preferred, then the first in the list.
+- **Not compared:** when there are several candidates, the signal (domain, subject, body) is ignored. Only the title decides. See the limits in section 9.
 The update then carries the note: "N roles at this company match equally. Check the role."
 
-If the AI decided the stage, the confidence is lowered:
+The confidence above comes from fixed rules and describes the role match.
+If the stage came from the AI, the confidence is lowered, because an AI answer is less certain than fixed wording.
+This is why an AI answer is never applied automatically.
 
-| Confidence from the chart | AI sure | AI unsure |
+| Confidence from the rules above | AI sure | AI unsure |
 |---|---|---|
 | High | Medium | Low |
 | Medium | Medium | Low |
@@ -330,6 +343,8 @@ You can still set any status by hand.
 
 ### 7.3 A sync run
 
+"Stuck" means a sync was marked as running but never finished. Examples: the app was closed, the computer went to sleep, or the program crashed mid-sync. After 30 minutes a new sync may start. Without this, one crash would block sync for good.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
@@ -364,7 +379,7 @@ Fixed in the code:
 | Text read per email (stage and company) | subject plus first 3000 characters |
 | Overlap on later syncs | 2 days |
 | Text sent to the AI | sender, subject, first 400 characters |
-| Wait before the AI retry | 5 seconds |
+| Wait before the AI retry | 5 seconds (a short pause for a brief network or rate-limit blip. Not tuned on real data) |
 | A sync counts as stuck after | 30 minutes |
 | Re-read button | last 30 days |
 
@@ -379,6 +394,7 @@ Know these before trusting a quiet review queue.
 - **AI sees 400 characters.** A stage far down the body can be missed.
 - **No cap on AI calls.** A first sync over 30 days can make many calls if many mails mention a company you applied to.
 - **No rate pacing in sync.** The one retry may not be enough when the AI provider's per-minute limit is hit.
+- **Signal strength is not compared** when several roles are candidates. A role matched by sender domain does not beat a role whose company is only named in the body. Only the title decides. A fix is proposed, not built.
 - **Other statuses** (Not Applied, Skipped, Not relevant, Closed, the rejected ones) never react to mail.
 - **Offers** move a role to Interview cleared. There is no "offer received" status.
 - **Other stages are not automatic.** Only Applied to Interview Ongoing is. This was reviewed in Nov 2026 and kept.
