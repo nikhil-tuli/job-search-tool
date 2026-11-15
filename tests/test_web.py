@@ -1309,3 +1309,11 @@ def test_summary_shows_the_last_successful_run_of_each_portal(
 def test_summary_has_no_naukri_run_line(client: FlaskClient, store: Store) -> None:
     body = text(client.get("/summary"))
     assert "Latest Naukri run" not in body
+
+
+def test_panel_closes_after_a_successful_save(client: FlaskClient) -> None:
+    script = client.get("/static/panel.js")
+    code = script.get_data(as_text=True)
+    script.close()
+    assert "applySaved(res.data); finishSave();" in code  # close and confirm, only on success
+    assert "function finishSave()" in code

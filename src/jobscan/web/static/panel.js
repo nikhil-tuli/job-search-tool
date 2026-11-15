@@ -87,7 +87,7 @@
       return (json ? r.json() : r.text()).then(function (data) { return { ok: r.ok, json: json, data: data }; });
     }).then(function (res) {
       if (!res) { return; }
-      if (res.ok && res.json) { applySaved(res.data); }
+      if (res.ok && res.json) { applySaved(res.data); finishSave(); }
       else if (!res.json) { show(res.data); }
       else { throw new Error('unexpected response'); }
     }).catch(function () {
@@ -96,6 +96,20 @@
       var b = f2 && f2.querySelector('button[type=submit]');
       if (b) { b.disabled = false; }
     });
+  }
+
+  // A saved role closes the panel. The list row is already updated, so confirm it with a message.
+  function finishSave() {
+    close();
+    if (current >= 0) { return; }  // the panel stayed open (unsaved edits made while saving)
+    var box = document.createElement('div');
+    box.className = 'flash ok';
+    box.setAttribute('role', 'status');
+    box.title = 'Click to dismiss';
+    box.textContent = 'Saved.';
+    box.addEventListener('click', function () { box.remove(); });
+    document.body.appendChild(box);
+    window.setTimeout(function () { box.remove(); }, 4000);
   }
 
   function scoreSubmit(event) {
