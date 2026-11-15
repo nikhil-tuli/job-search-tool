@@ -1,215 +1,260 @@
-# Email Sync: requirements and logic
+# Email Sync: what it does and how it decides
 
-Status: built. Updated Nov 2026 (accuracy changes, section 9).
+Status: built. Last revised Nov 2026.
 
-Email Sync reads your Gmail inbox and proposes status changes for roles you applied to.
-It uses plain rules first. It asks the AI only when the rules cannot decide.
-Only one kind of change is applied without asking: a clear invite moves a role to Interview Ongoing.
-Everything else waits in the Email Sync tab for you to accept or discard.
+## Contents
+
+1. [In short](#1-in-short)
+2. [Words used in this document](#2-words-used-in-this-document)
+3. [Set up](#3-set-up)
+4. [How one sync runs](#4-how-one-sync-runs)
+5. [How one email is decided](#5-how-one-email-is-decided)
+6. [Examples](#6-examples)
+7. [States](#7-states)
+8. [Settings and fixed values](#8-settings-and-fixed-values)
+9. [Limits](#9-limits)
+10. [What changed in Nov 2026](#10-what-changed-in-nov-2026)
+11. [Appendix: stage wording](#appendix-stage-wording)
 
 Related: `docs/REQUIREMENTS.md` (Round 11, Round 12 and Round 23), `docs/HIGH_LEVEL_DESIGN.md`.
 
-## 1. Goals and limits
+## 1. In short
 
-- Keep role statuses current without typing them in.
-- Never change a status backwards.
-- Never send the whole mailbox anywhere.
-- Never write to Gmail. The mailbox is opened read-only.
-- Out of scope: sending mail, replying, reading other folders, reading attachments (except calendar invites).
+Email Sync reads your Gmail inbox and keeps the status of your roles up to date.
+You do not type in "Interview Ongoing" or "Rejected" yourself.
 
-## 2. Setup
+- **It reads.** New mail in the inbox, read-only. It never changes, deletes or sends mail.
+- **It decides.** For each email it works out two things: what the email says, and which role it is about.
+- **It proposes.** Most changes wait in the Email Sync tab for you to accept or discard.
+- **It applies on its own in one case only.** A clear interview invite moves a role from Applied to Interview Ongoing.
+- **It can be undone.** Every automatic change has an Undo button.
+- **The AI is a second opinion.** It is asked only when the plain rules cannot decide. It sees three things: sender, subject and the first 400 characters.
 
-- Config, Email Sync: your Gmail address.
-- Terminal: `export JOBSYNC_APP_PASSWORD="<16-letter app password>"`, then `jobscan serve` in the same terminal.
-- The Gmail account needs 2-step verification, which is required to create an app password.
-- Without both, sync does not run. The Email Sync tab shows what is missing.
-
-| Config setting | Default | Range | Meaning |
-|---|---|---|---|
-| `sync_email` | empty | email | Gmail address. Empty keeps sync off. |
-| `sync_password_env` | `JOBSYNC_APP_PASSWORD` | variable name | Terminal variable that holds the app password. |
-| `sync_every_hours` | 4 | 1 to 24 | Time between scheduled syncs. |
-| `sync_first_days` | 30 | 1 to 90 | Days read on the first sync. |
-| `sync_use_ai` | 1 (on) | 0 or 1 | Allow the AI to help (sections 5 and 6). |
-
-Fixed values (not settings):
-
-| Value | Number | Where used |
-|---|---|---|
-| Newest mails read per sync | 1500 | Reading |
-| Text read per email | subject + first 3000 characters of the body | Stage and company checks |
-| Overlap on later syncs | 2 days | Start date |
-| Text sent to the AI | sender, subject, first 400 characters | AI call |
-| Re-read button | last 30 days | Re-read |
-| A running sync counts as stuck after | 30 minutes | Guard |
-
-## 3. The whole flow
-
-A sync starts on a schedule or with the Sync now button.
-It reads new mail, decides what each mail means, saves the results in one step and records the outcome.
-Every mail it reads is then marked as seen, including ignored mail, so it is not read twice.
+The whole idea in one picture:
 
 ```mermaid
-flowchart TD
-    A(["Start: schedule or Sync now"]) --> B{"Gmail address and app password set?"}
-    B -- No --> B1["Do not run. Tab shows what is missing"]
-    B -- Yes --> C{"Another sync running and not stuck?"}
-    C -- Yes --> C1["Do nothing"]
-    C -- No --> D["Mark sync as running"]
-    D --> E{"Re-read pressed?"}
-    E -- Yes --> E1["Forget seen marks for the last 30 days"]
-    E -- No --> F
-    E1 --> F["Work out the start date"]
-    F --> G["Read INBOX read-only from that date, newest 1500"]
-    G --> GE{"Gmail error?"}
-    GE -- Yes --> X["Finish with the error message. Keep the last good time"]
-    GE -- No --> H["Drop mails already seen"]
-    H --> I["Decide each new mail, oldest first (section 4)"]
-    I --> J["Save all decisions in one step"]
-    J --> K["Mark every new mail as seen"]
-    K --> L["Finish. Save last synced time and counts"]
+flowchart LR
+    A["Read new mail"] --> B["What does it say?"]
+    B --> C["Which role is it about?"]
+    C --> D{"Clear invite?"}
+    D -- Yes --> E["Role updated automatically"]
+    D -- No --> F["Waits for your review"]
 ```
 
-Start date:
+Mail that does not concern a role you applied to is ignored.
 
-- First sync: today minus `sync_first_days`.
-- Later syncs: last good sync minus 2 days. Gmail's date search has no time part, and mail can arrive late. Mails already seen are skipped, so the overlap is safe.
-- Re-read: today minus 30 days.
+## 2. Words used in this document
 
-## 4. What happens to one email
-
-The email is read in three steps.
-First the stage: what the wording says (interview, rejected, offer, closed).
-Then the role: which role it is about.
-Last the status: what the role would change to, and whether that needs your check.
-
-```mermaid
-flowchart TD
-    M(["New mail"]) --> S["Detect stage from subject and first 3000 characters"]
-    S --> R{"Only thanks-for-applying wording?"}
-    R -- Yes --> IGN["Ignore"]
-    R -- No --> C{"Company matches a tracked role? (section 5)"}
-    C -- No --> IGN
-    C -- Yes --> ST{"Stage wording found?"}
-
-    ST -- "One stage" --> RES
-    ST -- "None" --> AI0{"AI allowed and available?"}
-    AI0 -- No --> IGN
-    AI0 -- Yes --> Q0["Ask the AI"]
-    Q0 --> A0{"Stage given and AI sure?"}
-    A0 -- No --> IGN
-    A0 -- Yes --> RES
-
-    ST -- "Two or more stages (unclear)" --> AI1{"AI allowed and available?"}
-    AI1 -- No --> LOW["Review row, no new status, Low confidence. Note: could not be understood"]
-    AI1 -- Yes --> Q1["Ask the AI"]
-    Q1 --> A1{"AI answer"}
-    A1 -- "Stage given" --> RES
-    A1 -- "none and sure" --> IGN
-    A1 -- "none and unsure, or failed" --> LOW
-
-    RES["Stage settled"] --> CL{"Stage is rejected or closed?"}
-    CL -- No --> DROP["Remove roles at Interview cleared from the candidates"]
-    CL -- Yes --> PICK
-    DROP --> NONE{"Any candidate left?"}
-    NONE -- No --> IGN
-    NONE -- Yes --> PICK["Pick the role and its confidence (section 5)"]
-    PICK --> T{"New status for that role? (section 7)"}
-    T -- "No change" --> IGN
-    T -- "A new status" --> DUP{"Same status already waiting for that role, or mail already has a row?"}
-    DUP -- Yes --> IGN
-    DUP -- No --> AUTO{"New status is Interview Ongoing, confidence High, decided by rules?"}
-    AUTO -- Yes --> APPLY["Apply now. Row state: applied, can be undone"]
-    AUTO -- No --> REV["Create a row to review"]
-```
-
-Notes:
-
-- "Ignore" means no row is made. The mail is still marked as seen.
-- "Tracked role" means a role with status Applied, Interview Ongoing or Interview cleared.
-- "Interview cleared" roles react to rejected and closed only (section 7).
-- An unclear mail is one that shows two or more stages. Example: a rejection that says "your interview with our team".
-- "Decided by rules" excludes any answer from the AI. An AI answer is never applied automatically.
-
-## 5. Finding the role and its confidence
-
-An email is matched to a role by company name only.
-The role title is used only to choose between several roles at the same company.
-
-```mermaid
-flowchart TD
-    A["For each tracked role"] --> D{"Sender domain matches the company?"}
-    D -- Yes --> SD["Signal: domain"]
-    D -- No --> SU{"Company name in the subject?"}
-    SU -- Yes --> SS["Signal: subject"]
-    SU -- No --> BO{"Company name in the first 3000 characters of the body?"}
-    BO -- Yes --> SB["Signal: body"]
-    BO -- No --> NO["Not a candidate"]
-    SD --> N
-    SS --> N
-    SB --> N
-    NO --> N{"How many candidates?"}
-    N -- "0" --> IGN["Ignore the mail"]
-    N -- "1" --> ONE{"Signal"}
-    ONE -- "domain or subject" --> H["High"]
-    ONE -- "body" --> ME["Medium"]
-    N -- "2 or more" --> TS["Score each role by how many title words appear in the email"]
-    TS --> W{"Best score at least 0.8 and ahead of the next by 0.2?"}
-    W -- Yes --> ME2["Medium, best role"]
-    W -- No --> LO["Low, first of the best roles, plus a note if roles tie"]
-    H --> AIQ{"Stage decided by the AI?"}
-    ME --> AIQ
-    ME2 --> AIQ
-    AIQ -- No --> FIN["Keep confidence"]
-    AIQ -- Yes --> SURE{"AI sure?"}
-    SURE -- No --> LO2["Low"]
-    SURE -- Yes --> DROPH["High becomes Medium. Medium stays Medium"]
-```
-
-Company matching rules:
-
-- The company name is cleaned first: lower case, legal and filler words removed (Pvt, Ltd, Pte, Pty, GmbH, Plc, Inc, LLC, LLP, Corp, Technologies, India, Solutions, Services and similar), remaining words joined. Example: "YouTrip Pte Ltd" becomes `youtrip`.
-- Names shorter than 3 characters never match.
-- **Domain:** the sender domain is split at the dots. The company name must equal one whole part (not the ending such as `com`), with hyphens ignored. Or one part must be the name plus a recruiting word next to it: careers, jobs, hr, talent, recruit, recruiting, hiring.
-  - Matches: `jobs.youtrip.com`, `careers-youtrip.com`, `youtripjobs.com`, `angel-one.in` for "Angel One".
-  - Does not match: `viola.com` for "Ola", `tescobank.com` for "Tesco India".
-- Senders that serve many companies never match by domain (Gmail, Outlook, LinkedIn, Naukri, Greenhouse, Lever, Workday and similar). For these, the company must appear in the subject or body.
-- **Subject and body:** the company words must appear as whole words, in order. Space or hyphen between them is allowed.
-- **Equal titles:** when several roles tie for best, the one already at Interview Ongoing is preferred, then the first. The row gets the note "N roles at this company match equally. Check the role."
-
-Confidence values:
-
-| Confidence | When |
+| Word | Meaning |
 |---|---|
-| High | One role, matched by sender domain or subject, stage decided by the rules |
-| Medium | One role matched by the body only. Or a clear title winner among several roles. Or a High match whose stage came from the AI |
-| Low | Several roles without a clear title winner. Or the AI was unsure. Or the email could not be understood |
+| **Stage** | What an email says: interview, rejected, offer or closed. |
+| **Status** | The status of a role in the app, such as Applied or Interview Ongoing. |
+| **Update** | One row in the Email Sync tab: an email, a role and a proposed new status. |
+| **Review needed** | An update that waits for you. Nothing has changed yet. |
+| **Candidate role** | A role the email might be about. |
+| **Signal** | How an email was linked to a role: sender domain, subject or body. |
+| **Confidence** | How sure the app is that it picked the right role: High, Medium or Low. |
+| **Rules** | The built-in word lists and matching. No AI. |
+| **Tracked roles** | Roles with status Applied, Interview Ongoing or Interview cleared. Roles in any other status ignore email. |
 
-## 6. The AI step
+## 3. Set up
 
-The AI is a second opinion. It never sees the whole mailbox.
+1. In Config, Email Sync: enter your Gmail address.
+2. In your Google account: turn on 2-step verification, then create an app password (16 letters).
+3. In the terminal: `export JOBSYNC_APP_PASSWORD="<the 16 letters>"`.
+4. In the same terminal: `jobscan serve`.
+
+Until both the address and the password are set, sync does not run. The Email Sync tab says what is missing.
+
+Buttons on the Email Sync tab:
+
+- **Sync now:** reads new mail straight away. A sync also runs on its own every few hours.
+- **Re-read last 30 days:** forgets which mails were seen in the last 30 days and checks them all again. Use it after a settings or rules change. A mail never gets two updates.
+
+## 4. How one sync runs
+
+A sync is one pass over new mail. Each mail goes through the decision in section 5.
+
+```mermaid
+flowchart TD
+    A(["Sync starts: schedule or Sync now"]) --> B{"Address and password set?"}
+    B -- No --> B1["Stop. The tab says what is missing"]
+    B -- Yes --> C{"Another sync running?"}
+    C -- Yes --> C1["Do nothing"]
+    C -- No --> D["Read new inbox mail since the start date"]
+    D --> E{"Gmail reachable?"}
+    E -- No --> E1["Stop. Show the error. Keep the last good time"]
+    E -- Yes --> F["Decide each mail (section 5)"]
+    F --> G["Save the updates"]
+    G --> H["Mark every mail as seen"]
+    H --> I(["Done. Show the counts"])
+```
+
+Where reading starts:
+
+| Run | Start date |
+|---|---|
+| First sync | Today minus 30 days (`sync_first_days`) |
+| Later syncs | Last good sync minus 2 days |
+| Re-read | Today minus 30 days |
+
+Why 2 extra days: Gmail's date search has no time part, and mail can arrive late. Mails already seen are skipped, so reading twice is safe.
+
+Rules for reading:
+
+- Only the inbox. Newest 1500 mails at most.
+- Every mail read is marked as seen, even if it was ignored. A seen mail is not read again, except by Re-read.
+
+## 5. How one email is decided
+
+Each email passes five questions, in this order. Each question has its own chart.
+
+1. What stage does the email show?
+2. Does it mention a role I applied to?
+3. Do I need the AI?
+4. Which role is it, and how sure am I?
+5. Does the status change, and does it need my review?
+
+If any answer is "no", the email is ignored: no update is made.
+
+### 5.1 What stage does the email show?
+
+The app reads the subject and the first 3000 characters of the body.
+It looks for fixed wording in four groups: rejected, closed, offer and interview (appendix).
+A calendar invite counts as interview wording.
+The sender is not used here.
+
+```mermaid
+flowchart TD
+    A(["New mail"]) --> B{"How many stage groups match?"}
+    B -- "Two or more" --> U["Result: unclear"]
+    B -- "One" --> S["Result: that stage"]
+    B -- "None" --> D{"Thanks-for-applying wording?"}
+    D -- Yes --> X["Ignore. Nothing to change"]
+    D -- No --> N["Result: no stage wording"]
+```
+
+- **Unclear** means two or more stages at once. Example: "we are not moving forward ... your interview with our team".
+- Each phrase counts only as whole words. "round 1" does not match inside "around 10 am".
+
+### 5.2 Does it mention a role I applied to?
+
+Each tracked role is checked, using only the company name.
+The title is not used here.
+
+```mermaid
+flowchart TD
+    A(["One tracked role"]) --> B{"Sender domain matches the company?"}
+    B -- Yes --> S1["Candidate. Signal: domain"]
+    B -- No --> C{"Company in the subject?"}
+    C -- Yes --> S2["Candidate. Signal: subject"]
+    C -- No --> D{"Company in the first 3000 characters of the body?"}
+    D -- Yes --> S3["Candidate. Signal: body"]
+    D -- No --> N["Not a candidate"]
+```
+
+If no role becomes a candidate, the email is ignored.
+
+How the domain is matched:
+
+- The company name is cleaned first: lower case, words like Pvt, Ltd, Pte, Pty, GmbH, Plc, Inc, LLC, Technologies, India and Solutions are removed, the rest is joined. "YouTrip Pte Ltd" becomes `youtrip`.
+- The sender domain is split at the dots. The ending (`com`, `in`) is left out.
+- It matches if the company name equals one whole part, with hyphens ignored. `jobs.youtrip.com` matches "YouTrip".
+- It also matches if one part is the name plus a recruiting word: careers, jobs, hr, talent, recruit, recruiting, hiring. `careers-youtrip.com` matches.
+- It does not match inside a longer word. "Ola" does not match `viola.com`. "Tesco India" does not match `tescobank.com`.
+- Mail servers that carry many companies never match by domain: Gmail, Outlook, LinkedIn, Naukri, Greenhouse, Lever, Workday and similar. For these, the company must appear in the subject or body.
+- Names shorter than 3 letters never match.
+
+How the subject and body are matched: the company words must appear as whole words, in order.
+
+Roles at status Interview cleared are candidates only for rejected and closed mail.
+
+### 5.3 Do I need the AI?
+
+The AI is asked in two situations only.
+In both, a company you applied to must already match.
+The AI is never used for mail about other companies, or for thanks-for-applying mail.
+The AI can be switched off in Config (`sync_use_ai`).
+
+**Situation A: the email has no stage wording.**
+This is the mail the rules would otherwise miss.
+
+```mermaid
+flowchart TD
+    A(["No stage wording, company matches"]) --> B{"AI switched on?"}
+    B -- No --> X1["Ignore"]
+    B -- Yes --> C["Ask the AI"]
+    C --> D{"A stage, and the AI is sure?"}
+    D -- Yes --> E["Use the AI stage"]
+    D -- No --> X2["Ignore"]
+```
+
+"No" covers three answers: the AI says none, the AI is unsure, or both tries failed.
+
+**Situation B: the email is unclear.**
+The rules saw two or more stages.
+
+```mermaid
+flowchart TD
+    A(["Unclear mail, company matches"]) --> B{"AI switched on?"}
+    B -- No --> L["Update: Review needed, no new status, Low"]
+    B -- Yes --> C["Ask the AI"]
+    C --> D{"AI answer"}
+    D -- "A stage" --> E["Use the AI stage"]
+    D -- "none, and sure" --> X["Ignore"]
+    D -- "none but unsure, or failed" --> L
+```
+
+An update with "no new status" says "The email could not be understood. Please check it." You can only discard it.
+
+How the AI is called:
 
 - **Sent:** the sender, the subject and the first 400 characters of the body. Nothing else.
-- **Asked:** which stage the email shows (interview, rejected, offer, closed or none) and whether it is sure.
-- **Used for two cases:**
-  - Unclear mail (two or more stages).
-  - Mail from a company you applied to with no stage wording at all.
-- **Not used for:** mail from companies you did not apply to, and thanks-for-applying mail.
-- **Retry:** a failed call or an unreadable reply is tried once more after 5 seconds. A refused key (401, 403) or a wrong address (404) is not retried. After two failures the call counts as failed.
-- **Switch:** Config `sync_use_ai`. Off means unclear mail goes straight to review, and mail with no wording is ignored.
-- **Model:** the same service as resume tailoring (same key and Config values).
+- **Asked:** which stage (interview, rejected, offer, closed or none) and whether it is sure.
+- **Retry:** a failed call or an unreadable reply is tried once more after 5 seconds. A refused key (401, 403) or a wrong address (404) is not retried.
+- **Never automatic:** a change decided by the AI always waits for your review.
 
-How each answer is handled:
+### 5.4 Which role is it, and how sure am I?
 
-| Mail type | AI answer | Result |
+More than one candidate role can exist, for example two roles at the same company.
+
+```mermaid
+flowchart TD
+    A(["One or more candidate roles"]) --> B{"How many?"}
+    B -- "One" --> C{"Signal"}
+    C -- "domain or subject" --> H["High"]
+    C -- "body" --> M["Medium"]
+    B -- "Two or more" --> D["Score each title by how many of its words are in the email"]
+    D --> E{"Best score at least 0.8 and 0.2 ahead of the next?"}
+    E -- Yes --> M2["Medium. Use the winner"]
+    E -- No --> L["Low. Use the first of the best roles"]
+```
+
+When several roles tie, the one at Interview Ongoing is preferred, then the first in the list.
+The update then carries the note: "N roles at this company match equally. Check the role."
+
+If the AI decided the stage, the confidence is lowered:
+
+| Confidence from the chart | AI sure | AI unsure |
 |---|---|---|
-| Unclear | A stage | Row to review. Confidence at most Medium |
-| Unclear | none, sure | Ignored. No row |
-| Unclear | none but unsure, or the call failed | Review row, no new status, Low. Note: could not be understood |
-| No stage wording | A stage and sure | Row to review. Confidence at most Medium |
-| No stage wording | none, an unsure answer, or the call failed | Ignored. No row |
+| High | Medium | Low |
+| Medium | Medium | Low |
+| Low | Low | Low |
 
-## 7. Which status a stage leads to
+### 5.5 Does the status change, and does it need my review?
+
+```mermaid
+flowchart TD
+    A(["Stage and role settled"]) --> B{"Does this stage change this role's status? (table below)"}
+    B -- No --> X["Ignore"]
+    B -- Yes --> C{"Same change already waiting for this role, or this mail already has an update?"}
+    C -- Yes --> X
+    C -- No --> D{"New status is Interview Ongoing, confidence High, decided by the rules?"}
+    D -- Yes --> E["Applied automatically. Undo is available"]
+    D -- No --> F["Update: Review needed"]
+```
+
+What each stage does to each status:
 
 | Current status | interview | rejected | offer | closed |
 |---|---|---|---|---|
@@ -218,37 +263,50 @@ How each answer is handled:
 | Interview cleared | no change | Interview phase rejected | no change | Closed |
 | Any other status | no change | no change | no change | no change |
 
-Rules:
+Rules that always hold:
 
 - All interview rounds map to Interview Ongoing. There are no per-round statuses.
-- Status never moves backwards.
-- Only "Applied to Interview Ongoing" can be applied automatically, and only with High confidence from the rules.
-- Every other change waits in the review list. This includes every rejection. This is a standing decision.
-- Roles you have set to any other status are ignored by sync.
+- A status never moves backwards.
+- Only "Applied to Interview Ongoing" is automatic. It needs High confidence and a decision by the rules, not the AI.
+- Every other change waits for you. This includes every rejection. This is a standing decision.
 
-## 8. States
+## 6. Examples
 
-### 8.1 A sync row
+| Email | Stage | Role match | What happens |
+|---|---|---|---|
+| "Interview invite" from `talent@kestrelbank.example`, role at Applied | interview | one role, by domain: High | Applied automatically to Interview Ongoing. Undo available |
+| "We will not be moving forward" from `careers@orbitretail.example` | rejected | one role, by domain: High | Review needed: Initial screening rejected. Rejections are never automatic |
+| "Let's talk around 10 am tomorrow" from a company you applied to | none (not "round 1") | one role | AI is asked. If it says none and is sure, the mail is ignored |
+| "Not moving forward ... your interview with our team" | unclear | one role | AI is asked. A stage is used and reviewed. None and sure is ignored. None but unsure keeps an update that cannot be understood |
+| Rejection, company has two roles titled "Chef" | rejected | tie: Low | Review needed. Note: "2 roles at this company match equally. Check the role." |
+| Rejection for a role at Interview cleared | rejected | one role | Review needed: Interview phase rejected |
+| Offer email for a role at Interview cleared | offer | one role | Ignored: nothing to change |
+| Newsletter from a company you did not apply to | none | no candidate | Ignored |
+| "Thanks for applying" | received | n/a | Ignored |
 
-Each proposed or applied change is one row in the Email Sync tab.
+## 7. States
+
+### 7.1 An update (a row in the tab)
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Review: Needs your check
-    [*] --> Applied: Clear invite, applied automatically
-    Review --> Accepted: Accept (status still as proposed from)
-    Review --> Discarded: Discard
-    Review --> Discarded: Accept, but status changed since
-    Applied --> Discarded: Undo
+    [*] --> ReviewNeeded: Needs your check
+    [*] --> AppliedAuto: Clear invite
+    ReviewNeeded --> Accepted: Accept
+    ReviewNeeded --> Discarded: Discard
+    AppliedAuto --> Discarded: Undo
     Accepted --> [*]
     Discarded --> [*]
+    state "Review needed" as ReviewNeeded
+    state "Applied automatically (shown as No pending action)" as AppliedAuto
 ```
 
-- **Review:** nothing has changed yet. A review row with no new status (could not be understood) can only be discarded.
-- **Applied:** the role is already changed. Undo restores the previous status, but only if you have not changed it since. If you have, the row is marked Discarded and the role is left alone.
-- **Accept:** applies the new status, but only if the role still has the status it had when the row was made. Otherwise the row is discarded with a note.
+- **Review needed:** nothing has changed yet.
+- **Accept:** sets the new status, but only if the role still has the status it had when the update was made. If you changed it meanwhile, the update is discarded with a note and the role is left alone.
+- **Undo:** restores the previous status, under the same condition.
+- **No new status:** an update that could not be understood can only be discarded.
 
-### 8.2 A role's status, as sync can change it
+### 7.2 A role's status, as sync can change it
 
 ```mermaid
 stateDiagram-v2
@@ -268,9 +326,9 @@ stateDiagram-v2
     state "Interview phase rejected" as InterviewPhaseRejected
 ```
 
-You can still set any status by hand. Sync never moves a role out of a status not shown here.
+You can still set any status by hand.
 
-### 8.3 A sync run
+### 7.3 A sync run
 
 ```mermaid
 stateDiagram-v2
@@ -278,51 +336,79 @@ stateDiagram-v2
     Idle --> Reading: Start
     Reading --> Checking: Mail read
     Checking --> Saving: All mails decided
-    Saving --> Idle: Done. Last good time and counts saved
+    Saving --> Idle: Done
     Reading --> Failed: Gmail error
     Checking --> Failed: Unexpected error
-    Failed --> Idle: Error shown. Last good time kept
+    Failed --> Idle: Error shown, last good time kept
     Reading --> Idle: Stuck for 30 minutes, a new sync may start
     Checking --> Idle: Stuck for 30 minutes, a new sync may start
 ```
 
-## 9. Accuracy changes (Nov 2026)
+## 8. Settings and fixed values
 
-Reasons: real mail was missed, and some mail was read wrongly.
+Settings you can change in Config:
 
-| # | Change | Reason |
+| Setting | Default | Range | Meaning |
+|---|---|---|---|
+| `sync_email` | empty | email | Gmail address. Empty keeps sync off. |
+| `sync_password_env` | `JOBSYNC_APP_PASSWORD` | variable name | Terminal variable that holds the app password. |
+| `sync_every_hours` | 4 | 1 to 24 | Time between scheduled syncs. |
+| `sync_first_days` | 30 | 1 to 90 | Days read on the first sync. |
+| `sync_use_ai` | on | on or off | Allow the AI step (section 5.3). |
+
+Fixed in the code:
+
+| Value | Number |
+|---|---|
+| Newest mails read per sync | 1500 |
+| Text read per email (stage and company) | subject plus first 3000 characters |
+| Overlap on later syncs | 2 days |
+| Text sent to the AI | sender, subject, first 400 characters |
+| Wait before the AI retry | 5 seconds |
+| A sync counts as stuck after | 30 minutes |
+| Re-read button | last 30 days |
+
+## 9. Limits
+
+Know these before trusting a quiet review queue.
+
+- **Inbox only.** Mail filed under other labels is not read.
+- **Fixed wording.** Stage wording is a fixed list (appendix). The AI catches other wording only when the company matches.
+- **HTML mail** is turned into text by removing tags. Entities such as `&nbsp;` are not decoded.
+- **Ignored mail is gone.** A mail with no stage wording, or one the AI could not help with, is marked as seen. Only Re-read looks at it again.
+- **AI sees 400 characters.** A stage far down the body can be missed.
+- **No cap on AI calls.** A first sync over 30 days can make many calls if many mails mention a company you applied to.
+- **No rate pacing in sync.** The one retry may not be enough when the AI provider's per-minute limit is hit.
+- **Other statuses** (Not Applied, Skipped, Not relevant, Closed, the rejected ones) never react to mail.
+- **Offers** move a role to Interview cleared. There is no "offer received" status.
+- **Other stages are not automatic.** Only Applied to Interview Ongoing is. This was reviewed in Nov 2026 and kept.
+
+## 10. What changed in Nov 2026
+
+Reason: real mail was missed, and some mail was read wrongly.
+
+| # | Change | Why |
 |---|---|---|
-| 1 | Stage phrases match whole words only | "round 1" was found inside "around 10 am". A plain text hit could apply a status change automatically |
-| 2 | Company matching by whole domain parts. Pte, Pty, GmbH and Plc dropped from names | "YouTrip Pte Ltd" never matched `youtrip.com`. "Ola" matched `viola.com` |
-| 3 | One text window of 3000 characters for the stage and the company | The stage used 1500 and the company 2000, with no reason |
-| 4 | "Interview cleared" roles react to rejected and closed mail | A rejection after clearing interviews was ignored |
-| 5 | Note on the row when several roles tie | The row pointed at one role without saying it was a guess |
-| 6 | Mail from a company you applied to with no stage wording goes to the AI | Such mail was dropped and never seen again |
-| 7 | AI "none and sure" is ignored | It created a review row, which added noise |
+| 1 | Stage wording matches whole words only | "round 1" was found inside "around 10 am" and could change a status automatically |
+| 2 | Company matching uses whole domain parts. Pte, Pty, GmbH and Plc are dropped from names | "YouTrip Pte Ltd" never matched `youtrip.com`. "Ola" matched `viola.com` |
+| 3 | One 3000-character window for stage and company | They used 1500 and 2000, with no reason |
+| 4 | Roles at Interview cleared react to rejected and closed mail | A rejection after clearing interviews was ignored |
+| 5 | A note on the update when several roles tie | The update pointed at one role without saying it was a guess |
+| 6 | Mail with no stage wording, from a company you applied to, goes to the AI | Such mail was dropped and never seen again |
+| 7 | An AI answer of "none and sure" is ignored | It created an update and added noise |
+| 8 | One retry for a failed AI call | One failed call lost the mail |
 
-Acceptance rules:
+Checks the tests cover:
 
-- "We can talk around 10 am" does not count as an interview.
-- "Round 1 is on Monday" counts as an interview. "Round 10" does not.
+- "We can talk around 10 am" is not an interview. "Round 1 is on Monday" is. "Round 10" is not.
 - "YouTrip Pte Ltd" matches `jobs.youtrip.com`. "Ola" does not match `viola.com`.
 - A stage phrase at character 2800 of the body is found.
-- A rejection or closure for a role at Interview cleared creates a review row. An interview or offer mail does not.
+- A rejection or closure for a role at Interview cleared creates an update. An interview or offer mail does not.
 - With an Interview cleared role and an Applied role at one company, an invite goes to the Applied role.
 - Two roles with equal titles produce the tie note.
-- Mail with no stage wording reaches the AI only if the company matches a tracked role. An AI answer of none, unsure or failed creates no row.
+- Mail with no stage wording reaches the AI only if the company matches a tracked role.
 - No AI answer is ever applied automatically.
-
-## 10. Known limits
-
-- Only the INBOX is read. Mail filed under other labels is not.
-- Stage wording is a fixed list (appendix). Other wordings are missed unless the AI step catches them.
-- HTML mail is turned into text by removing tags. HTML entities such as `&nbsp;` are not decoded.
-- Mail with no stage wording and no company match is ignored and never looked at again, except with Re-read.
-- A mail whose AI calls both fail (on mail with no stage wording) is ignored and marked as seen. Only Re-read looks at it again.
-- There is no cap on AI calls per sync. A first sync over 30 days could make many calls if many mails mention a company you applied to.
-- The AI sees 400 characters. A stage far down the body can be missed. Raising this to about 1000 is possible later.
-- Other statuses (Not Applied, Skipped, Not relevant, Closed and the rejected ones) never react to mail.
-- Offer detection moves a role to Interview cleared. There is no "offer received" status.
+- A failed AI call is tried twice in total, except for a refused key.
 
 ## Appendix: stage wording
 
@@ -337,7 +423,7 @@ Acceptance rules:
 
 **Interview:** schedule an interview, schedule a call, interview scheduled, interview invitation, invite you for an interview, invite you to an interview, invitation to interview, interview with, next round, technical round, intro call, introductory call, telephonic, video interview, your availability, round 1, round 2, round 3, first round, second round, final round. A calendar invite also counts as interview. A cancelled invite does not.
 
-**Received (ignored, no change):** thank you for applying, thanks for applying, application received, we have received your application, we've received your application, your application has been submitted, application was sent
+**Thanks for applying (ignored, no change):** thank you for applying, thanks for applying, application received, we have received your application, we've received your application, your application has been submitted, application was sent
 
 If one email matches two or more of the first four groups, it is unclear.
 
