@@ -58,7 +58,9 @@ from .sites_readers import Http, HttpClient
 from .sites_run import ReaderFactory, SitesRunner, default_reader_factory
 from .sites_survey import run_survey, write_csv
 from .store import RUN_FAILED, RUN_PARTIAL, RUN_RUNNING, RUN_SUCCESS, Store
-from .sync import MailSourceFactory, default_source_factory, sync_once, sync_problem
+from .sync import MailSourceFactory, default_source_factory
+
+# EMAIL-SYNC-PAUSED: from .sync import sync_once, sync_problem
 from .timeutil import format_display, from_iso, now_ist, to_iso
 
 EmbedderFactory = Callable[[Config], Embedder]
@@ -112,12 +114,13 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=5000)
 
     sub.add_parser("status", help="show last run and role counts")
-    sync = sub.add_parser("sync", help="read Gmail once and update job statuses (Email Sync)")
-    sync.add_argument(
-        "--reread",
-        action="store_true",
-        help="look at all mail of the last 30 days again, including mail already read",
-    )
+    # EMAIL-SYNC-PAUSED: the sync command is switched off.
+    # sync = sub.add_parser("sync", help="read Gmail once and update job statuses (Email Sync)")
+    # sync.add_argument(
+    #     "--reread",
+    #     action="store_true",
+    #     help="look at all mail of the last 30 days again, including mail already read",
+    # )
     score = sub.add_parser(
         "score", help="score new roles against your CV (also runs after each scan)"
     )
@@ -885,31 +888,32 @@ def cmd_naukri_details(
         reporter.close()
 
 
-def cmd_sync(
-    store: Store, out: TextIO, make_mail_source: MailSourceFactory, reread: bool = False
-) -> int:
-    """Read the mailbox once. Prints what changed and what needs review."""
-    config = Config.from_raw(store.get_config_raw())
-    problem = sync_problem(config)
-    if problem:
-        print(problem, file=out)
-        return EXIT_USAGE
-    result = sync_once(store, config, make_mail_source, reread_days=30 if reread else 0)
-    if result is None:
-        print("A sync is already running.", file=out)
-        return EXIT_USAGE
-    state = store.get_sync_state()
-    if state.error:
-        print(f"Sync failed: {state.error}", file=out)
-        return EXIT_FAILED
-    print(
-        f"Checked {result.checked} emails: {result.applied} applied, {result.review} to review, "
-        f"{result.ignored} not about a tracked role.",
-        file=out,
-    )
-    for note in result.notes:
-        print(note, file=out)
-    return EXIT_OK
+# EMAIL-SYNC-PAUSED: the sync command is switched off.
+# def cmd_sync(
+#     store: Store, out: TextIO, make_mail_source: MailSourceFactory, reread: bool = False
+# ) -> int:
+#     """Read the mailbox once. Prints what changed and what needs review."""
+#     config = Config.from_raw(store.get_config_raw())
+#     problem = sync_problem(config)
+#     if problem:
+#         print(problem, file=out)
+#         return EXIT_USAGE
+#     result = sync_once(store, config, make_mail_source, reread_days=30 if reread else 0)
+#     if result is None:
+#         print("A sync is already running.", file=out)
+#         return EXIT_USAGE
+#     state = store.get_sync_state()
+#     if state.error:
+#         print(f"Sync failed: {state.error}", file=out)
+#         return EXIT_FAILED
+#     print(
+#         f"Checked {result.checked} emails: {result.applied} applied, {result.review} to review, "
+#         f"{result.ignored} not about a tracked role.",
+#         file=out,
+#     )
+#     for note in result.notes:
+#         print(note, file=out)
+#     return EXIT_OK
 
 
 def main(
@@ -943,8 +947,9 @@ def main(
             return cmd_salary_check(store, stream)
         if args.command == "push-traces":
             return cmd_push_traces(store, stream, sleep)
-        if args.command == "sync":
-            return cmd_sync(store, stream, make_mail_source, bool(args.reread))
+        # EMAIL-SYNC-PAUSED: the sync command is switched off.
+        # if args.command == "sync":
+        #     return cmd_sync(store, stream, make_mail_source, bool(args.reread))
         if args.command == "serve":
             from .web import create_app
             from .web.app import LOOPBACK_HOSTS
@@ -954,9 +959,9 @@ def main(
                     f"WARNING: {args.host} is not a loopback address; the app has no login.",
                     file=stream,
                 )
-            from .sync import start_scheduler
-
-            start_scheduler(db_path)
+            # EMAIL-SYNC-PAUSED: no scheduled sync while serving.
+            # from .sync import start_scheduler
+            # start_scheduler(db_path)
             app = create_app(store, allowed_hosts=LOOPBACK_HOSTS | {args.host})
             app.run(host=args.host, port=args.port, debug=False, threaded=False)
             return EXIT_OK

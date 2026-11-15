@@ -1266,9 +1266,10 @@ def test_every_setting_is_on_the_config_page_so_a_save_cannot_fail_unseen() -> N
 
     from jobscan.config import Config
     from jobscan.web.app import SETTING_GROUPS
+    from jobscan.web.forms import PAUSED_SETTINGS
 
     shown = {key for _, items in SETTING_GROUPS for key, _, _ in items}
-    assert {f.name for f in fields(Config)} <= shown
+    assert {f.name for f in fields(Config)} - PAUSED_SETTINGS <= shown
 
 
 def test_saving_the_page_as_shown_works_and_sticks(client: FlaskClient, store: Store) -> None:

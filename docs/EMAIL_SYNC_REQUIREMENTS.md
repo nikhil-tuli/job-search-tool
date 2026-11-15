@@ -1,6 +1,10 @@
 # Email Sync: what it does and how it decides
 
-Status: built. Last revised Nov 2026.
+Status: **paused** (Nov 2026). The code is kept but switched off. This document describes how it worked and how to switch it back on.
+
+How it was paused: the tab, the pages, the `sync` command, the scheduled sync and the Config settings are commented out. Search the code for `EMAIL-SYNC-PAUSED`. The modules (`sync.py`, `sync_rules.py`, `mailbox.py`, `sync_store.py`), the database tables and the saved data are untouched.
+
+To switch it back on: remove the comments at each `EMAIL-SYNC-PAUSED` mark, and remove `PAUSED_SETTINGS` and the skip marks in the tests.
 
 ## Contents
 

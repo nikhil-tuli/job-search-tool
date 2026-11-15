@@ -141,9 +141,22 @@ class ConfigForm:
     errors: dict[str, str]
 
 
+# EMAIL-SYNC-PAUSED: these settings are not on the Config page while Email Sync is off.
+# Without a value from the page, the default is used, so saving still works.
+PAUSED_SETTINGS = frozenset(
+    {"sync_email", "sync_password_env", "sync_every_hours", "sync_first_days", "sync_use_ai"}
+)
+
+
 def parse_config_form(form: Mapping[str, str]) -> ConfigForm:
     errors: dict[str, str] = {}
-    raw = {f.name: form.get(f.name, "").strip() for f in fields(Config)}
+    defaults = Config()
+    raw = {
+        f.name: str(getattr(defaults, f.name))
+        if f.name in PAUSED_SETTINGS and f.name not in form
+        else form.get(f.name, "").strip()
+        for f in fields(Config)
+    }
     try:
         Config.from_raw(raw)
     except ConfigError as exc:

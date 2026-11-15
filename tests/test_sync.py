@@ -126,6 +126,9 @@ def sync(store: Store, *mails: Mail, config: Config | None = None, ai: FakeAI | 
     return run_sync(store, config or Config(), FakeSource(*mails), lambda c: ai, NOW)  # type: ignore[arg-type,return-value]
 
 
+PAUSED = pytest.mark.skip(reason="EMAIL-SYNC-PAUSED: the Email Sync pages are switched off")
+
+
 # ---- reading the stage -------------------------------------------------------------------------
 
 
@@ -528,12 +531,14 @@ def client(store: Store) -> FlaskClient:
     ).test_client()
 
 
+@PAUSED
 def test_the_tab_before_setup_explains_what_to_do(store: Store) -> None:
     page = create_app(store, secret_key="t").test_client().get("/sync").get_data(as_text=True)
     assert "Not connected yet" in page
     assert "disabled" in page
 
 
+@PAUSED
 def test_sync_now_then_review_then_roles_follow(
     client: FlaskClient, store: Store, run_id: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -553,11 +558,13 @@ def test_sync_now_then_review_then_roles_follow(
     assert "(Email Sync)" in panel
 
 
+@PAUSED
 def test_sync_now_without_a_password_explains(client: FlaskClient) -> None:
     page = client.post("/sync/run", follow_redirects=True).get_data(as_text=True)
     assert "app password is missing" in page
 
 
+@PAUSED
 def test_filters_and_discard(
     client: FlaskClient, store: Store, run_id: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -571,6 +578,7 @@ def test_filters_and_discard(
     assert "Acme" not in client.get("/sync?portal=Naukri").get_data(as_text=True)
 
 
+@PAUSED
 def test_the_reference_email_links_to_that_message_in_gmail(
     client: FlaskClient, store: Store, run_id: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -632,6 +640,7 @@ def test_sync_progress_is_saved_while_running_and_cleared_after(store: Store, ru
     assert (state.phase, state.done, state.total) == ("", 0, 0)
 
 
+@PAUSED
 def test_the_tab_shows_the_counter_while_running(store: Store) -> None:
     store.set_config_raw(Config.from_raw({"sync_email": "a@gmail.com"}).to_raw())
     store.begin_sync(now=to_iso(NOW), stale_before="0")
@@ -673,6 +682,7 @@ def test_reread_looks_again_at_mail_already_read(store: Store, run_id: int) -> N
     assert len(store.list_sync_updates()) == 1
 
 
+@PAUSED
 def test_reread_button_starts_a_sync(store: Store, client: FlaskClient) -> None:
     reply = client.post("/sync/reread")
     assert reply.status_code == 302
@@ -895,3 +905,20 @@ def test_an_unclear_mail_whose_ai_calls_both_fail_keeps_a_low_row(
     sync(store, mail("Update", "not moving forward but schedule an interview"), ai=ai)  # type: ignore[arg-type]
     assert ai.calls == 2
     assert store.list_sync_updates()[0].new_status == ""
+
+
+# ---- Email Sync is switched off (EMAIL-SYNC-PAUSED) -------------------------------------------
+
+
+def test_the_email_sync_pages_are_off(client: FlaskClient) -> None:
+    assert client.get("/sync").status_code == 404
+    assert client.post("/sync/run").status_code == 404
+    assert "Email Sync" not in client.get("/roles").get_data(as_text=True)
+    assert "sync_email" not in client.get("/config").get_data(as_text=True)
+
+
+def test_the_sync_command_is_off() -> None:
+    from jobscan.cli import build_parser
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["sync"])

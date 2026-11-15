@@ -1,5 +1,7 @@
 # Jobscan: High-Level Design
 
+> **Email Sync is paused (Nov 2026).** The parts of this document about Email Sync describe a feature that is switched off. See `docs/REQUIREMENTS.md`, Round 24.
+
 A local-first job search tracker for one user, running on a Mac. It finds roles, filters and scores them against a CV, helps modify the CV and cover letter, and tracks applications. Nothing runs in the cloud except calls to third-party services.
 
 ## 1. Design in one view

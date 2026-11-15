@@ -26,7 +26,7 @@ your own computer.
 - **Eval:** compares the AI's rating with your own 👍 and 👎 on roles.
 - **Manage CV:** upload your CV and cover letter template; History lists tailored documents.
 - **Interview Prep:** a spoken practice interview on a role you track, a general role or your own questions, with feedback and Past History.
-- **Email Sync:** status changes found in your mail, waiting for review or applied.
+<!-- EMAIL-SYNC-PAUSED: - **Email Sync:** status changes found in your mail, waiting for review or applied. -->
 - **Config:** titles, filters, scan speed, the company list for Company sites and other settings.
 
 ## Screenshots
@@ -41,9 +41,11 @@ All data below is made up.
 
 ![Modification History](docs/screenshots/cv-history.png)
 
+<!-- EMAIL-SYNC-PAUSED:
 **Email Sync** proposes status changes from your mail. Clear ones apply by themselves. The rest wait for Accept or Discard.
 
 ![Email Sync](docs/screenshots/email-sync.png)
+-->
 
 **Interview Prep:** pick a role you track, a general role or your own questions.
 
@@ -94,7 +96,7 @@ Never paste keys into chats or files.
 |---|---|---|
 | Fit scores (AI) | Mistral key (free plan) | `MISTRAL_API_KEY` |
 | Resume and cover letter tailoring | Groq key | `GROQ_API_KEY` |
-| Email Sync | Gmail address (set in Config) and a Gmail app password | `JOBSYNC_APP_PASSWORD` |
+<!-- EMAIL-SYNC-PAUSED: | Email Sync | Gmail address (set in Config) and a Gmail app password | `JOBSYNC_APP_PASSWORD` | -->
 
 ```sh
 read -s MISTRAL_API_KEY && export MISTRAL_API_KEY   # paste the key, press Enter; nothing is shown
@@ -107,8 +109,7 @@ read -s MISTRAL_API_KEY && export MISTRAL_API_KEY   # paste the key, press Enter
   or press Score on a single role.
 - **Tailoring:** upload your Word CV and, for letters, your Word cover letter template. On a
   role, choose **Tailor resume** or **Tailor cover letter**, then follow progress in History.
-- **Email Sync:** it only reads mail; it never sends or deletes. Syncs run while `jobscan serve`
-  is open, or on demand with the Sync button.
+- **Email Sync:** paused. The code is kept but switched off (search the code for `EMAIL-SYNC-PAUSED`).
 
 ## Challenges and how they were handled
 
@@ -156,7 +157,7 @@ read -s MISTRAL_API_KEY && export MISTRAL_API_KEY   # paste the key, press Enter
 
 - Full requirements and decisions: `docs/REQUIREMENTS.md`.
 - System design: `docs/HIGH_LEVEL_DESIGN.md`.
-- Email Sync logic, flowcharts and states: `docs/EMAIL_SYNC_REQUIREMENTS.md`.
+- Email Sync (paused): `docs/EMAIL_SYNC_REQUIREMENTS.md`.
 - Interview Prep: `docs/INTERVIEW_PREP_REQUIREMENTS.md` (rules) and `docs/INTERVIEW_PREP_AI_FLOW.md` (what each AI model does).
 - Commands (all start with `jobscan`):
   - `serve`: open the app
@@ -165,7 +166,7 @@ read -s MISTRAL_API_KEY && export MISTRAL_API_KEY   # paste the key, press Enter
   - `sites`: fetch roles from the company career pages in Config
   - `naukri-details`, `details`: fetch missing job descriptions (Naukri, LinkedIn)
   - `score`: score new roles against your CV with the AI (`score --stale` also redoes roles scored under older settings)
-  - `sync`: read Gmail once and propose status changes
+  <!-- EMAIL-SYNC-PAUSED: - `sync`: read Gmail once and propose status changes -->
   - `status`: show the last run and counts
   - `eval`: check how well old-style scores match your ratings (only with Legacy scoring on; the
     Eval screen covers AI scores)

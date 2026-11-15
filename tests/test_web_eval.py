@@ -398,7 +398,6 @@ def test_tabs_are_in_the_agreed_order(web: Harness) -> None:
         "Roles",
         "Modify CV & Cover Letter",
         "Interview Prep",
-        "Email Sync",
         "Summary",
         "Eval",
         "Config",

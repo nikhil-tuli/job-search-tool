@@ -1257,3 +1257,12 @@ Full logic, flowcharts and state diagrams: `docs/EMAIL_SYNC_REQUIREMENTS.md`.
 - **Unclear mail:** an AI answer of "none" and sure is ignored. "none" but unsure, or a failed call, keeps a Low review row.
 - **One retry:** a failed AI call or an unreadable reply is tried once more after 5 seconds. A refused key or wrong address is not retried.
 - **Unchanged:** only a High confidence move into Interview Ongoing is automatic. The AI never applies a change by itself.
+
+## Round 24: Email Sync paused
+
+Email Sync is switched off. Reasons: it was not reliable enough (missed relevant mail, some wrong matches), and the effort to fix it was not planned.
+
+- **Hidden:** the Email Sync tab, its pages, the Config settings, the `sync` command and the scheduled sync.
+- **Kept:** the code modules, the database tables and the saved data. The role page still shows past automatic changes.
+- **Switch back on:** search the code for `EMAIL-SYNC-PAUSED` and remove the comments. Details in `docs/EMAIL_SYNC_REQUIREMENTS.md`.
+- **Config:** saving the page uses the default Email Sync values, because those fields are not shown.

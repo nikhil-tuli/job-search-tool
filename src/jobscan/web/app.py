@@ -55,8 +55,8 @@ from ..models import (
     PORTALS,
     SORTED_STATUSES,
     STATUSES,
-    SYNC_STATE_LABELS,
-    SYNC_STATES,
+    # SYNC_STATE_LABELS,
+    # SYNC_STATES,
     TAILOR_COVER,
     TAILOR_READY,
     TAILOR_RESUME,
@@ -92,11 +92,8 @@ from ..sites_run import ReaderFactory, default_reader_factory, redetect, try_com
 from ..store import Store, StoreError
 from ..sync import (
     MailSourceFactory,
-    accept_update,
     default_source_factory,
-    discard_update,
-    start_in_background,
-    sync_problem,
+    # EMAIL-SYNC-PAUSED: accept_update, discard_update, start_in_background, sync_problem
 )
 from ..tailor import (
     START_NEW,
@@ -431,37 +428,38 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
             ),
         ),
     ),
-    (
-        "Email Sync",
-        (
-            (
-                "sync_email",
-                "Gmail address",
-                "The mailbox to read. Leave empty to keep Email Sync off",
-            ),
-            (
-                "sync_password_env",
-                "App password variable name",
-                "Name of the terminal variable holding the Gmail app password. Never stored here",
-            ),
-            (
-                "sync_every_hours",
-                "Sync every (hours)",
-                "Runs while jobscan serve is open. Sync now works any time",
-            ),
-            (
-                "sync_first_days",
-                "First sync reads the last (days)",
-                "Later syncs read only newer mail",
-            ),
-            (
-                "sync_use_ai",
-                "Let the AI read unclear emails",
-                "1 sends an unclear email's sender, subject and short snippet to the AI service "
-                "above. 0 sends them straight to review",
-            ),
-        ),
-    ),
+    # EMAIL-SYNC-PAUSED: the Email Sync settings are hidden from the Config page.
+    #     (
+    #         "Email Sync",
+    #         (
+    #             (
+    #                 "sync_email",
+    #                 "Gmail address",
+    #                 "The mailbox to read. Leave empty to keep Email Sync off",
+    #             ),
+    #             (
+    #                 "sync_password_env",
+    #                 "App password variable name",
+    #                 "Name of the terminal variable holding the Gmail app password. Never stored here",  # noqa: E501
+    #             ),
+    #             (
+    #                 "sync_every_hours",
+    #                 "Sync every (hours)",
+    #                 "Runs while jobscan serve is open. Sync now works any time",
+    #             ),
+    #             (
+    #                 "sync_first_days",
+    #                 "First sync reads the last (days)",
+    #                 "Later syncs read only newer mail",
+    #             ),
+    #             (
+    #                 "sync_use_ai",
+    #                 "Let the AI read unclear emails",
+    #                 "1 sends an unclear email's sender, subject and short snippet to the AI service "  # noqa: E501
+    #                 "above. 0 sends them straight to review",
+    #             ),
+    #         ),
+    #     ),
     (
         "Fit filters",
         (
@@ -732,7 +730,7 @@ GROUP_SECTION = {
     "Job descriptions": "Common",
     "Fit filters": "Common",
     "Tailoring": "Common",
-    "Email Sync": "Common",
+    # "Email Sync": "Common",
     "Interview Prep": "Interview Prep",
     "Fit scoring (AI)": "Common",
     "Tracing (Langfuse)": "Common",
@@ -929,7 +927,7 @@ def create_app(
             "statuses": SORTED_STATUSES,
             "endpoint": request.endpoint,
             "tailor_review_count": store.count_tailor_review(),
-            "sync_review_count": store.count_sync_review(),
+            # "sync_review_count": store.count_sync_review(),
         }
 
     # ---- roles ----------------------------------------------------------------------------
@@ -1784,7 +1782,7 @@ def create_app(
     # ---- config ---------------------------------------------------------------------------
 
     SITES_SHOWN = 10
-    SYNC_REREAD_DAYS = 30
+    # SYNC_REREAD_DAYS = 30
     SITE_FILTERS = ("working", "attention", "paused", "unsupported")
     SITE_STATE_LABELS = {
         "working": "Working",
@@ -2050,73 +2048,74 @@ def create_app(
         flash("Configuration saved. It applies from the next scan.", "ok")
         return redirect(url_for("config_page"))
 
-    # ---- Email Sync ----------------------------------------------------------------------
+    # EMAIL-SYNC-PAUSED: the Email Sync pages are switched off. Remove the leading '# ' to restore.
+    #     # ---- Email Sync ----------------------------------------------------------------------
 
-    @app.get("/sync")
-    def sync_page() -> str:
-        state_filter = request.args.get("state", "")
-        state_filter = state_filter if state_filter in SYNC_STATES else ""
-        portal = request.args.get("portal", "")
-        portal = portal if portal in PORTALS else ""
-        config = current_config()
-        state = store.get_sync_state()
-        problem = sync_problem(config)
-        counts = store.count_sync_by_state()
-        every = timedelta(hours=config.sync_every_hours)
-        next_run = (
-            format_display(to_iso(from_iso(state.last_synced_on) + every))
-            if state.last_synced_on
-            else ""
-        )
-        return render_template(
-            "sync.html",
-            rows=store.list_sync_updates(state_filter, portal),
-            counts=counts,
-            total=sum(counts.values()),
-            state_filter=state_filter,
-            portal=portal,
-            portals=PORTALS,
-            states=SYNC_STATES,
-            labels=SYNC_STATE_LABELS,
-            sync_state=state,
-            problem=problem,
-            email=config.sync_email,
-            next_run=next_run,
-            running=bool(state.running_since),
-        )
+    #     @app.get("/sync")
+    #     def sync_page() -> str:
+    #         state_filter = request.args.get("state", "")
+    #         state_filter = state_filter if state_filter in SYNC_STATES else ""
+    #         portal = request.args.get("portal", "")
+    #         portal = portal if portal in PORTALS else ""
+    #         config = current_config()
+    #         state = store.get_sync_state()
+    #         problem = sync_problem(config)
+    #         counts = store.count_sync_by_state()
+    #         every = timedelta(hours=config.sync_every_hours)
+    #         next_run = (
+    #             format_display(to_iso(from_iso(state.last_synced_on) + every))
+    #             if state.last_synced_on
+    #             else ""
+    #         )
+    #         return render_template(
+    #             "sync.html",
+    #             rows=store.list_sync_updates(state_filter, portal),
+    #             counts=counts,
+    #             total=sum(counts.values()),
+    #             state_filter=state_filter,
+    #             portal=portal,
+    #             portals=PORTALS,
+    #             states=SYNC_STATES,
+    #             labels=SYNC_STATE_LABELS,
+    #             sync_state=state,
+    #             problem=problem,
+    #             email=config.sync_email,
+    #             next_run=next_run,
+    #             running=bool(state.running_since),
+    #         )
 
-    @app.post("/sync/run")
-    def sync_run() -> WerkzeugResponse:
-        problem = sync_problem(current_config())
-        if problem:
-            flash(problem, "error")
-        else:
-            start_in_background(store, make_mail_source, make_tailor_client)
-        return redirect(url_for("sync_page"))
+    #     @app.post("/sync/run")
+    #     def sync_run() -> WerkzeugResponse:
+    #         problem = sync_problem(current_config())
+    #         if problem:
+    #             flash(problem, "error")
+    #         else:
+    #             start_in_background(store, make_mail_source, make_tailor_client)
+    #         return redirect(url_for("sync_page"))
 
-    @app.post("/sync/reread")
-    def sync_reread() -> WerkzeugResponse:
-        problem = sync_problem(current_config())
-        if problem:
-            flash(problem, "error")
-        else:
-            start_in_background(
-                store, make_mail_source, make_tailor_client, reread_days=SYNC_REREAD_DAYS
-            )
-        return redirect(url_for("sync_page"))
+    #     @app.post("/sync/reread")
+    #     def sync_reread() -> WerkzeugResponse:
+    #         problem = sync_problem(current_config())
+    #         if problem:
+    #             flash(problem, "error")
+    #         else:
+    #             start_in_background(
+    #                 store, make_mail_source, make_tailor_client, reread_days=SYNC_REREAD_DAYS
+    #             )
+    #         return redirect(url_for("sync_page"))
 
-    def back_to_sync() -> WerkzeugResponse:
-        return redirect(safe_next(request.form.get("next"), url_for("sync_page")))
+    #     def back_to_sync() -> WerkzeugResponse:
+    #         return redirect(safe_next(request.form.get("next"), url_for("sync_page")))
 
-    @app.post("/sync/<int:update_id>/accept")
-    def sync_accept(update_id: int) -> WerkzeugResponse:
-        flash(accept_update(store, update_id), "ok")
-        return back_to_sync()
+    #     @app.post("/sync/<int:update_id>/accept")
+    #     def sync_accept(update_id: int) -> WerkzeugResponse:
+    #         flash(accept_update(store, update_id), "ok")
+    #         return back_to_sync()
 
-    @app.post("/sync/<int:update_id>/discard")
-    def sync_discard(update_id: int) -> WerkzeugResponse:
-        flash(discard_update(store, update_id), "ok")
-        return back_to_sync()
+    #     @app.post("/sync/<int:update_id>/discard")
+    #     def sync_discard(update_id: int) -> WerkzeugResponse:
+    #         flash(discard_update(store, update_id), "ok")
+    #         return back_to_sync()
 
     # ---- tailored resumes -----------------------------------------------------------------
 
