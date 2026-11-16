@@ -289,8 +289,8 @@ Agreed on 16 Nov 2026. Not built yet.
 | ID | Requirement | Stories |
 |---|---|---|
 | FR-M1 | Two separate Config switches in the group Tracing (Langfuse), both **on by default**: **Send traces to Langfuse** (fit scoring, existing, default changes from off to on) and **Send interview traces** (new). Neither depends on the other. Nothing is sent until the Langfuse key variables are set. Both use the same service address and key variables. | US-23 |
-| FR-M2 | The app never calls Langfuse during an interview. The command `jobscan push-traces` sends interview traces, the same way it sends fit scoring traces. It also runs at the end of the daily run. The command must run for either switch, not only the fit scoring one. | US-23 |
-| FR-M3 | An interview is sent once its final feedback is generated, that is, its status is **Ready**. **In progress**, **Preparing**, **Incomplete** and **Failed** interviews wait. They are sent after Get feedback or Try again makes them Ready. | US-23 |
+| FR-M2 | The app never calls Langfuse during an interview. The command `jobscan push-traces` sends interview traces, the same way it sends fit scoring traces. It also runs at the end of the daily run. An interview that becomes Ready during the day is sent at the next daily run, or when you run the command by hand. The command must run for either switch, not only the fit scoring one. | US-23 |
+| FR-M3 | An interview is sent once its final feedback is generated, that is, its status is **Ready**. **In progress**, **Preparing**, **Incomplete** and **Failed** interviews wait. They are sent after Get feedback or Try again makes them Ready. Feedback is written once for the whole interview. There is no separate feedback call per answer. | US-23 |
 | FR-M4 | All three interview types are sent. The type is a label. | US-23 |
 | FR-M5 | One trace per interview. Trace duration runs from the start of the first span to the end of the last span. | US-23 |
 | FR-M6 | Spans, in order: **Question writing** (not for My questions), then one **Answer** span per answer, then **Feedback writing**. Each Answer span holds one **Speech to text** child span. | US-23 |
