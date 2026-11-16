@@ -1275,4 +1275,5 @@ Interview tracing details: `docs/INTERVIEW_PREP_REQUIREMENTS.md`, section 4.M.
 - **Changed default:** the fit scoring switch was off (Round 16). It is now on.
 - **Keys still needed:** nothing is sent until the Langfuse key variables are set.
 - **What leaves:** unchanged for fit scoring. For interviews: numbers and labels only, no text.
+- **Interviews are sent at once:** when feedback is ready, the app sends the interview trace in the background. The daily run and the push command are the backup. Fit scoring stays on the daily run.
 - **Build note:** the push command must run when either switch is on.

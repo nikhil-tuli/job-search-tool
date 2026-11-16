@@ -36,6 +36,7 @@ Changes from v2
 | Wait time | Seconds from your click to the result. Includes pacing waits and retries |
 | Audio length | Length of one recording, in seconds |
 | Speech response time | Seconds Groq took to return the text |
+| Active time | Sum of the top-level span durations. Leaves out gaps between steps |
 
 **Shape of the feature**
 - New tab **Interview Prep** with sub-tabs **Online Interview** and **Past History**.
@@ -288,21 +289,21 @@ Agreed on 16 Nov 2026. Not built yet.
 
 | ID | Requirement | Stories |
 |---|---|---|
-| FR-M1 | Two separate Config switches in the group Tracing (Langfuse), both **on by default**: **Send traces to Langfuse** (fit scoring, existing, default changes from off to on) and **Send interview traces** (new). Neither depends on the other. Nothing is sent until the Langfuse key variables are set. Both use the same service address and key variables. | US-23 |
-| FR-M2 | The app never calls Langfuse during an interview. The command `jobscan push-traces` sends interview traces, the same way it sends fit scoring traces. It also runs at the end of the daily run. An interview that becomes Ready during the day is sent at the next daily run, or when you run the command by hand. The command must run for either switch, not only the fit scoring one. | US-23 |
+| FR-M1 | Two separate Config switches in the group Tracing (Langfuse), both **on by default**: **Send traces to Langfuse** (fit scoring, existing, default changes from off to on) and **Send interview traces** (new). Neither depends on the other. Nothing is sent until the Langfuse key variables are set. Both use the same service address and key variables. The app reads the keys from the terminal variables it was started with. The Keychain items are used only by the daily run. | US-23 |
+| FR-M2 | When an interview becomes Ready, the app sends its trace to Langfuse at once, in the background, after the feedback page is ready. The command `jobscan push-traces` is the backup. It also runs at the end of the daily run and sends any interview not yet sent. The command must run for either switch, not only the fit scoring one. Fit scoring traces are unchanged: sent by the daily run. | US-23 |
 | FR-M3 | An interview is sent once its final feedback is generated, that is, its status is **Ready**. **In progress**, **Preparing**, **Incomplete** and **Failed** interviews wait. They are sent after Get feedback or Try again makes them Ready. Feedback is written once for the whole interview. There is no separate feedback call per answer. | US-23 |
 | FR-M4 | All three interview types are sent. The type is a label. | US-23 |
-| FR-M5 | One trace per interview. Trace duration runs from the start of the first span to the end of the last span. | US-23 |
+| FR-M5 | One trace per interview. Trace duration runs from the start of the first span to the end of the last span. **Active time** is the sum of the top-level span durations (Question writing, each Answer, Feedback writing). It leaves out the gaps between steps. Both are sent. | US-23 |
 | FR-M6 | Spans, in order: **Question writing** (not for My questions), then one **Answer** span per answer, then **Feedback writing**. Each Answer span holds one **Speech to text** child span. | US-23 |
 | FR-M7 | The Answer span runs from the estimated recording start (arrival time minus audio length) to the moment the text returns. It carries audio length and speech response time as separate numbers. The Speech to text child span sits inside it. Its duration is the speech response time. | US-23 |
 | FR-M8 | Every model call is its own span. A retry after a bad reply is a second span, marked as a retry. Each speech attempt is its own span. A failed attempt is marked as an error. | US-23 |
 | FR-M9 | Model span numbers: input tokens, output tokens, model time, input tokens per second (input tokens ÷ model time), output tokens per second (output tokens ÷ model time). Input tokens per second is a rough number, because model time is mostly writing. | US-23 |
 | FR-M10 | Feedback writing span adds **wait time**. Model time and wait time are two separate numbers. | US-23 |
 | FR-M11 | Speech span numbers: audio length, speech response time, and **time info** with the value `word times`, `sentence times only` or `none`. | US-23 |
-| FR-M12 | Trace numbers: model calls, model errors, model retries, speech calls, speech errors, speech retries. Trace labels: interview type, question model, speech model, prompt version. | US-23 |
+| FR-M12 | Trace numbers: active time, model calls, model errors, model retries, speech calls, speech errors, speech retries. Trace labels: interview type, question model, speech model, prompt version. | US-23 |
 | FR-M13 | If a provider returns no token counts, show "not available". Tokens per second is not computed. Never show 0. | US-23 |
 | FR-M14 | Per-call numbers are saved locally in a new table (section 8.3). Numbers only. They are saved even when tracing is off. | US-23 |
-| FR-M15 | An interview is sent once. It is marked sent only after Langfuse replies OK. After a failure it is sent again on the next run. The trace id comes from the interview id, so a repeat never makes a duplicate. | US-23 |
+| FR-M15 | An interview is sent once. It is marked sent only after Langfuse replies OK. If the live send fails, or the app has no keys, the interview stays unsent and the command sends it later. The trace id comes from the interview id, so a repeat never makes a duplicate. | US-23 |
 | FR-M16 | A trace is sent once, complete. It includes failed and retried calls from earlier attempts. Nothing is added to a trace after it is sent. | US-23 |
 | FR-M17 | Numbers are sent as span attributes, not as Langfuse scores. This keeps the push inside the Hobby plan limit (about 30 general requests a minute). | US-23 |
 
@@ -549,7 +550,6 @@ Trace: Interview <id>
 | NFR-14 | Usability | Start an interview in at most 3 clicks from the Roles list. |
 | NFR-15 | Usability | Sentences are short. Words match the terms in section 1. |
 | NFR-16 | Usability | The interview screen has no more than three buttons. |
-| NFR-17 | Reliability | Tracing never slows or breaks an interview. A failed push changes nothing in the app. |
 | NFR-17 | Accessibility | All controls work by keyboard. Focus is visible. |
 | NFR-18 | Accessibility | Colour is never the only signal (FR-H10). Text contrast meets WCAG AA. |
 | NFR-19 | Accessibility | Questions are always shown as text. Reading aloud is optional. |
@@ -561,6 +561,7 @@ Trace: Interview <id>
 | NFR-25 | Testability | Providers are behind small interfaces so tests use fakes. |
 | NFR-26 | Observability | Per interview: counts of calls, retries, timings and errors, with no content. |
 | NFR-27 | Language | English only. |
+| NFR-28 | Reliability | Tracing never slows or breaks an interview. The live send runs in the background after the feedback page is ready. A failed send changes nothing in the app. |
 
 ---
 
@@ -609,6 +610,8 @@ Audio exists only in browser memory, about 1.5 MB for a 3-minute answer.
 - No audio and no content in logs.
 - Trace builder: fixed call rows give the expected spans, durations and tokens per second. Missing tokens give "not available". No text appears anywhere in the payload.
 - Which interviews are sent: each status, with and without an answered question.
+- Live send: on success the interview is marked sent. On failure or no keys it stays unsent, and the feedback page is unaffected.
+- Active time: sum of the top-level span durations, with and without a retried call.
 
 **Manual checks**
 - Real microphone on Chrome and Safari. Permission refused. Device unplugged.
@@ -716,15 +719,17 @@ Audio exists only in browser memory, about 1.5 MB for a 3-minute answer.
 |---|---|---|
 | 49 | Switch off, or key variables not set | Nothing is sent. The push command says why. Per-call numbers are still saved. |
 | 50 | Interview from before this update | Not sent. It has totals only, no per-call numbers. |
-| 51 | Langfuse down or key wrong | The push command shows the reason. Nothing is marked sent. Sent again next run. |
+| 51 | Langfuse down or key wrong | The interview is unaffected. It is not marked sent. The daily run or the command sends it later and shows the reason. |
 | 52 | Interview In progress, Preparing, Incomplete or Failed | Waits. Not sent until it reaches Ready. |
 | 53 | Interview left open | It becomes Incomplete when history is next opened (FR-J2). It is not sent unless you later get feedback and it reaches Ready. |
-| 54 | Incomplete interview gets feedback later | Sent then, as one full trace. Trace duration includes the gap since the first span. |
+| 54 | Incomplete interview gets feedback later | Sent when it reaches Ready, as one full trace. Trace duration includes the gap since the first span. Active time does not. |
 | 55 | Failed interview | Not sent. After Try again reaches Ready, it is sent. The failed attempt shows as an error span. |
 | 56 | Question writing retried | Two Question writing spans. The second is marked as a retry. |
 | 57 | Speech rate limit, then success | Two Speech to text spans under the same Answer. The first is marked as an error. |
 | 58 | Provider returns no token counts | Shown as "not available". |
 | 59 | Delete an interview already sent | Local rows are removed. The trace stays in Langfuse. Delete it there by hand. |
+| 60 | App started without the Langfuse key variables | The live send is skipped. The daily run sends it, using the Keychain keys. |
+| 61 | App closed right after Ready | No live send. The daily run or the command sends it. |
 
 ---
 
@@ -788,6 +793,8 @@ Every story is served by at least one functional requirement.
 | 22 | Save per-call numbers locally | Agreed 16 Nov. About 1 KB per interview. |
 | 23 | Two separate switches, fit scoring and interview, both on by default. Nothing is sent until the keys are set | Agreed 16 Nov. |
 | 24 | Fit scoring switch default changes from off to on | Agreed 16 Nov. Needs a change in the built code and in Round 16 of `REQUIREMENTS.md`. |
+| 25 | The app sends an interview trace at once when feedback is ready. The daily run and command are the backup | Agreed 16 Nov. Interviews only. Fit scoring stays on the daily run. |
+| 26 | Send active time with each trace | Agreed 16 Nov. |
 
 **Your actions before build**
 - Turn off "Anonymous improvement data" in the Mistral Admin Console (checks 6 and 7).
@@ -818,11 +825,11 @@ All numbers are made up. The Langfuse screen layout is approximate. Only the num
 
 ### 17.1 Trace list (one row per interview)
 
-| Trace | Type | Trace duration | Model calls | Speech calls | Speech errors | Input tokens | Output tokens |
-|---|---|---|---|---|---|---|---|
-| Interview 41 | Company role | 9 min 12 s | 2 | 5 | 1 | 4,792 | 1,498 |
-| Interview 42 | General role | 2 min 11 s | 2 | 1 | 0 | 1,520 | 551 |
-| Interview 43 | My questions | 4 min 20 s | 1 | 2 | 0 | 1,960 | 880 |
+| Trace | Type | Trace duration | Active time | Model calls | Speech calls | Speech errors | Input tokens | Output tokens |
+|---|---|---|---|---|---|---|---|---|
+| Interview 41 | Company role | 9 min 12 s | 302.0 s | 2 | 5 | 1 | 4,792 | 1,498 |
+| Interview 42 | General role | 2 min 11 s | 65.2 s | 2 | 1 | 0 | 1,520 | 551 |
+| Interview 43 | My questions | 4 min 20 s | 135.5 s | 1 | 2 | 0 | 1,960 | 880 |
 
 Input and output of every trace: empty. Every trace is for an interview with final feedback.
 
@@ -844,6 +851,8 @@ Interview 41                                   552 s
 ```
 
 An Answer span is the audio length plus the speech response time, for example 62.4 s + 2.9 s = 65.3 s. Upload time is not counted.
+
+Active time = 3.0 + 65.3 + 91.6 + 43.1 + 79.0 + 20.0 = 302.0 s. The trace duration (552 s) is longer because it also holds your reading and thinking time between answers.
 
 **Model spans**
 
@@ -876,7 +885,8 @@ Interview 42                                   131 s
 
 - Question writing: input 540, output 131, input tokens/s 192.9, output tokens/s 46.8.
 - Feedback writing: model time 6.0 s, wait time 6.0 s, input 980, output 420, input tokens/s 163.3, output tokens/s 70.0.
-- A left-open interview that later gets feedback looks the same, but its trace duration includes the gap (FR-M16, edge case 54).
+- Active time = 2.8 + 56.4 + 6.0 = 65.2 s.
+- A left-open interview that later gets feedback looks the same. Its trace duration includes the days in between. Its active time does not (edge case 54).
 
 ### 17.4 Interview 43: My questions, 2 answers
 
@@ -891,6 +901,7 @@ Interview 43                                   260 s
 
 - No Question writing span. My questions needs no model call (FR-C10).
 - Feedback writing: model time 12.5 s, wait time 12.5 s, input 1,960, output 880, input tokens/s 156.8, output tokens/s 70.4.
+- Active time = 49.5 + 73.5 + 12.5 = 135.5 s.
 
 ### 17.5 Where to look in Langfuse
 - Traces list: one row per interview. Filter by type.

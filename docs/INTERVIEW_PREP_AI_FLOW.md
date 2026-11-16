@@ -380,7 +380,7 @@ Example: 2 of 5 answered.
 
 Local SQLite keeps transcripts, scores and feedback. Audio is never written to disk. Usage counts (calls, time, tokens, retries, errors) are kept without any text.
 
-Tracing (planned, see `INTERVIEW_PREP_REQUIREMENTS.md` section 4.M): after an interview ends, `jobscan push-traces` sends one trace per interview to Langfuse. It is on by default and sends nothing until the Langfuse keys are set.
+Tracing (planned, see `INTERVIEW_PREP_REQUIREMENTS.md` section 4.M): when an interview's feedback is ready, the app sends one trace to Langfuse in the background. `jobscan push-traces` is the backup for any interview not yet sent. It is on by default and sends nothing until the Langfuse keys are set.
 
 ## 9. Failures
 
