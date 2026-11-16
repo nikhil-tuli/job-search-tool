@@ -382,6 +382,19 @@ class InterviewStoreMixin:
             (max(0, int(wait_ms)), interview_id, step),
         )
 
+    def mark_interview_traced(self, interview_id: int, now: str) -> None:
+        self._conn.execute("UPDATE interview SET traced_on = ? WHERE id = ?", (now, interview_id))
+
+    def untraced_ready_interviews(self) -> list[int]:
+        """Ready interviews not yet sent, oldest first. Ones with no call numbers are left out."""
+        rows = self._conn.execute(
+            "SELECT i.id FROM interview i WHERE i.status = ? AND i.traced_on = '' "
+            "AND EXISTS (SELECT 1 FROM interview_call c WHERE c.interview_id = i.id) "
+            "ORDER BY i.id",
+            (READY,),
+        ).fetchall()
+        return [r["id"] for r in rows]
+
     def set_interview_models(self, interview_id: int, feedback_model: str) -> None:
         self._conn.execute(
             "UPDATE interview SET feedback_model = ? WHERE id = ?", (feedback_model, interview_id)
