@@ -3,7 +3,7 @@
 Status: approved on 11 Nov 2026. Build started.
 Date: 11 Nov 2026.
 
-**Update 16 Nov 2026 (not built yet):** Langfuse tracing of interviews added. See sections 4.M, 8.6 and 17. Numbers only. No text is sent. On by default.
+**Update 16 Nov 2026 (not built yet):** Langfuse tracing of interviews added. See sections 4.M, 8.6 and 17. Numbers only. No text is sent. On by default. Sent once final feedback is generated.
 
 Changes from v2
 - Question and feedback model is now **Mistral** (the same one used for fit scoring).
@@ -91,7 +91,7 @@ Format: *As a candidate, I want ... so that ...*, then acceptance criteria (AC).
 | US-20 | I want to rate the feedback. | Given an answer's feedback, then I can mark it helpful or not. The mark is saved. |
 | US-21 | I want to practise again quickly. | Given a feedback page, when I click "Practice again", then a new interview of the same kind starts with new questions. |
 | US-22 | I want clear messages when limits are hit. | Given a provider limit, then I see what happened and when to try again. |
-| US-23 | I want to see how fast and how reliable the speech and model calls are. | Given tracing is on, when an interview has at least one answer, then it appears in Langfuse as one trace with a span per step. No question, transcript or feedback text is sent. |
+| US-23 | I want to see how fast and how reliable the speech and model calls are. | Given tracing is on, when final feedback is generated, then the interview appears in Langfuse as one trace with a span per step. No question, transcript or feedback text is sent. |
 
 ---
 
@@ -288,22 +288,22 @@ Agreed on 16 Nov 2026. Not built yet.
 
 | ID | Requirement | Stories |
 |---|---|---|
-| FR-M1 | New Config item **Send interview traces** in the group Tracing (Langfuse). Default **on**. Nothing is sent until the Langfuse key variables are set. It uses the same service address and key variables as fit scoring. It does not depend on the fit scoring switch. | US-23 |
-| FR-M2 | The app never calls Langfuse during an interview. The command `jobscan push-traces` sends interview traces, the same way it sends fit scoring traces. It also runs at the end of the daily run when on. | US-23 |
-| FR-M3 | An interview is sent when its status is **Ready**, **Incomplete** or **Failed**, and at least one answer got a reply from speech to text. **In progress** and **Preparing** wait. | US-23 |
+| FR-M1 | Two separate Config switches in the group Tracing (Langfuse), both **on by default**: **Send traces to Langfuse** (fit scoring, existing, default changes from off to on) and **Send interview traces** (new). Neither depends on the other. Nothing is sent until the Langfuse key variables are set. Both use the same service address and key variables. | US-23 |
+| FR-M2 | The app never calls Langfuse during an interview. The command `jobscan push-traces` sends interview traces, the same way it sends fit scoring traces. It also runs at the end of the daily run. The command must run for either switch, not only the fit scoring one. | US-23 |
+| FR-M3 | An interview is sent once its final feedback is generated, that is, its status is **Ready**. **In progress**, **Preparing**, **Incomplete** and **Failed** interviews wait. They are sent after Get feedback or Try again makes them Ready. | US-23 |
 | FR-M4 | All three interview types are sent. The type is a label. | US-23 |
 | FR-M5 | One trace per interview. Trace duration runs from the start of the first span to the end of the last span. | US-23 |
 | FR-M6 | Spans, in order: **Question writing** (not for My questions), then one **Answer** span per answer, then **Feedback writing**. Each Answer span holds one **Speech to text** child span. | US-23 |
-| FR-M7 | Answer span duration is the audio length. Its start is estimated as the arrival time minus the audio length. Speech to text span duration is the speech response time. | US-23 |
+| FR-M7 | The Answer span runs from the estimated recording start (arrival time minus audio length) to the moment the text returns. It carries audio length and speech response time as separate numbers. The Speech to text child span sits inside it. Its duration is the speech response time. | US-23 |
 | FR-M8 | Every model call is its own span. A retry after a bad reply is a second span, marked as a retry. Each speech attempt is its own span. A failed attempt is marked as an error. | US-23 |
 | FR-M9 | Model span numbers: input tokens, output tokens, model time, input tokens per second (input tokens ÷ model time), output tokens per second (output tokens ÷ model time). Input tokens per second is a rough number, because model time is mostly writing. | US-23 |
 | FR-M10 | Feedback writing span adds **wait time**. Model time and wait time are two separate numbers. | US-23 |
 | FR-M11 | Speech span numbers: audio length, speech response time, and **time info** with the value `word times`, `sentence times only` or `none`. | US-23 |
-| FR-M12 | Trace numbers: model calls, model errors, model retries, speech calls, speech errors, speech retries. Trace labels: interview type, outcome (Ready, Incomplete, Failed), question model, speech model, prompt version. | US-23 |
+| FR-M12 | Trace numbers: model calls, model errors, model retries, speech calls, speech errors, speech retries. Trace labels: interview type, question model, speech model, prompt version. | US-23 |
 | FR-M13 | If a provider returns no token counts, show "not available". Tokens per second is not computed. Never show 0. | US-23 |
 | FR-M14 | Per-call numbers are saved locally in a new table (section 8.3). Numbers only. They are saved even when tracing is off. | US-23 |
 | FR-M15 | An interview is sent once. It is marked sent only after Langfuse replies OK. After a failure it is sent again on the next run. The trace id comes from the interview id, so a repeat never makes a duplicate. | US-23 |
-| FR-M16 | If an Incomplete interview later gets feedback, the Feedback writing span is added to the same trace. To be confirmed in the first live push. | US-23 |
+| FR-M16 | A trace is sent once, complete. It includes failed and retried calls from earlier attempts. Nothing is added to a trace after it is sent. | US-23 |
 | FR-M17 | Numbers are sent as span attributes, not as Langfuse scores. This keeps the push inside the Hobby plan limit (about 30 general requests a minute). | US-23 |
 
 
@@ -512,7 +512,7 @@ Validation: scores are integers 0 to 100; every transcript has one item; lists w
 ```
 Trace: Interview <id>
 |-- Question writing         model span    (not for My questions)
-|-- Answer 1                 span          duration = audio length
+|-- Answer 1                 span          recording start to text returned
 |     `-- Speech to text     child span    duration = speech response time
 |-- Answer 2 ...
 |-- Answer n                 (up to 5)
@@ -717,10 +717,10 @@ Audio exists only in browser memory, about 1.5 MB for a 3-minute answer.
 | 49 | Switch off, or key variables not set | Nothing is sent. The push command says why. Per-call numbers are still saved. |
 | 50 | Interview from before this update | Not sent. It has totals only, no per-call numbers. |
 | 51 | Langfuse down or key wrong | The push command shows the reason. Nothing is marked sent. Sent again next run. |
-| 52 | Interview In progress or Preparing | Waits until it is Ready, Incomplete or Failed. |
-| 53 | Interview left open | It becomes Incomplete when history is next opened (FR-J2). It is sent after that. |
-| 54 | Incomplete interview gets feedback later | The Feedback writing span is added to the same trace (FR-M16). |
-| 55 | Failed interview with answers | Sent with outcome Failed. |
+| 52 | Interview In progress, Preparing, Incomplete or Failed | Waits. Not sent until it reaches Ready. |
+| 53 | Interview left open | It becomes Incomplete when history is next opened (FR-J2). It is not sent unless you later get feedback and it reaches Ready. |
+| 54 | Incomplete interview gets feedback later | Sent then, as one full trace. Trace duration includes the gap since the first span. |
+| 55 | Failed interview | Not sent. After Try again reaches Ready, it is sent. The failed attempt shows as an error span. |
 | 56 | Question writing retried | Two Question writing spans. The second is marked as a retry. |
 | 57 | Speech rate limit, then success | Two Speech to text spans under the same Answer. The first is marked as an error. |
 | 58 | Provider returns no token counts | Shown as "not available". |
@@ -779,14 +779,15 @@ Every story is served by at least one functional requirement.
 | 13 | Details for My questions: "n custom questions" | Assumed. |
 | 14 | Status In progress added | New. Shown only while a run is open. |
 | 15 | One trace per interview, with a span per step | Agreed 16 Nov. |
-| 16 | Answer span with one Speech to text child. Question writing and Feedback writing sit beside the Answer spans | Proposed 16 Nov. To confirm. |
+| 16 | Answer span runs from recording start to text returned. Speech to text is its only child. Question writing and Feedback writing sit beside the Answer spans | Agreed 16 Nov. |
 | 17 | No text in traces. A switch may come later | Agreed 16 Nov. |
 | 18 | Show both input tokens per second (rough) and output tokens per second | Agreed 16 Nov. |
-| 19 | Send all three interview types | Proposed 16 Nov. To confirm (agreed for two types; My questions was missed). |
-| 20 | Send interviews with at least one answer, including left-open ones | Agreed 16 Nov. |
+| 19 | Send all three interview types | Agreed 16 Nov. |
+| 20 | Send an interview once final feedback is generated (status Ready). Left-open and Failed interviews are sent after they reach Ready | Agreed 16 Nov. Replaces the earlier plan to send left-open interviews as they are. |
 | 21 | Feedback: model time and wait time, named separately | Agreed 16 Nov. |
 | 22 | Save per-call numbers locally | Agreed 16 Nov. About 1 KB per interview. |
-| 23 | Separate Config switch "Send interview traces", default on | Agreed 16 Nov. Nothing is sent until the keys are set. |
+| 23 | Two separate switches, fit scoring and interview, both on by default. Nothing is sent until the keys are set | Agreed 16 Nov. |
+| 24 | Fit scoring switch default changes from off to on | Agreed 16 Nov. Needs a change in the built code and in Round 16 of `REQUIREMENTS.md`. |
 
 **Your actions before build**
 - Turn off "Anonymous improvement data" in the Mistral Admin Console (checks 6 and 7).
@@ -817,30 +818,32 @@ All numbers are made up. The Langfuse screen layout is approximate. Only the num
 
 ### 17.1 Trace list (one row per interview)
 
-| Trace | Type | Outcome | Trace duration | Model calls | Speech calls | Speech errors | Input tokens | Output tokens |
-|---|---|---|---|---|---|---|---|---|
-| Interview 41 | Company role | Ready | 9 min 12 s | 2 | 5 | 1 | 4,792 | 1,498 |
-| Interview 42 | General role | Incomplete | 2 min 5 s | 1 | 1 | 0 | 540 | 131 |
-| Interview 43 | My questions | Ready | 4 min 20 s | 1 | 2 | 0 | 1,960 | 880 |
+| Trace | Type | Trace duration | Model calls | Speech calls | Speech errors | Input tokens | Output tokens |
+|---|---|---|---|---|---|---|---|
+| Interview 41 | Company role | 9 min 12 s | 2 | 5 | 1 | 4,792 | 1,498 |
+| Interview 42 | General role | 2 min 11 s | 2 | 1 | 0 | 1,520 | 551 |
+| Interview 43 | My questions | 4 min 20 s | 1 | 2 | 0 | 1,960 | 880 |
 
-Input and output of every trace: empty.
+Input and output of every trace: empty. Every trace is for an interview with final feedback.
 
-### 17.2 Interview 41: Company role, Ready, 4 answers, one speech retry
+### 17.2 Interview 41: Company role, 4 answers, one speech retry
 
 ```
 Interview 41                                   552 s
 |-- Question writing        (model)              3.0 s
-|-- Answer 1                                    62.4 s
+|-- Answer 1                                    65.3 s
 |     `-- Speech to text                         2.9 s
-|-- Answer 2                                    88.0 s
+|-- Answer 2                                    91.6 s
 |     `-- Speech to text                         3.6 s
-|-- Answer 3                                    41.2 s
+|-- Answer 3                                    43.1 s
 |     `-- Speech to text                         1.9 s
-|-- Answer 4                                    75.5 s
+|-- Answer 4                                    79.0 s
 |     |-- Speech to text (error)                 0.4 s
 |     `-- Speech to text (retry)                 3.1 s
 `-- Feedback writing        (model)             20.0 s
 ```
+
+An Answer span is the audio length plus the speech response time, for example 62.4 s + 2.9 s = 65.3 s. Upload time is not counted.
 
 **Model spans**
 
@@ -849,38 +852,39 @@ Interview 41                                   552 s
 | Question writing | ministral-14b | 3.0 s | 3.0 s | 612 | 148 | 204.0 | 49.3 |
 | Feedback writing | ministral-14b | 20.0 s | 24.5 s | 4,180 | 1,350 | 209.0 | 67.5 |
 
-**Speech spans**
+**Answer spans**
 
-| Span | Audio length | Speech response time | Time info | Result |
+| Answer | Audio length | Speech response time | Time info | Result |
 |---|---|---|---|---|
-| Answer 1, Speech to text | 62.4 s | 2.9 s | word times | OK |
-| Answer 2, Speech to text | 88.0 s | 3.6 s | word times | OK |
-| Answer 3, Speech to text | 41.2 s | 1.9 s | sentence times only | OK |
-| Answer 4, Speech to text | 75.5 s | 0.4 s | none | Error: rate limit |
-| Answer 4, Speech to text | 75.5 s | 3.1 s | word times | OK (retry) |
+| 1 | 62.4 s | 2.9 s | word times | OK |
+| 2 | 88.0 s | 3.6 s | word times | OK |
+| 3 | 41.2 s | 1.9 s | sentence times only | OK |
+| 4, first attempt | 75.5 s | 0.4 s | none | Error: rate limit |
+| 4, retry | 75.5 s | 3.1 s | word times | OK |
 
 **Trace numbers:** model calls 2, model errors 0, model retries 0, speech calls 5, speech errors 1, speech retries 1.
 
-### 17.3 Interview 42: General role, left open after 1 answer
+### 17.3 Interview 42: General role, ended early after 1 answer
 
 ```
-Interview 42                                   125 s
+Interview 42                                   131 s
 |-- Question writing        (model)              2.8 s
-`-- Answer 1                                    54.0 s
-      `-- Speech to text                         2.4 s
+|-- Answer 1                                    56.4 s
+|     `-- Speech to text                         2.4 s
+`-- Feedback writing        (model)              6.0 s
 ```
 
-- No Feedback writing span. Outcome: Incomplete.
 - Question writing: input 540, output 131, input tokens/s 192.9, output tokens/s 46.8.
-- If feedback is requested later, the Feedback writing span joins this trace (FR-M16).
+- Feedback writing: model time 6.0 s, wait time 6.0 s, input 980, output 420, input tokens/s 163.3, output tokens/s 70.0.
+- A left-open interview that later gets feedback looks the same, but its trace duration includes the gap (FR-M16, edge case 54).
 
-### 17.4 Interview 43: My questions, Ready, 2 answers
+### 17.4 Interview 43: My questions, 2 answers
 
 ```
 Interview 43                                   260 s
-|-- Answer 1                                    47.3 s
+|-- Answer 1                                    49.5 s
 |     `-- Speech to text                         2.2 s
-|-- Answer 2                                    70.8 s
+|-- Answer 2                                    73.5 s
 |     `-- Speech to text                         2.7 s
 `-- Feedback writing        (model)             12.5 s
 ```
@@ -889,6 +893,6 @@ Interview 43                                   260 s
 - Feedback writing: model time 12.5 s, wait time 12.5 s, input 1,960, output 880, input tokens/s 156.8, output tokens/s 70.4.
 
 ### 17.5 Where to look in Langfuse
-- Traces list: one row per interview. Filter by type or outcome.
+- Traces list: one row per interview. Filter by type.
 - Open a trace: the span tree above, with each span's duration and numbers.
 - Model calls: Langfuse shows tokens and latency on its own. The per-second numbers are extra attributes.

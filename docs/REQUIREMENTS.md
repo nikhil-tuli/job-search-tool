@@ -1266,3 +1266,13 @@ Email Sync is switched off. Reasons: it was not reliable enough (missed relevant
 - **Kept:** the code modules, the database tables and the saved data. The role page still shows past automatic changes.
 - **Switch back on:** search the code for `EMAIL-SYNC-PAUSED` and remove the comments. Details in `docs/EMAIL_SYNC_REQUIREMENTS.md`.
 - **Config:** saving the page uses the default Email Sync values, because those fields are not shown.
+
+## Round 25: Langfuse switches (agreed, not built)
+
+Interview tracing details: `docs/INTERVIEW_PREP_REQUIREMENTS.md`, section 4.M.
+
+- **Two separate switches,** both on by default: "Send traces to Langfuse" (fit scoring) and "Send interview traces".
+- **Changed default:** the fit scoring switch was off (Round 16). It is now on.
+- **Keys still needed:** nothing is sent until the Langfuse key variables are set.
+- **What leaves:** unchanged for fit scoring. For interviews: numbers and labels only, no text.
+- **Build note:** the push command must run when either switch is on.
