@@ -54,6 +54,7 @@ class InterviewRow:
     answered: int  # answers that were scored or are waiting to be
     spoken_score: int | None
     answer_score: int | None
+    traced_on: str = ""  # when its trace was sent to Langfuse; empty until then
 
     @property
     def compare_key(self) -> str:
@@ -82,6 +83,25 @@ class AnswerRow:
     word_count: int
     measure: dict[str, object]
     note: str
+
+
+@dataclass(frozen=True)
+class CallRow:
+    """Numbers about one model or speech call. Never any text."""
+
+    id: int
+    step: str  # questions, speech or feedback
+    idx: int | None  # the answer number, for speech calls
+    attempt: int  # 1 for the first call of this step, 2 for the next, and so on
+    started_on: str
+    ms: int
+    ok: bool
+    http_status: int | None
+    tokens_in: int | None  # None when the provider gave no count
+    tokens_out: int | None
+    length_s: float | None
+    time_info: str  # speech only: word times, sentence times only, or none
+    wait_ms: int | None  # feedback only: from the click to Ready
 
 
 @dataclass(frozen=True)
@@ -132,6 +152,7 @@ def _row(r: sqlite3.Row) -> InterviewRow:
         answered=r["answered"],
         spoken_score=r["spoken_score"],
         answer_score=r["answer_score"],
+        traced_on=r["traced_on"],
     )
 
 
@@ -296,6 +317,69 @@ class InterviewStoreMixin:
         self._conn.execute(
             "UPDATE interview SET status = ?, stage = ?, error = ?, updated_on = ? WHERE id = ?",
             (status, stage, error, now, interview_id),
+        )
+
+    # ---- call numbers and tracing ---------------------------------------------------------
+
+    def add_call(
+        self,
+        interview_id: int,
+        *,
+        step: str,
+        started_on: str,
+        ms: int,
+        ok: bool,
+        idx: int | None = None,
+        http_status: int | None = None,
+        tokens_in: int | None = None,
+        tokens_out: int | None = None,
+        length_s: float | None = None,
+        time_info: str = "",
+    ) -> None:
+        """Keep the numbers of one call. The attempt number counts calls of the same step."""
+        before = self._conn.execute(
+            "SELECT COUNT(*) FROM interview_call WHERE interview_id = ? AND step = ? AND idx IS ?",
+            (interview_id, step, idx),
+        ).fetchone()[0]
+        self._conn.execute(
+            "INSERT INTO interview_call (interview_id, step, idx, attempt, started_on, ms, ok, "
+            "http_status, tokens_in, tokens_out, length_s, time_info) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                interview_id, step, idx, before + 1, started_on, max(0, int(ms)), int(ok),
+                http_status, tokens_in, tokens_out, length_s, time_info,
+            ),
+        )  # fmt: skip
+
+    def get_calls(self, interview_id: int) -> list[CallRow]:
+        rows = self._conn.execute(
+            "SELECT * FROM interview_call WHERE interview_id = ? ORDER BY id", (interview_id,)
+        ).fetchall()
+        return [
+            CallRow(
+                id=r["id"],
+                step=r["step"],
+                idx=r["idx"],
+                attempt=r["attempt"],
+                started_on=r["started_on"],
+                ms=r["ms"],
+                ok=bool(r["ok"]),
+                http_status=r["http_status"],
+                tokens_in=r["tokens_in"],
+                tokens_out=r["tokens_out"],
+                length_s=r["length_s"],
+                time_info=r["time_info"],
+                wait_ms=r["wait_ms"],
+            )
+            for r in rows
+        ]
+
+    def set_last_call_wait(self, interview_id: int, step: str, wait_ms: int) -> None:
+        """Note how long the person waited, on the latest call of the step."""
+        self._conn.execute(
+            "UPDATE interview_call SET wait_ms = ? WHERE id = (SELECT MAX(id) FROM "
+            "interview_call WHERE interview_id = ? AND step = ?)",
+            (max(0, int(wait_ms)), interview_id, step),
         )
 
     def set_interview_models(self, interview_id: int, feedback_model: str) -> None:

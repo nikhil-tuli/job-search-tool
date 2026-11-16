@@ -100,11 +100,12 @@ class Config:
     ai_max_missing: int = 2
     ai_max_words: int = 3_000
     ai_calls_per_minute: int = 4
-    langfuse_on: int = 0
+    langfuse_on: int = 1
     langfuse_base_url: str = "https://cloud.langfuse.com"
     langfuse_public_env: str = "LANGFUSE_PUBLIC_KEY"
     langfuse_secret_env: str = "LANGFUSE_SECRET_KEY"
     langfuse_send_text: int = 0
+    interview_langfuse_on: int = 1
     naukri_location: str = "india"
     naukri_max_pages: int = 5
     naukri_delay_seconds_min: float = 6.0
@@ -278,6 +279,7 @@ _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
     "interview_stop_s": (int, 30, 600),
     "interview_read_aloud": (int, 0, 1),
     "langfuse_on": (int, 0, 1),
+    "interview_langfuse_on": (int, 0, 1),
     "langfuse_send_text": (int, 0, 1),
     "schedule_timeout_minutes": (int, 5, 240),
     "schedule_notify_finish": (int, 0, 1),

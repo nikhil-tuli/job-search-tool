@@ -43,6 +43,13 @@ from jobscan.store import Store
 from jobscan.timeutil import IST, to_iso
 from jobscan.web import create_app
 
+
+@pytest.fixture(autouse=True)
+def tracing_off(store: Store) -> None:
+    """These tests are about the scan. Tracing is on by default, so switch it off here."""
+    store.set_config_raw({"langfuse_on": "0", "interview_langfuse_on": "0"})
+
+
 NOW = datetime(2026, 10, 28, 8, 0, tzinfo=IST)
 FRESH = to_iso(NOW - timedelta(days=3))
 OLD = to_iso(NOW - timedelta(days=90))
@@ -883,10 +890,10 @@ def test_schedule_runs_company_sites_after_linkedin(store: Store, tmp_path: Path
 def test_schedule_skips_sites_when_off_empty_or_done(store: Store, tmp_path: Path) -> None:
     assert [c[-1] for c in scheduled(store, tmp_path)] == ["scan"]  # no companies yet
     add_company(store, "Mythic")
-    raw = Config(sites_daily=0).to_raw()
+    raw = Config(sites_daily=0, langfuse_on=0, interview_langfuse_on=0).to_raw()
     store.set_config_raw(raw)
     assert [c[-1] for c in scheduled(store, tmp_path)] == ["scan"]
-    store.set_config_raw(Config().to_raw())
+    store.set_config_raw(Config(langfuse_on=0, interview_langfuse_on=0).to_raw())
     run = runner(store, {"Mythic": FakeReader([job("1")])}).run()
     assert store.get_run(run.run_id) is not None
     assert "sites" not in [c[-1] for c in scheduled(store, tmp_path)]

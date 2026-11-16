@@ -565,8 +565,14 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
             (
                 "langfuse_on",
                 "Send traces to Langfuse",
-                "1 lets jobscan push-traces (and the daily job) send call details and your "
-                "ratings, 0 sends nothing",
+                "1 lets jobscan push-traces (and the daily job) send fit scoring call details "
+                "and your ratings, 0 sends none of them. Nothing is sent until the keys are set",
+            ),
+            (
+                "interview_langfuse_on",
+                "Send interview traces",
+                "1 sends one trace per interview once its feedback is ready (numbers and labels "
+                "only, no text), 0 sends none. Nothing is sent until the keys are set",
             ),
             (
                 "langfuse_base_url",

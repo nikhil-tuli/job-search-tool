@@ -267,7 +267,11 @@ def test_the_push_is_remembered_for_the_eval_page(store: Store) -> None:
 # ---- the command and the daily job ----------------------------------------------------------
 
 
-def test_the_command_is_off_until_config_says_so(tmp_path: Path) -> None:
+def test_the_command_stops_when_both_switches_are_off(tmp_path: Path) -> None:
+    conn = db.connect(tmp_path / "j.db")
+    db.migrate(conn)
+    Store(conn).set_config_raw({"langfuse_on": "0", "interview_langfuse_on": "0"})
+    conn.close()
     out = io.StringIO()
     code = cli.main(["--db", str(tmp_path / "j.db"), "push-traces"], out=out)
     assert code == cli.EXIT_USAGE
@@ -329,7 +333,10 @@ def test_the_daily_job_pushes_with_keys_from_the_keychain(store: Store, tmp_path
     assert notes == []
 
 
-def test_the_daily_job_does_nothing_when_off(store: Store, tmp_path: Path) -> None:
+def test_the_daily_job_does_nothing_when_both_switches_are_off(
+    store: Store, tmp_path: Path
+) -> None:
+    store.set_config_raw({"langfuse_on": "0", "interview_langfuse_on": "0"})
     seen, notes = daily(store, tmp_path, Runner(), [0])
     assert seen == []
     assert notes == []
@@ -363,7 +370,9 @@ def test_install_names_the_langfuse_keychain_items_when_on(tmp_path: Path) -> No
 
 def test_config_has_the_tracing_group_and_validates_it() -> None:
     assert Config.from_raw({"langfuse_on": "1"}).langfuse_on == 1
-    assert Config().langfuse_on == 0
+    assert Config().langfuse_on == 1  # on by default; nothing is sent until the keys are set
+    assert Config().interview_langfuse_on == 1
+    assert Config.from_raw({"interview_langfuse_on": "0"}).interview_langfuse_on == 0
     assert Config().langfuse_send_text == 0
     from jobscan.config import ConfigError
 

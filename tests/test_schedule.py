@@ -16,6 +16,13 @@ from jobscan.models import NewRole
 from jobscan.store import RUN_FAILED, RUN_PARTIAL, RUN_SUCCESS, Store
 from jobscan.timeutil import now_ist, to_iso
 
+
+@pytest.fixture(autouse=True)
+def tracing_off(store: Store) -> None:
+    """These tests are about the scan. Tracing is on by default, so switch it off here."""
+    store.set_config_raw({"langfuse_on": "0", "interview_langfuse_on": "0"})
+
+
 SECRET = "AIza-test-secret-value"
 KEY_ENV = "MISTRAL_API_KEY"
 

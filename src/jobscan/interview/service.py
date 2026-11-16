@@ -20,12 +20,13 @@ from ..config import Config, ConfigError
 from ..models import Cv, Role
 from ..store import Store
 from ..tailor_ai import TailorClient, TailorError
+from ..timeutil import from_iso
 from . import feedback as fb
 from . import metrics as mx
 from . import questions as qs
 from . import store as st
 from .rules import MIN_ANSWER_WORDS
-from .stt import ALLOWED_AUDIO_TYPES, TranscribeError, Transcriber, make_transcriber
+from .stt import ALLOWED_AUDIO_TYPES, TranscribeError, Transcriber, Transcription, make_transcriber
 
 WHERE = "Config, Interview Prep"
 RATE_LIMIT_WAIT_SECONDS = 30.0
@@ -200,16 +201,31 @@ def _ask(
     system: str,
     user: str,
     *,
+    step: str,
     temperature: float,
     max_tokens: int,
 ) -> str:
-    """One model call, paced. A rate limit is waited out once. Counts go to the interview."""
+    """One model call, paced. A rate limit is waited out once. Counts go to the interview.
+
+    The numbers of every call (step, start, time, tokens, result) are kept for tracing. No text.
+    """
     client = env.make_ai(config)
     for attempt in (1, 2):
         env.pacer.wait(config.ai_calls_per_minute)
+        started_on = env.now()
+        clock_start = time.monotonic()
         try:
             text = client.complete(system, user, temperature=temperature, max_tokens=max_tokens)
         except TailorError as exc:
+            info = getattr(client, "last_call", None)
+            store.add_call(
+                interview_id,
+                step=step,
+                started_on=started_on,
+                ms=getattr(info, "ms", 0) or int((time.monotonic() - clock_start) * 1000),
+                ok=False,
+                http_status=exc.status,
+            )
             store.add_stats(interview_id, ai_calls=1, ai_errors=1)
             if exc.status == 429 and attempt == 1:
                 store.add_stats(interview_id, ai_retries=1)
@@ -217,6 +233,15 @@ def _ask(
                 continue
             raise
         info = getattr(client, "last_call", None)
+        store.add_call(
+            interview_id,
+            step=step,
+            started_on=started_on,
+            ms=getattr(info, "ms", 0) or int((time.monotonic() - clock_start) * 1000),
+            ok=True,
+            tokens_in=getattr(info, "tokens_in", None),
+            tokens_out=getattr(info, "tokens_out", None),
+        )
         store.add_stats(
             interview_id,
             ai_calls=1,
@@ -265,7 +290,7 @@ def write_questions(store: Store, env: Env, config: Config, interview_id: int) -
         questions: list[qs.Question] = []
         for attempt in (1, 2):
             reply = _ask(
-                store, env, config, interview_id, qs.SYSTEM_PROMPT, user,
+                store, env, config, interview_id, qs.SYSTEM_PROMPT, user, step="questions",
                 temperature=QUESTIONS_TEMPERATURE, max_tokens=QUESTIONS_MAX_TOKENS,
             )  # fmt: skip
             try:
@@ -330,15 +355,36 @@ def submit_answer(
     if not content_type.startswith(ALLOWED_AUDIO_TYPES):
         raise InterviewError("That file is not a recording.")
     duration = min(max(0.0, duration_s), float(MAX_ANSWER_SECONDS))
+    clock_start = time.monotonic()
     try:
         result = transcriber.transcribe(audio, filename, content_type)
     except TranscribeError as exc:
+        store.add_call(
+            interview_id,
+            step="speech",
+            idx=idx,
+            started_on=now,
+            ms=int((time.monotonic() - clock_start) * 1000),
+            ok=False,
+            http_status=exc.status,
+            length_s=duration,
+        )
         store.add_stats(interview_id, stt_calls=1, stt_errors=1)
         if exc.status == 429:
             return AnswerOutcome("", retry_after=exc.retry_after or RATE_LIMIT_WAIT_SECONDS)
         return AnswerOutcome("", error=str(exc))
     finally:
         del audio  # the only copy of the recording on this side
+    store.add_call(
+        interview_id,
+        step="speech",
+        idx=idx,
+        started_on=now,
+        ms=result.ms,
+        ok=True,
+        length_s=duration or result.duration_s or 0.0,
+        time_info=_time_info(result),
+    )
     store.add_stats(interview_id, stt_calls=1, stt_ms=result.ms)
     times = result.words or result.sentences
     measure = mx.measure_answer(
@@ -364,6 +410,13 @@ def submit_answer(
         measure=measure.to_dict(),
     )
     return AnswerOutcome(status, words=measure.words)
+
+
+def _time_info(result: Transcription) -> str:
+    """Which times the speech service gave: the best one decides how exact the pauses are."""
+    if result.words:
+        return "word times"
+    return "sentence times only" if result.sentences else "none"
 
 
 def skip_answer(store: Store, interview_id: int, idx: int, *, now: str) -> None:
@@ -429,6 +482,7 @@ def build_feedback(store: Store, env: Env, config: Config, interview_id: int) ->
     row = store.get_interview(interview_id)
     if row is None or row.status != st.PREPARING:
         return "This interview is not waiting for feedback."
+    waiting_since = row.updated_on  # set when you clicked Finish, Get feedback or Try again
     cv = store.get_cv()
     if cv is None or not cv.text.strip():
         return _fail(store, env, interview_id, "Upload your CV first, then try again.")
@@ -463,7 +517,7 @@ def build_feedback(store: Store, env: Env, config: Config, interview_id: int) ->
     try:
         for attempt in (1, 2):
             reply = _ask(
-                store, env, config, interview_id, fb.SYSTEM_PROMPT, user,
+                store, env, config, interview_id, fb.SYSTEM_PROMPT, user, step="feedback",
                 temperature=FEEDBACK_TEMPERATURE, max_tokens=config.interview_reply_cap,
             )  # fmt: skip
             try:
@@ -493,8 +547,17 @@ def build_feedback(store: Store, env: Env, config: Config, interview_id: int) ->
         missing=result.missing,
         now=env.now(),
     )
+    store.set_last_call_wait(interview_id, "feedback", _waited_ms(waiting_since, env.now()))
     store.set_interview_status(interview_id, st.READY, now=env.now())
     return ""
+
+
+def _waited_ms(since: str, until: str) -> int:
+    """Milliseconds between two saved times. 0 when either cannot be read."""
+    try:
+        return max(0, int((from_iso(until) - from_iso(since)).total_seconds() * 1000))
+    except ValueError:
+        return 0
 
 
 def _fail(store: Store, env: Env, interview_id: int, message: str) -> str:

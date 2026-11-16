@@ -723,6 +723,32 @@ def _migration_19(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_20(conn: sqlite3.Connection) -> None:
+    """Interview tracing: numbers for each model and speech call (no text), and a sent marker."""
+    conn.execute("ALTER TABLE interview ADD COLUMN traced_on TEXT NOT NULL DEFAULT ''")
+    conn.execute(
+        """
+        CREATE TABLE interview_call (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            interview_id INTEGER NOT NULL REFERENCES interview (id) ON DELETE CASCADE,
+            step TEXT NOT NULL CHECK (step IN ('questions', 'speech', 'feedback')),
+            idx INTEGER,
+            attempt INTEGER NOT NULL,
+            started_on TEXT NOT NULL,
+            ms INTEGER NOT NULL DEFAULT 0,
+            ok INTEGER NOT NULL CHECK (ok IN (0, 1)),
+            http_status INTEGER,
+            tokens_in INTEGER,
+            tokens_out INTEGER,
+            length_s REAL,
+            time_info TEXT NOT NULL DEFAULT '',
+            wait_ms INTEGER
+        )
+        """
+    )
+    conn.execute("CREATE INDEX interview_call_interview ON interview_call (interview_id)")
+
+
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_1,
     _migration_2,
@@ -743,6 +769,7 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_17,
     _migration_18,
     _migration_19,
+    _migration_20,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 
