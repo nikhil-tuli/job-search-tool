@@ -46,6 +46,9 @@ from ..fit_book import FitBook
 from ..fit_filters import FitResult, FitRules
 from ..interview.service import Pacer, interview_ai_from_env, transcriber_from_env
 from ..interview.stt import Transcriber
+from ..interview.trace import live_tracer
+from ..langfuse_push import LangfuseClient
+from ..langfuse_push import client_from_env as langfuse_client_from_env
 from ..matching import MATCH_MODES
 from ..models import (
     FOLLOW_UP_STATES,
@@ -815,6 +818,7 @@ def create_app(
     make_interview_ai: Callable[[Config], Completer] = interview_ai_from_env,
     make_interview_stt: Callable[[Config], Transcriber] = transcriber_from_env,
     interview_pacer: Pacer | None = None,
+    make_langfuse: Callable[[Config], LangfuseClient] = langfuse_client_from_env,
 ) -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = secret_key or secrets.token_hex(32)
@@ -828,6 +832,7 @@ def create_app(
         make_ai=make_interview_ai,
         make_transcriber=make_interview_stt,
         pacer=interview_pacer,
+        trace=live_tracer(make_langfuse),
     )
 
     # ---- request guards -------------------------------------------------------------------

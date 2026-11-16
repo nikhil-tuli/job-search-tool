@@ -3,7 +3,7 @@
 Status: approved on 11 Nov 2026. Build started.
 Date: 11 Nov 2026.
 
-**Update 16 Nov 2026 (not built yet):** Langfuse tracing of interviews added. See sections 4.M, 8.6 and 17. Numbers only. No text is sent. On by default. Sent once final feedback is generated.
+**Update 16 Nov 2026 (built; the live check in section 11 is still to be done):** Langfuse tracing of interviews added. See sections 4.M, 8.6 and 17. Numbers only. No text is sent. On by default. Sent once final feedback is generated.
 
 Changes from v2
 - Question and feedback model is now **Mistral** (the same one used for fit scoring).
@@ -285,7 +285,7 @@ Default allowed roles: Backend Engineer, Frontend Engineer, Full-stack Engineer,
 
 ### 4.M Tracing (Langfuse)
 
-Agreed on 16 Nov 2026. Not built yet.
+Agreed on 16 Nov 2026. Built. The first live check (section 11, check 9) is still to be done.
 
 | ID | Requirement | Stories |
 |---|---|---|
@@ -459,16 +459,16 @@ Validation: scores are integers 0 to 100; every transcript has one item; lists w
 
 | Table | Key fields |
 |---|---|
-| `interview` | id, type, role_id (null), general_title (null), status, started_at, ended_at, cv_name, cv_uploaded_at, read_aloud, question_model, feedback_model, prompt_version, error, traced_at |
+| `interview` | id, type, role_id (null), general_title (null), status, started_at, ended_at, cv_name, cv_uploaded_at, read_aloud, question_model, feedback_model, prompt_version, error, traced_on |
 | `interview_question` | id, interview_id, idx, slot, kind, text, source |
 | `interview_answer` | id, interview_id, idx, status (answered, skipped, too_short, no_speech, not_scored), transcript, duration_s, word_count, raw_metrics (JSON) |
 | `interview_feedback` | interview_id, spoken (JSON: raw values, ratings), answer_feedback (JSON), spoken_score, answer_score, tips (JSON), created_at |
 | `interview_thumb` | interview_id, idx, value |
-| `interview_call` | id, interview_id, step (questions, speech, feedback), idx (answer number, empty for model steps), attempt, started_at, ms, ok, http_status, tokens_in, tokens_out, time_info (speech only) |
+| `interview_call` | id, interview_id, step (questions, speech, feedback), idx (answer number, empty for model steps), attempt, started_on, ms, ok, http_status, tokens_in, tokens_out, length_s (audio length, speech only), time_info (speech only), wait_ms (feedback only) |
 
 - No word list, no audio, no images.
 - Deleting an interview deletes its rows in all six tables.
-- Added with the app's existing schema mechanism. Existing tables are unchanged, except `interview` gets the column `traced_at` (empty until sent).
+- Added with the app's existing schema mechanism. Existing tables are unchanged, except `interview` gets the column `traced_on` (empty until sent).
 
 ### 8.4 Routes (outline)
 
@@ -811,6 +811,14 @@ Every story is served by at least one functional requirement.
 - Word times: the speech client asks for `verbose_json` with word and segment times and works without them. The pre-build test in section 11 is still to be run by the user.
 - Feedback also receives the must-haves with their Met, Partly or Missing labels (Company role only), so Role fit can be judged against them.
 - Bands are three: Good, Needs work, Weak (Strong was merged into Good).
+- **Tracing (built 16 Nov 2026).** Code: `interview/trace.py`. Numbers are kept in the table `interview_call`, one row per model or speech call. Differences from the text above:
+  - Column names follow the app: `started_on`, `traced_on`, and `length_s` for the audio length (the word "audio" is kept out of the database on purpose, see the test that checks no recording is stored).
+  - Feedback wait time is measured from the moment you click Finish, Get feedback or Try again to the moment the interview is Ready.
+  - The live send runs in the same background job that writes the feedback, right after the interview is saved as Ready. It never shows an error in the app. The push command prints the reason when it sends the leftovers.
+  - The speech model label is the one in Config at the time of sending.
+  - Answer span start is the time the audio arrived minus the audio length. Answer span end is the end of the last speech call. A rate-limit wait before a retry is therefore inside the span.
+  - Numbers are sent as text attributes (for example "49.3"). Token counts also go in Langfuse's own usage field. Attribute names and how Langfuse shows them are checked in the first live push.
+  - Tests never reach Langfuse: the test setup removes the key variables.
 
 ---
 
@@ -902,6 +910,8 @@ Interview 43                                   260 s
 - No Question writing span. My questions needs no model call (FR-C10).
 - Feedback writing: model time 12.5 s, wait time 12.5 s, input 1,960, output 880, input tokens/s 156.8, output tokens/s 70.4.
 - Active time = 49.5 + 73.5 + 12.5 = 135.5 s.
+
+The numbers in 17.1 to 17.4 are rebuilt by `tests/test_interview_trace.py`, which checks every duration, tokens per second and active time.
 
 ### 17.5 Where to look in Langfuse
 - Traces list: one row per interview. Filter by type.

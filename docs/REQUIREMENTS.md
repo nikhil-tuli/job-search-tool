@@ -1267,7 +1267,7 @@ Email Sync is switched off. Reasons: it was not reliable enough (missed relevant
 - **Switch back on:** search the code for `EMAIL-SYNC-PAUSED` and remove the comments. Details in `docs/EMAIL_SYNC_REQUIREMENTS.md`.
 - **Config:** saving the page uses the default Email Sync values, because those fields are not shown.
 
-## Round 25: Langfuse switches (agreed, not built)
+## Round 25: Langfuse switches (built; live check pending)
 
 Interview tracing details: `docs/INTERVIEW_PREP_REQUIREMENTS.md`, section 4.M.
 

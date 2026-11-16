@@ -45,3 +45,10 @@ def web(store: Store, embedder: BagEmbedder) -> Harness:
 @pytest.fixture
 def client(web: Harness) -> FlaskClient:
     return web.client
+
+
+@pytest.fixture(autouse=True)
+def no_langfuse_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test must never reach the real Langfuse, even when the keys are set in this terminal."""
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)

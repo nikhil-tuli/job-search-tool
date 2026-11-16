@@ -40,6 +40,7 @@ PREPARING_NOW = "preparing"
 
 Sleep = Callable[[float], None]
 Now = Callable[[], str]
+Tracer = Callable[[Store, Config, int], None]  # sends a finished interview to Langfuse
 
 
 class InterviewError(Exception):
@@ -102,6 +103,7 @@ class Env:
     pacer: Pacer
     sleep: Sleep
     now: Now
+    trace: Tracer | None = None  # called once an interview is Ready; None sends nothing
 
 
 # ---- starting ---------------------------------------------------------------------------------
@@ -549,7 +551,18 @@ def build_feedback(store: Store, env: Env, config: Config, interview_id: int) ->
     )
     store.set_last_call_wait(interview_id, "feedback", _waited_ms(waiting_since, env.now()))
     store.set_interview_status(interview_id, st.READY, now=env.now())
+    _trace_quietly(store, env, config, interview_id)
     return ""
+
+
+def _trace_quietly(store: Store, env: Env, config: Config, interview_id: int) -> None:
+    """Send the Ready interview to Langfuse. Whatever goes wrong here changes nothing."""
+    if env.trace is None:
+        return
+    try:
+        env.trace(store, config, interview_id)
+    except Exception:  # tracing must never break an interview
+        return
 
 
 def _waited_ms(since: str, until: str) -> int:

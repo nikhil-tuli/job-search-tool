@@ -237,6 +237,7 @@ def agreement(rating: str, band: str) -> int:
 class PushResult:
     traces: int = 0
     ratings: int = 0
+    interviews: int = 0
     stopped: str = ""
     notes: list[str] = field(default_factory=list)
 
@@ -259,15 +260,26 @@ def push(
         emit(f"Langfuse push stopped: {result.stopped}")
         return result
     try:
-        _push_calls(store, config, client, result, emit, sleep, clock)
-        if not result.stopped:
-            _push_ratings(store, config, client, result, sleep, clock)
+        if config.langfuse_on:  # fit scoring has its own switch
+            _push_calls(store, config, client, result, emit, sleep, clock)
+            if not result.stopped:
+                _push_ratings(store, config, client, result, sleep, clock)
+        if config.interview_langfuse_on:  # so do interviews: the backup for the live send
+            from .interview.trace import push_interviews  # here, as trace imports this module
+
+            result.interviews = push_interviews(
+                store, config, client, emit, clock=clock, sleep=sleep
+            )
     except LangfuseError as exc:
         result.stopped = str(exc)
-    store.save_push_state(to_iso(clock()), result.traces, result.ratings, result.stopped)
+    if config.langfuse_on:
+        store.save_push_state(to_iso(clock()), result.traces, result.ratings, result.stopped)
     if result.stopped:
         emit(f"Langfuse push stopped: {result.stopped}; the rest goes next time")
-    emit(f"Langfuse push: {result.traces} traces and {result.ratings} ratings sent")
+    summary = f"Langfuse push: {result.traces} traces and {result.ratings} ratings sent"
+    if config.interview_langfuse_on:
+        summary += f", {result.interviews} interview traces"
+    emit(summary)
     return result
 
 

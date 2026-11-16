@@ -176,7 +176,7 @@ def install(
     print(f"Scheduled: a scan runs daily at {config.schedule_time} IST and at login.", file=out)
     print(f"Log: {log}", file=out)
     choice = key_choice(config)
-    if config.langfuse_on:
+    if config.langfuse_on or config.interview_langfuse_on:
         missing = [
             s
             for s in (LANGFUSE_PUBLIC_SERVICE, LANGFUSE_SECRET_SERVICE)
@@ -319,7 +319,7 @@ def push_traces_scheduled(
         config = Config.from_raw(store.get_config_raw())
     except ConfigError:
         return
-    if not config.langfuse_on:
+    if not (config.langfuse_on or config.interview_langfuse_on):
         return
     send: Notifier = notifier or (lambda title, message: notify(title, message, runner))
     environment = dict(os.environ if env is None else env)

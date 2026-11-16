@@ -344,7 +344,7 @@ def cmd_push_traces(store: Store, out: TextIO, sleep: Callable[[float], None]) -
     config = load_config(store, out, "nothing was sent")
     if config is None:
         return EXIT_USAGE
-    if not config.langfuse_on:
+    if not (config.langfuse_on or config.interview_langfuse_on):
         print("Langfuse is switched off in Config, Tracing (Langfuse).", file=out)
         return EXIT_USAGE
     result = push_traces(
@@ -356,7 +356,7 @@ def cmd_push_traces(store: Store, out: TextIO, sleep: Callable[[float], None]) -
     )
     if not result.stopped:
         return EXIT_OK
-    return EXIT_PARTIAL if (result.traces or result.ratings) else EXIT_FAILED
+    return EXIT_PARTIAL if (result.traces or result.ratings or result.interviews) else EXIT_FAILED
 
 
 def cmd_score(

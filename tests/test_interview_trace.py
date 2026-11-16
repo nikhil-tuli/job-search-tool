@@ -2,25 +2,35 @@
 
 from __future__ import annotations
 
+import io
 import json
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from jobscan import cli, db
 from jobscan.config import Config
 from jobscan.interview import service as sv
 from jobscan.interview import store as st
 from jobscan.interview import trace as tr
+from jobscan.interview.service import Pacer
 from jobscan.langfuse_push import LangfuseError
 from jobscan.store import Store
+from jobscan.web import create_app
 from tests.test_interview_calls import MeteredAi
 from tests.test_interview_service import (
     LONG,
+    FakeAi,
+    FakeStt,
     feedback_reply,
     make_env,
     preparing,
+    spoken,
 )
-from tests.test_langfuse_push import Session, lf, span_attrs
+from tests.test_interview_web import run_own, upload
+from tests.test_langfuse_push import ON, Runner, Session, daily, lf, run_push, scored, span_attrs
 
 TZ = "+05:30"
 
@@ -365,3 +375,133 @@ def test_the_backup_stops_at_the_first_refusal(store: Store) -> None:
             store, Config(), lf(Session(status=401)), lambda _l: None, sleep=lambda _s: None
         )
     assert len(store.untraced_ready_interviews()) == 1
+
+
+# ---- wiring: the feedback step, the web app, the push command, the daily run ----------------
+
+
+def test_the_tracer_runs_after_the_interview_is_ready(store: Store) -> None:
+    interview_id = preparing(store)
+    seen: list[str] = []
+
+    def tracer(s: Store, _config: Config, i: int) -> None:
+        row = s.get_interview(i)
+        assert row is not None
+        seen.append(row.status)
+
+    env = make_env(FakeAi(feedback_reply(1)))
+    env.trace = tracer
+    assert sv.build_feedback(store, env, Config(), interview_id) == ""
+    assert seen == [st.READY]
+
+
+def test_a_tracer_that_blows_up_changes_nothing(store: Store) -> None:
+    interview_id = preparing(store)
+
+    def tracer(_s: Store, _c: Config, _i: int) -> None:
+        raise RuntimeError("boom")
+
+    env = make_env(FakeAi(feedback_reply(1)))
+    env.trace = tracer
+    assert sv.build_feedback(store, env, Config(), interview_id) == ""
+    row = store.get_interview(interview_id)
+    assert row is not None
+    assert row.status == st.READY
+
+
+def web_client(store: Store, ai: FakeAi, make_langfuse: Any) -> Any:
+    return create_app(
+        store,
+        secret_key="t",
+        make_interview_ai=lambda _c: ai,
+        make_interview_stt=lambda _c: FakeStt(spoken()),
+        interview_pacer=Pacer(monotonic=lambda: 0.0, sleep=lambda _s: None),
+        make_langfuse=make_langfuse,
+    ).test_client()
+
+
+def test_finishing_in_the_web_app_sends_the_trace(store: Store) -> None:
+    session = Session()
+    ai = FakeAi(feedback_reply(1))
+    client = web_client(store, ai, lambda _c: lf(session))
+    interview_id = run_own(client, store)
+    upload(client, interview_id, 1)
+    assert client.post(f"/interview/{interview_id}/finish").get_json()["discarded"] is False
+    assert len(session.posts) == 1
+    row = store.get_interview(interview_id)
+    assert row is not None
+    assert row.status == st.READY
+    assert row.traced_on
+
+
+def test_the_feedback_page_works_when_langfuse_is_unreachable(store: Store) -> None:
+    def down(_config: Config) -> Any:
+        raise LangfuseError("The Langfuse keys are missing.")
+
+    client = web_client(store, FakeAi(feedback_reply(1)), down)
+    interview_id = run_own(client, store)
+    upload(client, interview_id, 1)
+    client.post(f"/interview/{interview_id}/finish")
+    row = store.get_interview(interview_id)
+    assert row is not None
+    assert row.status == st.READY
+    assert row.traced_on == ""
+    assert "AI estimate" in client.get(f"/interview/{interview_id}").get_data(as_text=True)
+
+
+def bodies(session: Session) -> list[list[str]]:
+    return [
+        [s["name"] for s in body["resourceSpans"][0]["scopeSpans"][0]["spans"]]
+        for _url, body, _h in session.posts
+    ]
+
+
+def test_fit_scoring_only_when_only_its_switch_is_on(store: Store) -> None:
+    scored(store)
+    ready(store)
+    session = Session()
+    result = run_push(store, session, replace(ON, interview_langfuse_on=0))
+    assert (result.traces, result.interviews) == (1, 0)
+    assert [n for names in bodies(session) for n in names] == ["fit-score"]
+
+
+def test_interviews_only_when_only_their_switch_is_on(store: Store) -> None:
+    scored(store)
+    interview_id = ready(store)
+    session = Session()
+    result = run_push(store, session, replace(ON, langfuse_on=0))
+    assert (result.traces, result.interviews) == (0, 1)
+    assert bodies(session)[0][0] == f"Interview {interview_id}"
+    assert "fit-score" not in [n for names in bodies(session) for n in names]
+
+
+def test_both_switches_send_both(store: Store) -> None:
+    scored(store)
+    ready(store)
+    session = Session()
+    result = run_push(store, session, replace(ON, interview_langfuse_on=1))
+    assert (result.traces, result.interviews) == (1, 1)
+
+
+def test_the_push_command_runs_with_only_the_interview_switch_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = Session()
+    monkeypatch.setattr(cli, "LANGFUSE_CLIENT_FACTORY", lambda _c: lf(session))
+    conn = db.connect(tmp_path / "j.db")
+    db.migrate(conn)
+    Store(conn).set_config_raw({"langfuse_on": "0", "interview_langfuse_on": "1"})
+    conn.close()
+    out = io.StringIO()
+    code = cli.main(["--db", str(tmp_path / "j.db"), "push-traces"], out=out, sleep=lambda _s: None)
+    assert code == cli.EXIT_OK
+    assert "0 interview traces" in out.getvalue()
+
+
+def test_the_daily_job_pushes_with_only_the_interview_switch_on(
+    store: Store, tmp_path: Path
+) -> None:
+    store.set_config_raw({"langfuse_on": "0", "interview_langfuse_on": "1"})
+    seen, notes = daily(store, tmp_path, Runner(), [0])
+    assert seen[0][0][-1] == "push-traces"
+    assert notes == []

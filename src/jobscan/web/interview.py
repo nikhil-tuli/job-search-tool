@@ -79,10 +79,11 @@ def register(
     launch: sv.Launcher | None = None,
     pacer: sv.Pacer | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    trace: sv.Tracer | None = None,
 ) -> None:
     clock = now or (lambda: to_iso(now_ist()))
     run_job = launch or sv.thread_runner(store)
-    env = sv.Env(make_ai=make_ai, pacer=pacer or sv.Pacer(), sleep=sleep, now=clock)
+    env = sv.Env(make_ai=make_ai, pacer=pacer or sv.Pacer(), sleep=sleep, now=clock, trace=trace)
     # Why question writing failed, by interview id. The interview is deleted when it fails,
     # so this is the only place the reason survives. Memory only; it holds no interview content.
     failures: dict[int, str] = {}
