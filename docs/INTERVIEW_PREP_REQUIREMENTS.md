@@ -3,7 +3,7 @@
 Status: approved on 11 Nov 2026. Build started.
 Date: 11 Nov 2026.
 
-**Update 16 Nov 2026 (not built yet):** Langfuse tracing of interviews added. See sections 4.M, 8.6 and 17. Numbers only. No text is sent. Off by default.
+**Update 16 Nov 2026 (not built yet):** Langfuse tracing of interviews added. See sections 4.M, 8.6 and 17. Numbers only. No text is sent. On by default.
 
 Changes from v2
 - Question and feedback model is now **Mistral** (the same one used for fit scoring).
@@ -55,7 +55,7 @@ Changes from v2
 - Two feedback rubrics, with benchmarks, tips and examples.
 - Past History with status, details and feedback.
 - Config section "Interview Prep".
-- Langfuse tracing of interviews: numbers only, off by default.
+- Langfuse tracing of interviews: numbers only, on by default.
 
 **Out of scope:** see section 12.
 
@@ -288,7 +288,7 @@ Agreed on 16 Nov 2026. Not built yet.
 
 | ID | Requirement | Stories |
 |---|---|---|
-| FR-M1 | New Config item **Send interview traces** in the group Tracing (Langfuse). Default off. It uses the same service address and key variables as fit scoring. | US-23 |
+| FR-M1 | New Config item **Send interview traces** in the group Tracing (Langfuse). Default **on**. Nothing is sent until the Langfuse key variables are set. It uses the same service address and key variables as fit scoring. It does not depend on the fit scoring switch. | US-23 |
 | FR-M2 | The app never calls Langfuse during an interview. The command `jobscan push-traces` sends interview traces, the same way it sends fit scoring traces. It also runs at the end of the daily run when on. | US-23 |
 | FR-M3 | An interview is sent when its status is **Ready**, **Incomplete** or **Failed**, and at least one answer got a reply from speech to text. **In progress** and **Preparing** wait. | US-23 |
 | FR-M4 | All three interview types are sent. The type is a label. | US-23 |
@@ -714,7 +714,7 @@ Audio exists only in browser memory, about 1.5 MB for a 3-minute answer.
 
 | # | Case | Behaviour |
 |---|---|---|
-| 49 | Tracing off | Nothing is sent. Per-call numbers are still saved. |
+| 49 | Switch off, or key variables not set | Nothing is sent. The push command says why. Per-call numbers are still saved. |
 | 50 | Interview from before this update | Not sent. It has totals only, no per-call numbers. |
 | 51 | Langfuse down or key wrong | The push command shows the reason. Nothing is marked sent. Sent again next run. |
 | 52 | Interview In progress or Preparing | Waits until it is Ready, Incomplete or Failed. |
@@ -786,7 +786,7 @@ Every story is served by at least one functional requirement.
 | 20 | Send interviews with at least one answer, including left-open ones | Agreed 16 Nov. |
 | 21 | Feedback: model time and wait time, named separately | Agreed 16 Nov. |
 | 22 | Save per-call numbers locally | Agreed 16 Nov. About 1 KB per interview. |
-| 23 | Separate Config switch "Send interview traces", default off | Assumed. |
+| 23 | Separate Config switch "Send interview traces", default on | Agreed 16 Nov. Nothing is sent until the keys are set. |
 
 **Your actions before build**
 - Turn off "Anonymous improvement data" in the Mistral Admin Console (checks 6 and 7).
