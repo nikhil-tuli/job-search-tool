@@ -13,7 +13,7 @@ from dataclasses import dataclass, fields
 
 from .matching import MATCH_MODES
 
-VERIFIED_WINDOW_SECONDS = 86_400  # Only this value has been confirmed against LinkedIn.
+VERIFIED_WINDOW_HOURS = 24  # Only this value has been confirmed against LinkedIn.
 MAX_FOCUS_CHARS = 4_000
 DEFAULT_INTERVIEW_ROLES = (
     "Backend Engineer, Frontend Engineer, Full-stack Engineer, Mobile Engineer, "
@@ -47,7 +47,7 @@ class Config:
     match_mode: str = "contains"
     location_name: str = "India"
     geo_id: str = "102713980"
-    time_window_seconds: int = VERIFIED_WINDOW_SECONDS
+    time_window_hours: int = VERIFIED_WINDOW_HOURS
     max_pages_per_keyword: int = 10
     stop_after_empty_pages: int = 2
     delay_seconds_min: float = 8.0
@@ -170,8 +170,13 @@ class Config:
         )
 
     @property
+    def time_window_seconds(self) -> int:
+        """The search window as LinkedIn wants it. The setting itself is in whole hours."""
+        return self.time_window_hours * 3_600
+
+    @property
     def window_is_verified(self) -> bool:
-        return self.time_window_seconds == VERIFIED_WINDOW_SECONDS
+        return self.time_window_hours == VERIFIED_WINDOW_HOURS
 
     def to_raw(self) -> dict[str, str]:
         return {f.name: str(getattr(self, f.name)) for f in fields(self)}
@@ -179,6 +184,7 @@ class Config:
     @classmethod
     def from_raw(cls, raw: Mapping[str, str]) -> Config:
         """Build a Config from string values; missing keys fall back to defaults."""
+        raw = _with_hours(raw)
         defaults = cls()
         values: dict[str, object] = {}
         errors: dict[str, str] = {}
@@ -215,7 +221,7 @@ class Config:
 
 # key -> (type, minimum, maximum)
 _NUMERIC_SPECS: dict[str, tuple[type, float, float]] = {
-    "time_window_seconds": (int, 3_600, 2_592_000),
+    "time_window_hours": (int, 1, 720),
     "max_pages_per_keyword": (int, 1, 100),
     "stop_after_empty_pages": (int, 1, 20),
     "delay_seconds_min": (float, 1, 120),
@@ -317,6 +323,17 @@ _RANGE_PAIRS = (
     ("retry_wait_min", "retry_wait_max"),
     ("naukri_delay_seconds_min", "naukri_delay_seconds_max"),
 )
+
+
+def _with_hours(raw: Mapping[str, str]) -> Mapping[str, str]:
+    """An older saved Config holds the search window in seconds. Read it as whole hours."""
+    if "time_window_hours" in raw or "time_window_seconds" not in raw:
+        return raw
+    try:
+        hours = max(1, round(int(raw["time_window_seconds"]) / 3_600))
+    except ValueError:
+        return raw
+    return {**raw, "time_window_hours": str(hours)}
 
 
 def _parse_number(text: str, kind: type, low: float, high: float) -> int | float:

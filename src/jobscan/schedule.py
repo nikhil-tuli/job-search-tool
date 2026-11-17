@@ -196,7 +196,7 @@ def install(
             f'  security add-generic-password -a "$USER" -s {choice.service} -w',
             file=out,
         )
-    window_days = config.time_window_seconds / 86_400
+    window_days = config.time_window_hours / 24
     if config.fit_recency_days < window_days:
         print(
             f"Note: the scan looks back {window_days:g} days but Fit recency is "

@@ -1277,3 +1277,12 @@ Interview tracing details: `docs/INTERVIEW_PREP_REQUIREMENTS.md`, section 4.M.
 - **What leaves:** unchanged for fit scoring. For interviews: numbers and labels only, no text.
 - **Interviews are sent at once:** when feedback is ready, the app sends the interview trace in the background. The daily run and the push command are the backup. Fit scoring stays on the daily run.
 - **Build note:** the push command must run when either switch is on.
+
+## Round 26: Search window in hours (built)
+
+- **Config page:** "Posted within (hours)", whole hours, 1 to 720. It was "Posted within (seconds)".
+- **Saved setting:** `time_window_hours`. The scan still sends seconds to LinkedIn (hours x 3,600).
+- **Older saved value:** a Config that holds `time_window_seconds` is read as hours, rounded, at least 1. For example 50,400 shows as 14.
+- **Verified value:** still 24 hours only. The check command warns for any other value.
+- **Messages:** the check command and the scan notes now say hours.
+

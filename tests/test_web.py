@@ -557,7 +557,9 @@ def test_config_page_shows_phrases_and_settings(client: FlaskClient) -> None:
     for phrase in DEFAULT_PHRASES:
         assert f'value="{phrase}"' in body
     assert 'name="max_pages_per_keyword" value="10"' in body
-    assert "86400" in body
+    assert 'name="time_window_hours" value="24"' in body
+    assert "Posted within (hours)" in body
+    assert "86400" not in body
 
 
 def test_config_save_persists_settings_and_phrases(client: FlaskClient, store: Store) -> None:

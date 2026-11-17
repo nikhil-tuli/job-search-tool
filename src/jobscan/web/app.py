@@ -232,9 +232,9 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
             ("location_name", "Location", "Search location text, for example India"),
             ("geo_id", "Geo ID", "LinkedIn geography ID (India is 102713980)"),
             (
-                "time_window_seconds",
-                "Posted within (seconds)",
-                "86400 (24 hours) is the only value verified to work. Scheduled scans use it too. "
+                "time_window_hours",
+                "Posted within (hours)",
+                "24 is the only value verified to work. Scheduled scans use it too. "
                 "If widened, raise Fit recency days to match",
             ),
             ("max_pages_per_keyword", "Page cap per keyword", "10 results per page"),

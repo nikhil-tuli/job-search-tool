@@ -580,16 +580,15 @@ def cmd_scan(
             if age > config.time_window_seconds:
                 reporter.line(
                     "WARNING: the last successful run is older than the "
-                    f"{config.time_window_seconds}s search window, so roles posted in "
+                    f"{config.time_window_hours}-hour search window, so roles posted in "
                     "between may be missed."
                 )
         if not config.window_is_verified:
             reporter.line(
-                "WARNING: the search window is not the verified 86400 seconds; "
-                "LinkedIn may ignore it."
+                "WARNING: the search window is not the verified 24 hours; LinkedIn may ignore it."
             )
         reporter.line(
-            f"Config OK: window {config.time_window_seconds}s, match mode {config.match_mode}, "
+            f"Config OK: window {config.time_window_hours} h, match mode {config.match_mode}, "
             f"up to {config.max_pages_per_keyword} pages per keyword, "
             f"{config.delay_seconds_min:g}-{config.delay_seconds_max:g}s between requests"
         )

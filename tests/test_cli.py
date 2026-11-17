@@ -96,7 +96,7 @@ def test_old_last_run_prints_a_window_warning(db_path: Path) -> None:
     age_runs(db_path)
     code, text = run(db_path, "scan", script=SCRIPT_OK)
     assert code == EXIT_OK
-    assert "older than the 86400s search window" in text
+    assert "older than the 24-hour search window" in text
 
 
 def test_recent_last_run_has_no_window_warning(db_path: Path) -> None:
@@ -135,10 +135,10 @@ def test_invalid_config_is_reported_and_nothing_runs(db_path: Path) -> None:
 
 def test_unverified_window_warns(db_path: Path) -> None:
     store = cli.open_store(db_path)
-    store.set_config_raw({"time_window_seconds": "604800"})
+    store.set_config_raw({"time_window_hours": "168"})
     store.close()
     _, text = run(db_path, "scan", script=SCRIPT_OK)
-    assert "not the verified 86400" in text
+    assert "not the verified 24 hours" in text
 
 
 def test_partial_run_exit_code(db_path: Path) -> None:

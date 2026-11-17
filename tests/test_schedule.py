@@ -201,7 +201,7 @@ def test_install_explains_a_missing_keychain_key(tmp_path: Path) -> None:
 
 def test_install_warns_when_recency_is_shorter_than_the_window(tmp_path: Path) -> None:
     out = io.StringIO()
-    config = Config.from_raw({"time_window_seconds": "259200", "fit_recency_days": "1"})
+    config = Config.from_raw({"time_window_hours": "72", "fit_recency_days": "1"})
     schedule.install(
         tmp_path / "jobscan.db", config, out, runner=FakeRunner(), home=tmp_path, uid=1,
         platform="darwin",

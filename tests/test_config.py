@@ -9,6 +9,7 @@ def test_defaults_match_the_agreed_design() -> None:
     cfg = Config()
     assert cfg.match_mode == "contains"
     assert (cfg.location_name, cfg.geo_id) == ("India", "102713980")
+    assert cfg.time_window_hours == 24
     assert cfg.time_window_seconds == 86_400
     assert cfg.max_pages_per_keyword == 10
     assert cfg.stop_after_empty_pages == 2
@@ -48,8 +49,8 @@ def test_values_are_stripped_and_typed() -> None:
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        ("time_window_seconds", "3599"),
-        ("time_window_seconds", "2592001"),
+        ("time_window_hours", "0"),
+        ("time_window_hours", "721"),
         ("max_pages_per_keyword", "0"),
         ("max_pages_per_keyword", "101"),
         ("stop_after_empty_pages", "0"),
@@ -134,7 +135,7 @@ def test_all_errors_are_reported_together() -> None:
 
 def test_window_verification_flag() -> None:
     assert Config().window_is_verified
-    assert not Config(time_window_seconds=172_800).window_is_verified
+    assert not Config(time_window_hours=48).window_is_verified
 
 
 # ---- scoring settings ----------------------------------------------------------------------
@@ -183,3 +184,19 @@ def test_ordered_pair_message_names_the_other_setting() -> None:
     with pytest.raises(ConfigError) as caught:
         Config.from_raw({"score_partial_min": "80", "score_strong_min": "70"})
     assert "must be below" in caught.value.errors["score_partial_min"]
+
+
+def test_an_older_saved_window_in_seconds_is_read_as_hours() -> None:
+    assert Config.from_raw({"time_window_seconds": "50400"}).time_window_hours == 14
+    assert Config.from_raw({"time_window_seconds": "86400"}).window_is_verified
+    assert Config.from_raw({"time_window_seconds": "1800"}).time_window_hours == 1  # at least 1
+    assert Config.from_raw({"time_window_seconds": "x"}).time_window_hours == 24  # unreadable
+
+
+def test_the_hours_setting_wins_over_an_older_seconds_one() -> None:
+    raw = {"time_window_seconds": "50400", "time_window_hours": "48"}
+    assert Config.from_raw(raw).time_window_hours == 48
+
+
+def test_the_window_is_sent_to_linkedin_in_seconds() -> None:
+    assert Config(time_window_hours=14).time_window_seconds == 50_400
