@@ -262,3 +262,10 @@ def test_real_detail_url_points_at_the_guest_posting_api() -> None:
     assert DETAIL_URL.format(job_id="42") == (
         "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/42"
     )
+
+
+def test_build_params_uses_the_given_place() -> None:
+    from jobscan.config import Place
+
+    params = build_params(Config(), "TPM", 0, Place("Saudi Arabia", "100459316"))
+    assert (params["location"], params["geoId"]) == ("Saudi Arabia", "100459316")

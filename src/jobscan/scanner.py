@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from .client import PAGE_SIZE, DetailFetcher, FetchResult, Outcome, PageFetcher
-from .config import Config
+from .config import Config, Place
 from .details import fetch_descriptions
 from .matching import TitleMatcher, dup_key
 from .models import PORTAL_LINKEDIN, KeywordRecord, NewRole, PageStat
@@ -84,8 +84,10 @@ class Scanner:
             raise ScanSetupError("no title phrase is switched on for title matching")
         matcher = TitleMatcher(match_phrases, self._config.match_mode)
 
+        places = self._config.places
+        searches = [(place, keyword) for place in places for keyword in keywords]
         run_id = self._store.start_run(
-            window_seconds=self._config.time_window_seconds, keywords_total=len(keywords)
+            window_seconds=self._config.time_window_seconds, keywords_total=len(searches)
         )
         purged = self._store.purge_skipped(
             self._config.skipped_titles_retention_days, now=self._clock()
@@ -95,7 +97,7 @@ class Scanner:
 
         records: list[KeywordRecord] = []
         try:
-            self._scan_keywords(run_id, keywords, matcher, records)
+            self._scan_keywords(run_id, searches, len(places) > 1, matcher, records)
             self._fetch_details(records)
         except KeyboardInterrupt:
             self._store.finish_run(run_id, RUN_FAILED, "Interrupted by user")
@@ -114,14 +116,22 @@ class Scanner:
     # ---- keyword loop -------------------------------------------------------------------
 
     def _scan_keywords(
-        self, run_id: int, keywords: list[str], matcher: TitleMatcher, records: list[KeywordRecord]
+        self,
+        run_id: int,
+        searches: list[tuple[Place, str]],
+        label_place: bool,
+        matcher: TitleMatcher,
+        records: list[KeywordRecord],
     ) -> None:
-        for number, keyword in enumerate(keywords, start=1):
-            record = KeywordRecord(keyword)
+        """Location by location: every keyword in one location, then the next location."""
+        for number, (place, keyword) in enumerate(searches, start=1):
+            record = KeywordRecord(f"{keyword} ({place.name})" if label_place else keyword)
             records.append(record)
             pages: list[PageStat] = []
             try:
-                self._scan_keyword(run_id, number, len(keywords), record, matcher, pages)
+                self._scan_keyword(
+                    run_id, number, len(searches), record, matcher, pages, (keyword, place)
+                )
             except _AbortRun:
                 record.stopped_by = STOP_ABORTED
                 self._emit(
@@ -155,13 +165,14 @@ class Scanner:
         record: KeywordRecord,
         matcher: TitleMatcher,
         pages: list[PageStat],
+        search: tuple[str, Place],
     ) -> None:
         cfg = self._config
         empty_streak = 0
         label = f"[{number}/{total}] {record.keyword!r}"
         for page_index in range(cfg.max_pages_per_keyword):
             self._pace(first_page=page_index == 0)
-            result = self._fetch_with_retries(record, page_index, label)
+            result = self._fetch_with_retries(record, page_index, label, search)
             if result is None:
                 record.failed_pages += 1
                 self._emit(f"{label} page {page_index + 1}: skipped after retries")
@@ -267,12 +278,12 @@ class Scanner:
         self._sleep(seconds)
 
     def _fetch_with_retries(
-        self, record: KeywordRecord, page_index: int, label: str
+        self, record: KeywordRecord, page_index: int, label: str, search: tuple[str, Place]
     ) -> FetchResult | None:
         cfg = self._config
         attempt = 0
         while True:
-            result = self._fetcher.fetch_page(record.keyword, page_index)
+            result = self._fetcher.fetch_page(search[0], page_index, search[1])
             if result.outcome is not Outcome.THROTTLED:
                 self._consecutive_throttles = 0
                 return result

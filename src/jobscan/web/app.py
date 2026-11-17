@@ -229,8 +229,18 @@ SETTING_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
     (
         "LinkedIn search",
         (
-            ("location_name", "Location", "Search location text, for example India"),
-            ("geo_id", "Geo ID", "LinkedIn geography ID (India is 102713980)"),
+            (
+                "location_name",
+                "Location",
+                "One or more names, separated by commas, for example India, United Arab Emirates. "
+                "No commas inside a name. LinkedIn only",
+            ),
+            (
+                "geo_id",
+                "Geo ID",
+                "One LinkedIn geography ID per location, same order, separated by commas "
+                "(India 102713980, United Arab Emirates 104305776, Saudi Arabia 100459316)",
+            ),
             (
                 "time_window_hours",
                 "Posted within (hours)",

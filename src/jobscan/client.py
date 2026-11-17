@@ -13,7 +13,7 @@ from typing import Protocol
 
 import requests
 
-from .config import Config
+from .config import Config, Place
 from .models import JobDetail
 from .parser import ParsedPage, has_job_urns, parse_detail, parse_page
 
@@ -46,7 +46,9 @@ class FetchResult:
 
 
 class PageFetcher(Protocol):
-    def fetch_page(self, keyword: str, page_index: int) -> FetchResult: ...
+    def fetch_page(
+        self, keyword: str, page_index: int, place: Place | None = None
+    ) -> FetchResult: ...
 
 
 class DetailOutcome(enum.Enum):
@@ -110,11 +112,14 @@ def classify_response(status: int, body: str) -> FetchResult:
     )
 
 
-def build_params(config: Config, keyword: str, page_index: int) -> dict[str, str | int]:
+def build_params(
+    config: Config, keyword: str, page_index: int, place: Place | None = None
+) -> dict[str, str | int]:
+    place = place or config.places[0]
     return {
         "keywords": keyword,
-        "location": config.location_name,
-        "geoId": config.geo_id,
+        "location": place.name,
+        "geoId": place.geo_id,
         "f_TPR": f"r{config.time_window_seconds}",
         "start": page_index * PAGE_SIZE,
     }
@@ -143,11 +148,11 @@ class LinkedInClient:
             }
         )
 
-    def fetch_page(self, keyword: str, page_index: int) -> FetchResult:
+    def fetch_page(self, keyword: str, page_index: int, place: Place | None = None) -> FetchResult:
         try:
             response = self._session.get(
                 self._base_url,
-                params=build_params(self._config, keyword, page_index),
+                params=build_params(self._config, keyword, page_index, place),
                 timeout=self._timeout,
                 allow_redirects=False,
             )

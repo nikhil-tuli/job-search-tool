@@ -200,3 +200,26 @@ def test_the_hours_setting_wins_over_an_older_seconds_one() -> None:
 
 def test_the_window_is_sent_to_linkedin_in_seconds() -> None:
     assert Config(time_window_hours=14).time_window_seconds == 50_400
+
+
+def test_several_locations_pair_with_geo_ids() -> None:
+    cfg = Config.from_raw({"location_name": "India , United Arab Emirates", "geo_id": "1,2"})
+    assert [(p.name, p.geo_id) for p in cfg.places] == [
+        ("India", "1"),
+        ("United Arab Emirates", "2"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "geo", "field"),
+    [
+        ("India, UAE", "1", "geo_id"),
+        ("India", "1,2", "geo_id"),
+        ("India,,UAE", "1,2", "location_name"),
+        ("India, UAE", "1,x", "geo_id"),
+    ],
+)
+def test_location_list_mismatch_is_rejected(name: str, geo: str, field: str) -> None:
+    with pytest.raises(ConfigError) as info:
+        Config.from_raw({"location_name": name, "geo_id": geo})
+    assert field in info.value.errors

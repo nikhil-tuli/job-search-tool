@@ -707,3 +707,36 @@ def test_a_recent_role_without_a_description_is_retried(store: Store, cfg: Confi
     role = store.get_role("LinkedIn", "9")
     assert role is not None
     assert role.description == "Description of 9"
+
+
+def test_scan_goes_location_by_location_and_labels_runs(store: Store, cfg: Config) -> None:
+    one_keyword(store)
+    two_keywords(store)
+    cfg = replace(
+        cfg,
+        location_name="India, United Arab Emirates",
+        geo_id="102713980, 104305776",
+        keyword_pause_min=0,
+        keyword_pause_max=0,
+    )
+    script = {(k, 0): [end()] for k in (TPM, DM)}
+    for key in list(script):
+        script[key] = [end(), end()]
+    h = Harness(store, cfg, script)
+    result = h.run()
+    assert h.fetcher.places == ["India", "India", "United Arab Emirates", "United Arab Emirates"]
+    assert [r.keyword for r in result.keywords] == [
+        f"{TPM} (India)",
+        f"{DM} (India)",
+        f"{TPM} (United Arab Emirates)",
+        f"{DM} (United Arab Emirates)",
+    ]
+    assert store.get_run(result.run_id).keywords_total == 4
+
+
+def test_single_location_keeps_plain_keyword_labels(store: Store, cfg: Config) -> None:
+    one_keyword(store)
+    h = Harness(store, cfg, {(TPM, 0): [end()]})
+    result = h.run()
+    assert [r.keyword for r in result.keywords] == [TPM]
+    assert h.fetcher.places == ["India"]

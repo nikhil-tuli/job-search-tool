@@ -56,9 +56,11 @@ class ScriptedFetcher:
     def __init__(self, script: dict[tuple[str, int], list[FetchResult | BaseException]]) -> None:
         self.script = {k: list(v) for k, v in script.items()}
         self.calls: list[tuple[str, int]] = []
+        self.places: list[str] = []
 
-    def fetch_page(self, keyword: str, page_index: int) -> FetchResult:
+    def fetch_page(self, keyword: str, page_index: int, place=None) -> FetchResult:
         self.calls.append((keyword, page_index))
+        self.places.append(place.name if place else "")
         queue = self.script.get((keyword, page_index))
         assert queue, f"unscripted request: {keyword!r} page {page_index}"
         item = queue.pop(0)

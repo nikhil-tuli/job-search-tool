@@ -42,6 +42,18 @@ class ConfigError(ValueError):
         super().__init__("; ".join(f"{key}: {message}" for key, message in self.errors.items()))
 
 
+MAX_LOCATION_LENGTH = 80
+MAX_LOCATIONS = 10
+
+
+@dataclass(frozen=True)
+class Place:
+    """One LinkedIn search location: its name and geo ID."""
+
+    name: str
+    geo_id: str
+
+
 @dataclass(frozen=True)
 class Config:
     match_mode: str = "contains"
@@ -168,6 +180,13 @@ class Config:
             self.interview_ai_model or self.ai_model,
             self.interview_ai_key_env or self.ai_key_env,
         )
+
+    @property
+    def places(self) -> list[Place]:
+        """The search locations in the order listed. Names and IDs pair up by position."""
+        names = [n.strip() for n in self.location_name.split(",")]
+        ids = [i.strip() for i in self.geo_id.split(",")]
+        return [Place(n, i) for n, i in zip(names, ids, strict=False)]
 
     @property
     def time_window_seconds(self) -> int:
@@ -361,17 +380,22 @@ def _parse_text_fields(
     else:
         errors["match_mode"] = f"must be one of: {', '.join(MATCH_MODES)}"
 
-    location = raw.get("location_name", defaults.location_name).strip()
-    if 0 < len(location) <= 80:
-        values["location_name"] = location
+    names = [part.strip() for part in raw.get("location_name", defaults.location_name).split(",")]
+    ids = [part.strip() for part in raw.get("geo_id", defaults.geo_id).split(",")]
+    if not all(0 < len(name) <= MAX_LOCATION_LENGTH for name in names):
+        errors["location_name"] = (
+            f"each location must be 1 to {MAX_LOCATION_LENGTH} characters, separated by commas"
+        )
+    elif len(names) > MAX_LOCATIONS:
+        errors["location_name"] = f"at most {MAX_LOCATIONS} locations"
     else:
-        errors["location_name"] = "must be 1 to 80 characters"
-
-    geo_id = raw.get("geo_id", defaults.geo_id).strip()
-    if geo_id.isascii() and geo_id.isdigit():
-        values["geo_id"] = geo_id
+        values["location_name"] = ", ".join(names)
+    if not all(i.isascii() and i.isdigit() for i in ids):
+        errors["geo_id"] = "digits only, separated by commas"
+    elif "location_name" in values and len(ids) != len(names):
+        errors["geo_id"] = f"needs {len(names)} IDs to match {len(names)} locations"
     else:
-        errors["geo_id"] = "must be digits only"
+        values["geo_id"] = ", ".join(ids)
 
     place = " ".join(raw.get("naukri_location", defaults.naukri_location).lower().split())
     if _PLACE.fullmatch(place):

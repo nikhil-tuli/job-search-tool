@@ -1286,3 +1286,13 @@ Interview tracing details: `docs/INTERVIEW_PREP_REQUIREMENTS.md`, section 4.M.
 - **Verified value:** still 24 hours only. The check command warns for any other value.
 - **Messages:** the check command and the scan notes now say hours.
 
+
+## Round 27: Several search locations (built)
+
+- **Config page:** "Location" and "Geo ID" take comma-separated lists, same order and count. Example: `India, United Arab Emirates, Saudi Arabia` and `102713980, 104305776, 100459316`.
+- **Checks:** a count mismatch, an empty name or a non-digit ID shows an error on the page. At most 10 locations. Names cannot hold commas. Existing single values work as before.
+- **Scan order:** location by location. All keywords run in one location, then the next location.
+- **Run records:** with more than one location, each row shows `keyword (location)`. With one location, rows are unchanged. The keyword total is keywords x locations.
+- **Unchanged:** pacing, page cap, match rules, duplicate skipping. A throttle abort stops the whole run.
+- **Scope:** LinkedIn only. Naukri stays India-only. Company sites keep their own location words.
+- **Geo IDs given by the user:** United Arab Emirates 104305776, Saudi Arabia 100459316.
