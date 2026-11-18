@@ -15,6 +15,35 @@
     }
   }
 
+  // Rating buttons in a row: pressing the pressed one clears the rating.
+  table.addEventListener('click', function (event) {
+    var button = event.target.closest ? event.target.closest('button[data-rate]') : null;
+    if (!button) { return; }
+    event.preventDefault();
+    var form = button.form;
+    var buttons = form.querySelectorAll('button[data-rate]');
+    var body = new URLSearchParams(new FormData(form));
+    body.set('rating', button.getAttribute('aria-pressed') === 'true' ? 'clear' : button.value);
+    buttons.forEach(function (b) { b.disabled = true; });
+    note(form, 'Saving…', false);
+    fetch(form.action, { method: 'POST', body: body, headers: { 'X-Panel': '1' } })
+      .then(function (response) {
+        if (!response.ok) { throw new Error(response.status); }
+        return response.json();
+      })
+      .then(function (data) {
+        buttons.forEach(function (b) {
+          b.disabled = false;
+          b.setAttribute('aria-pressed', String(b.value === data.rating));
+        });
+        note(form, 'Saved ✓', false);
+      })
+      .catch(function () {
+        buttons.forEach(function (b) { b.disabled = false; });
+        note(form, 'Could not save. Try again.', true);
+      });
+  });
+
   table.addEventListener('focusin', function (event) {
     var select = event.target;
     if (select.matches && select.matches('select[data-autosave]')) { select.dataset.prev = select.value; }

@@ -61,6 +61,7 @@
     <tr>
       <th><input type="checkbox" id="all" aria-label="Select all on this page"></th>
       {% for key, h in heads.items() %}<th aria-sort="{{ 'ascending' if h.arrow == 'asc' else 'descending' if h.arrow == 'desc' else 'none' }}"><a class="sort{% if h.arrow %} on{% endif %}" href="{{ h.url }}">{{ h.label }}{% if h.arrow == 'asc' %} &#9650;{% elif h.arrow == 'desc' %} &#9660;{% endif %}</a></th>{% endfor %}
+      <th>Rating</th>
       <th></th>
     </tr>
   </thead>
@@ -70,7 +71,6 @@
       <td><input type="checkbox" name="ids" value="{{ r.key }}" form="bulk" aria-label="Select {{ r.title }}"></td>
       <td>
         <a class="row-link" href="{{ url_for('role_page', portal=r.portal, job_id=r.job_id, next=here) }}">{{ r.title }}</a>
-        <span class="rating-mark" title="Your rating">{% if r.fit_rating == 'good' %}&#128077;{% elif r.fit_rating == 'bad' %}&#128078;{% endif %}</span>
         {% if r.actively_hiring %}<span class="tag">Actively hiring</span>{% endif %}
         <span data-follow-slot>{{ follow_html.tag(r, today) }}</span>
         {% if r.possible_duplicate_of %}<span class="tag warn" title="Same company, title and city as {{ r.possible_duplicate_of }}">Possible duplicate</span>{% endif %}
@@ -96,8 +96,15 @@
         </form>
       </td>
       <td class="nw applied">{{ r.applied_on | ist_date }}</td>
-      <td><span class="row-links">{% set link = r.link | safe_link %}{% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer">Open</a>{% endif %}
-        <a class="practice" href="{{ url_for('interview_start', role=r.key) }}">Practice interview</a></span></td>
+      <td class="nw rate">
+        <form method="post" action="{{ url_for('role_rating', portal=r.portal, job_id=r.job_id) }}" class="inline rate-form">
+          <input type="hidden" name="next" value="{{ here }}">
+          <button type="submit" name="rating" value="good" title="Fit: Good" aria-label="Rate {{ r.title }} Good" aria-pressed="{{ 'true' if r.fit_rating == 'good' else 'false' }}" data-rate>&#128077;</button>
+          <button type="submit" name="rating" value="bad" title="Fit: Poor" aria-label="Rate {{ r.title }} Poor" aria-pressed="{{ 'true' if r.fit_rating == 'bad' else 'false' }}" data-rate>&#128078;</button>
+          <span class="note" aria-live="polite"></span>
+        </form>
+      </td>
+      <td><span class="row-links">{% set link = r.link | safe_link %}{% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer">Open</a>{% endif %}</span></td>
     </tr>
   {% endfor %}
   </tbody>

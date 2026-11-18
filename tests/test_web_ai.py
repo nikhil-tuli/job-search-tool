@@ -211,7 +211,7 @@ def test_checklist_evidence_uses_the_app_tooltip(seeded: Store) -> None:
     assert 'title="Led payment gateway migration"' not in panel
 
 
-def test_open_and_practice_links_sit_in_one_spaced_group(seeded: Store) -> None:
+def test_list_row_has_open_link_and_no_practice_link(seeded: Store) -> None:
     page = body(make_client(seeded, FakeClient([])).get("/roles"))
     assert '<span class="row-links">' in page
-    assert 'class="practice"' in page
+    assert 'class="practice"' not in page

@@ -1296,3 +1296,11 @@ Interview tracing details: `docs/INTERVIEW_PREP_REQUIREMENTS.md`, section 4.M.
 - **Unchanged:** pacing, page cap, match rules, duplicate skipping. A throttle abort stops the whole run.
 - **Scope:** LinkedIn only. Naukri stays India-only. Company sites keep their own location words.
 - **Geo IDs given by the user:** United Arab Emirates 104305776, Saudi Arabia 100459316.
+
+## Round 28: Rating on the roles list (built)
+
+- **New column "Rating"** on the roles list: 👍 Good and 👎 Poor buttons per row. The chosen one is highlighted.
+- **Saves at once,** without reloading the page. Pressing the highlighted button again clears the rating.
+- **Same saved rating** as the role page and the side panel. The eval and Langfuse are unchanged. Changing it in the panel updates the row.
+- **Removed from the list:** the 👍/👎 mark beside the title, and the "Practice interview" link. Practice interview stays on the role page.
+- **Open link** stays in the last column.

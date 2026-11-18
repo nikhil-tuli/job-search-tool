@@ -402,3 +402,14 @@ def test_tabs_are_in_the_agreed_order(web: Harness) -> None:
         "Eval",
         "Config",
     ]
+
+
+def test_list_has_a_rating_column_with_the_saved_choice(web: Harness) -> None:
+    add_role(web.store, "1")
+    web.store.set_fit_rating("LinkedIn", "1", "bad")
+    page = web.client.get("/roles").get_data(as_text=True)
+    assert "<th>Rating</th>" in page
+    assert 'name="rating" value="good" title="Fit: Good"' in page
+    assert 'value="bad" title="Fit: Poor" aria-label="Rate' in page
+    assert 'aria-pressed="true" data-rate' in page
+    assert "rating-mark" not in page

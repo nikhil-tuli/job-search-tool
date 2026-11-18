@@ -91,9 +91,9 @@ def test_menu_has_interview_prep(client: FlaskClient) -> None:
     assert "Interview Prep</a>" in text(client.get("/roles"))
 
 
-def test_roles_list_and_panel_have_practice_buttons(client: FlaskClient, store: Store) -> None:
+def test_panel_has_practice_button_and_list_does_not(client: FlaskClient, store: Store) -> None:
     add_role(store, "100")
-    assert "/interview?role=LinkedIn%7C100" in text(client.get("/roles"))
+    assert "Practice interview" not in text(client.get("/roles"))
     panel = text(client.get("/roles/LinkedIn/100?partial=1"))
     assert "Practice interview" in panel
     assert "role=LinkedIn%7C100" in panel

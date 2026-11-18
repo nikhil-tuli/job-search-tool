@@ -226,7 +226,8 @@ def web(store: Store, fake: FakeClient) -> FlaskClient:
     return create_app(store, secret_key="t", make_ai_client=lambda _c: fake).test_client()
 
 
-def test_eval_shows_the_ai_calls_section(store: Store) -> None:
+def test_eval_shows_the_ai_calls_section(store: Store, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("jobscan.web.app.now_ist", lambda: NOW)
     upload_cv(store)
     add_role(store, "1", LONG_JD)
     run(store, Informed([GOOD_REPLY]))

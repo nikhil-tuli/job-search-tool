@@ -138,8 +138,6 @@
     });
   }
 
-  var MARKS = { good: '\uD83D\uDC4D', bad: '\uD83D\uDC4E', '': '' };
-
   function ratingSubmit(event) {
     event.preventDefault();
     var f = event.target;
@@ -171,8 +169,9 @@
     });
     var label = body.querySelector('[data-label-note]');
     if (label) { label.textContent = res.note; }
-    var mark = rows[current].querySelector('.rating-mark');
-    if (mark) { mark.textContent = MARKS[res.rating] || ''; }
+    rows[current].querySelectorAll('button[data-rate]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.value === res.rating));
+    });
   }
 
   function showScore(score, button) {
