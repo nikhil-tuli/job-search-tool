@@ -15,7 +15,7 @@
     <a class="chip-link{% if not portal %} on{% endif %}" href="{{ url_for('summary') }}">All</a>
     {% for p in portals %}<a class="chip-link{% if portal == p %} on{% endif %}" href="{{ url_for('summary', portal=p) }}">{{ p }}</a>{% endfor %}
   </p>
-  {% if naukri_reminder %}<p class="notice">{{ naukri_reminder }}</p>{% endif %}
+  {% from "_notices.html" import show_notices %}{{ show_notices(notices, url_for('summary')) }}
   {% if site_attention and (not portal or portal == 'Company sites') %}<p class="notice"><strong>Needs attention ({{ site_attention | length }}):</strong> {% for name, note in site_attention %}{{ name }}: {{ note }}{% if not loop.last %}; {% endif %}{% endfor %}. Fix the link under Config, Company sites, then run <code>jobscan sites</code>.</p>{% endif %}
   {% if latest_run and latest_run.status == 'running' %}<p class="muted scan-state">
     <strong>Scan running:</strong> {{ latest_run.keywords_done }} of {{ latest_run.keywords_total }} keywords done,

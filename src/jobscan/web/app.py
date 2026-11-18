@@ -51,6 +51,8 @@ from ..langfuse_push import LangfuseClient
 from ..langfuse_push import client_from_env as langfuse_client_from_env
 from ..matching import MATCH_MODES
 from ..models import (
+    FOLLOW_UP_DUE,
+    FOLLOW_UP_OVERDUE,
     FOLLOW_UP_STATES,
     PORTAL_LINKEDIN,
     PORTAL_NAUKRI,
@@ -951,6 +953,53 @@ def create_app(
             # "sync_review_count": store.count_sync_review(),
         }
 
+    # ---- notices --------------------------------------------------------------------------
+
+    def follow_up_keys() -> dict[str, str]:
+        """Roles whose follow-up is due or overdue, keyed by role and follow-up date."""
+        flt = RoleFilter(follow_ups=(FOLLOW_UP_DUE, FOLLOW_UP_OVERDUE))
+        return {
+            f"follow:{r.portal}|{r.job_id}|{r.follow_up_on}": r.key for r in store.list_roles(flt)
+        }
+
+    def naukri_key() -> str | None:
+        latest = store.latest_run(PORTAL_NAUKRI)
+        return None if latest is None or reminder_text(store) is None else f"naukri:{latest.id}"
+
+    def open_notices() -> list[dict[str, str]]:
+        """The notices you have not closed. Each has a kind, a text and an optional link."""
+        closed = store.dismissed_notices()
+        out: list[dict[str, str]] = []
+        key, text = naukri_key(), reminder_text(store)
+        if key and text and key not in closed:
+            out.append({"kind": "naukri", "text": text, "link": ""})
+        fresh = [k for k in follow_up_keys() if k not in closed]
+        if fresh:
+            n = len(fresh)
+            out.append(
+                {
+                    "kind": "followup",
+                    "text": f"{n} follow-up{'s' if n != 1 else ''} due or overdue.",
+                    "link": url_for("roles", followup=[FOLLOW_UP_DUE, FOLLOW_UP_OVERDUE]),
+                }
+            )
+        return out
+
+    @app.post("/notices/dismiss")
+    def dismiss_notice() -> WerkzeugResponse | tuple[Response, int] | Response:
+        kind = request.form.get("kind", "")
+        if kind == "naukri":
+            key = naukri_key()
+            keys = [key] if key else []
+        elif kind == "followup":
+            keys = list(follow_up_keys())
+        else:
+            abort(400, "Unknown notice")
+        store.dismiss_notices(keys, to_iso(now_ist()))
+        if request.headers.get("X-Panel") == "1":
+            return jsonify(ok=True)
+        return redirect(safe_next(request.form.get("next"), url_for("roles")))
+
     # ---- roles ----------------------------------------------------------------------------
 
     TITLE_OTHER = "__other__"
@@ -1175,7 +1224,7 @@ def create_app(
                 today=today_iso(),
                 status_options=[(v, v) for v in SORTED_STATUSES],
                 portal_options=[(p, p) for p in PORTALS],
-                naukri_reminder=reminder_text(store),
+                notices=open_notices(),
                 fit_options=(("eligible", "Eligible"), ("excluded", "Excluded")),
                 score_options=(
                     (
@@ -1732,7 +1781,7 @@ def create_app(
             ],
             portal=portal,
             portals=PORTALS,
-            naukri_reminder=reminder_text(store),
+            notices=open_notices(),
             naukri_latest=store.latest_run(PORTAL_NAUKRI),
             linkedin_latest=store.latest_run(PORTAL_LINKEDIN),
             sites_latest=store.latest_run(PORTAL_SITES),

@@ -202,3 +202,51 @@ def test_details_open_when_a_detail_field_has_an_error(
     add_role(store, run_id, "1")
     body = text(save(client, "1", follow_up_on="not a date"))
     assert " open" in details_tag(body)
+
+
+def test_follow_up_notice_counts_due_and_overdue_and_can_be_closed(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    for job in "1234":
+        add_role(store, run_id, job)
+    assert "due or overdue" not in text(client.get("/roles"))
+    save(client, "1", follow_up_needed="1", follow_up_on=day(0))  # due
+    save(client, "2", follow_up_needed="1", follow_up_on=day(-3))  # overdue
+    save(client, "3", follow_up_needed="1", follow_up_on=day(5))  # upcoming: not counted
+    save(client, "4", follow_up_needed="1")  # no date: not counted
+    page = text(client.get("/roles"))
+    assert "2 follow-ups due or overdue." in page
+    assert "followup=due" in page
+    assert "2 follow-ups due or overdue." not in text(client.get("/config"))
+    assert client.post("/notices/dismiss", data={"kind": "followup"}).status_code == 302
+    assert "due or overdue" not in text(client.get("/roles"))
+    assert "due or overdue" not in text(client.get("/summary"))
+    save(client, "3", follow_up_needed="1", follow_up_on=day(0))  # a new one becomes due
+    assert "1 follow-up due or overdue." in text(client.get("/roles"))
+
+
+def test_naukri_notice_closes_for_that_run_only(client: FlaskClient, store: Store) -> None:
+    from jobscan.models import PORTAL_NAUKRI
+    from jobscan.store import RUN_SUCCESS
+
+    old = to_iso(now_ist() - timedelta(days=4))
+    first = store.start_run(window_seconds=1, keywords_total=1, portal=PORTAL_NAUKRI)
+    store.finish_run(first, RUN_SUCCESS)
+    store._conn.execute("UPDATE runs SET started_on = ? WHERE id = ?", (old, first))
+    assert "Naukri last run" in text(client.get("/summary"))
+    assert (
+        client.post(
+            "/notices/dismiss", data={"kind": "naukri"}, headers={"X-Panel": "1"}
+        ).status_code
+        == 200
+    )
+    assert "Naukri last run" not in text(client.get("/roles"))
+    assert "Naukri last run" not in text(client.get("/summary"))
+    second = store.start_run(window_seconds=1, keywords_total=1, portal=PORTAL_NAUKRI)
+    store.finish_run(second, RUN_SUCCESS)
+    store._conn.execute("UPDATE runs SET started_on = ? WHERE id = ?", (old, second))
+    assert "Naukri last run" in text(client.get("/roles"))
+
+
+def test_unknown_notice_is_refused(client: FlaskClient) -> None:
+    assert client.post("/notices/dismiss", data={"kind": "x"}).status_code == 400

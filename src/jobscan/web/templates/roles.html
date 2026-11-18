@@ -14,7 +14,7 @@
 </nav>
 {% endif %}
 {% endmacro %}
-{% if naukri_reminder %}<p class="notice">{{ naukri_reminder }}</p>{% endif %}
+{% from "_notices.html" import show_notices %}{{ show_notices(notices, here) }}
 <form id="filterform" class="filters" method="get" action="{{ url_for('roles') }}">
   <h1>Roles <span class="muted">{{ total }}</span></h1>
   {{ multi.pick('portal', 'Portal', portal_options, filters.get('portal', [])) }}

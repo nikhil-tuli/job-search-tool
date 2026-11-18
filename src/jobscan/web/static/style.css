@@ -162,6 +162,8 @@ details.multi .multi-body label { display: flex; gap: 6px; align-items: center; 
 .edit .follow-check .inline { justify-content: flex-start; }
 .edit .follow-check input[type=checkbox] { width: auto; margin: 0; }
 
+form.notice { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.notice-x { border: 0; background: transparent; cursor: pointer; font-size: 14px; padding: 0 4px; color: inherit; }
 .notice { padding: 6px 10px; margin: 8px 0; border-left: 3px solid #d9a400; background: rgba(217, 164, 0, .12); border-radius: 4px; }
 .portal-pick { margin: 6px 0; }
 .chip-link { display: inline-block; padding: 2px 10px; margin-right: 4px; border: 1px solid var(--line, #ccc); border-radius: 12px; text-decoration: none; }

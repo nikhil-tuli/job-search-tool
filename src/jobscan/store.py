@@ -700,6 +700,15 @@ class Store(
         ).fetchall()
         return [_run(r) for r in rows]
 
+    def dismissed_notices(self) -> set[str]:
+        return {r["key"] for r in self._conn.execute("SELECT key FROM dismissed_notice")}
+
+    def dismiss_notices(self, keys: Iterable[str], when: str) -> None:
+        self._conn.executemany(
+            "INSERT OR IGNORE INTO dismissed_notice (key, dismissed_on) VALUES (?, ?)",
+            [(k, when) for k in keys],
+        )
+
     def latest_run(self, portal: str = PORTAL_LINKEDIN) -> RunSummary | None:
         runs = self.list_runs(1, portal)
         return runs[0] if runs else None

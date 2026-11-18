@@ -1,0 +1,10 @@
+{% macro show_notices(notices, next) -%}
+{% for n in notices %}
+<form method="post" action="{{ url_for('dismiss_notice') }}" class="notice" data-notice>
+  <span>{{ n.text }}{% if n.link %} <a href="{{ n.link }}">View roles</a>{% endif %}</span>
+  <input type="hidden" name="kind" value="{{ n.kind }}">
+  <input type="hidden" name="next" value="{{ next }}">
+  <button type="submit" class="notice-x" title="Close this notice" aria-label="Close this notice">&#10005;</button>
+</form>
+{% endfor %}
+{%- endmacro %}

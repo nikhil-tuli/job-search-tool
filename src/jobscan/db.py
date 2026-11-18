@@ -749,6 +749,11 @@ def _migration_20(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX interview_call_interview ON interview_call (interview_id)")
 
 
+def _migration_21(conn: sqlite3.Connection) -> None:
+    """Notices you closed with the cross. A closed notice is never shown again."""
+    conn.execute("CREATE TABLE dismissed_notice (key TEXT PRIMARY KEY, dismissed_on TEXT NOT NULL)")
+
+
 MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_1,
     _migration_2,
@@ -770,6 +775,7 @@ MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _migration_18,
     _migration_19,
     _migration_20,
+    _migration_21,
 )
 SCHEMA_VERSION = len(MIGRATIONS)
 

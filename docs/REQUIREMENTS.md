@@ -1304,3 +1304,14 @@ Interview tracing details: `docs/INTERVIEW_PREP_REQUIREMENTS.md`, section 4.M.
 - **Same saved rating** as the role page and the side panel. The eval and Langfuse are unchanged. Changing it in the panel updates the row.
 - **Removed from the list:** the 👍/👎 mark beside the title, and the "Practice interview" link. Practice interview stays on the role page.
 - **Open link** stays in the last column.
+
+## Round 29: Closable notices (built)
+
+- **Cross icon** on the Naukri notice and the new follow-up notice. Clicking it hides the notice at once and it never shows again.
+- **Naukri notice:** closing covers that last run only. A later run that goes stale again shows a new notice.
+- **Follow-up notice:** "N follow-ups due or overdue." with a "View roles" link to the Roles list filtered to Due today and Overdue.
+  - Counts roles where Follow-up is needed and the date is today or earlier. Roles with no date are not counted.
+  - Closing hides every role in it. It shows again only when a different role becomes due or overdue.
+  - Closing hides the notice only. Row tags stay.
+- **Where:** Roles and Summary only.
+- **Saved** in the database (table `dismissed_notice`), so it holds after a reload or restart.
