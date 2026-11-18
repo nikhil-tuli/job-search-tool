@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import math
@@ -933,6 +934,15 @@ def create_app(
     @app.template_filter("safe_link")
     def safe_link(url: str) -> str:
         return url if url.startswith("https://") else ""
+
+    @app.url_defaults
+    def version_static(endpoint: str, values: dict[str, Any]) -> None:
+        """Add the file's change time to static links, so the browser never shows old CSS or JS."""
+        if endpoint != "static" or "filename" not in values or not app.static_folder:
+            return
+        with contextlib.suppress(OSError):
+            path = os.path.join(app.static_folder, values["filename"])
+            values["v"] = str(int(os.stat(path).st_mtime))
 
     @app.template_global("without")
     def without(values: Mapping[str, Any], key: str, drop: str = "") -> dict[str, Any]:

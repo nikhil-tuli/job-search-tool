@@ -84,7 +84,7 @@ def test_panel_has_rating_buttons_and_a_label_note(web: Harness) -> None:
     page = body(web.client.get("/roles/LinkedIn/1?partial=1"))
     assert 'name="rating" value="good" aria-pressed="true"' in page
     assert 'name="rating" value="bad" aria-pressed="false"' in page
-    assert 'value="clear"' in page
+    assert 'value="clear"' not in page  # pressing the chosen button again clears it
     assert "Counts in the eval." in page
 
 
@@ -413,3 +413,18 @@ def test_list_has_a_rating_column_with_the_saved_choice(web: Harness) -> None:
     assert 'value="bad" title="Fit: Poor" aria-label="Rate' in page
     assert 'aria-pressed="true" data-rate' in page
     assert "rating-mark" not in page
+
+
+def test_list_rating_buttons_carry_the_styled_form_class_and_saved_choice(web: Harness) -> None:
+    add_role(web.store, "1")
+    rate(web.client, "1", "bad")
+    page = body(web.client.get("/roles"))
+    assert 'class="inline rate-form rating-form"' in page
+    assert 'value="bad" title="Fit: Poor"' in page
+    assert 'aria-pressed="true" data-rate' in page
+
+
+def test_static_links_change_when_the_file_changes(web: Harness) -> None:
+    page = body(web.client.get("/roles"))
+    assert "style.css?v=" in page
+    assert "panel.js?v=" in page

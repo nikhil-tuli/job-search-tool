@@ -97,7 +97,7 @@
       </td>
       <td class="nw applied">{{ r.applied_on | ist_date }}</td>
       <td class="nw rate">
-        <form method="post" action="{{ url_for('role_rating', portal=r.portal, job_id=r.job_id) }}" class="inline rate-form">
+        <form method="post" action="{{ url_for('role_rating', portal=r.portal, job_id=r.job_id) }}" class="inline rate-form rating-form">
           <input type="hidden" name="next" value="{{ here }}">
           <button type="submit" name="rating" value="good" title="Fit: Good" aria-label="Rate {{ r.title }} Good" aria-pressed="{{ 'true' if r.fit_rating == 'good' else 'false' }}" data-rate>&#128077;</button>
           <button type="submit" name="rating" value="bad" title="Fit: Poor" aria-label="Rate {{ r.title }} Poor" aria-pressed="{{ 'true' if r.fit_rating == 'bad' else 'false' }}" data-rate>&#128078;</button>

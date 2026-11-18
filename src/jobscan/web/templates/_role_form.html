@@ -36,7 +36,6 @@
       <input type="hidden" name="next" value="{{ next }}">
       <button type="submit" name="rating" value="good" aria-pressed="{{ 'true' if role.fit_rating == 'good' else 'false' }}">&#128077; Good</button>
       <button type="submit" name="rating" value="bad" aria-pressed="{{ 'true' if role.fit_rating == 'bad' else 'false' }}">&#128078; Poor</button>
-      <button type="submit" name="rating" value="clear">Clear</button>
       <span class="note" aria-live="polite"></span>
     </form>
     <small class="muted" data-label-note>{{ label_note }}</small>

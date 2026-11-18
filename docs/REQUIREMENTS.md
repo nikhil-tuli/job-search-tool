@@ -1323,3 +1323,10 @@ Interview tracing details: `docs/INTERVIEW_PREP_REQUIREMENTS.md`, section 4.M.
 - **Change or clear:** pressing the other button switches the rating. Pressing the chosen one again clears it. The role page and side panel keep a Clear button too.
 - **Same look** on the list, the side panel and the role page, in light and dark mode.
 - **Duplicates:** reviewed, no change for now. "Bangalore Urban" is not read as Bengaluru, so such pairs are not flagged. Left as is by decision.
+
+## Round 31: Rating fixes (built)
+
+- **List:** the rating buttons now carry the same look as the panel (the earlier change never reached the list, because the list form lacked the style class).
+- **Panel:** the unchosen button is readable (dark text, light fill, softly faded). The Clear button is removed. Pressing the chosen button again clears the rating.
+- **In sync:** a change on the list shows in the panel when it opens. A change in the panel updates the list row at once. Checked in a real browser: rate on the list, open the panel, switch, then clear.
+- **Old CSS or JS:** static file links carry the file's change time, so a browser never shows an older copy.

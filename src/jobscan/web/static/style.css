@@ -106,7 +106,7 @@ table.scoring td, table.scoring th { font-size: 12px; }
 :root { --good-bg: #e3f3e8; --bad-bg: #fbe6e4; }
 @media (prefers-color-scheme: dark) { :root { --good-bg: #1f3a2a; --bad-bg: #44231f; } }
 .rating-form button[data-rate], .rating-form button[value="good"], .rating-form button[value="bad"] {
-  border: 1.5px solid var(--line); background: transparent; border-radius: 8px; cursor: pointer;
+  border: 1.5px solid var(--line); background: var(--card); color: var(--fg); border-radius: 8px; cursor: pointer;
   transition: background .12s, border-color .12s, opacity .12s, filter .12s;
 }
 .rating-form button[value="good"]:hover:not([aria-pressed="true"]) { background: var(--good-bg); }
@@ -115,7 +115,7 @@ table.scoring td, table.scoring th { font-size: 12px; }
 .rating-form button[value="bad"][aria-pressed="true"] { background: var(--bad-bg); border-color: var(--err); color: var(--err); font-weight: 600; }
 /* Once one is chosen, the other fades back. */
 .rating-form:has(button[aria-pressed="true"]) button[aria-pressed="false"][value="good"],
-.rating-form:has(button[aria-pressed="true"]) button[aria-pressed="false"][value="bad"] { opacity: .4; filter: grayscale(1); }
+.rating-form:has(button[aria-pressed="true"]) button[aria-pressed="false"][value="bad"] { opacity: .65; filter: grayscale(1); }
 .rating-form:has(button[aria-pressed="true"]) button[aria-pressed="false"]:hover { opacity: .8; }
 table.roles td.rate form { display: flex; gap: 4px; }
 table.roles td.rate button { padding: 0.15rem 0.4rem; font-size: 15px; line-height: 1.2; }
