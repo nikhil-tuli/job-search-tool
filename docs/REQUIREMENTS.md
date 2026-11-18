@@ -1315,3 +1315,11 @@ Interview tracing details: `docs/INTERVIEW_PREP_REQUIREMENTS.md`, section 4.M.
   - Closing hides the notice only. Row tags stay.
 - **Where:** Roles and Summary only.
 - **Saved** in the database (table `dismissed_notice`), so it holds after a reload or restart.
+
+## Round 30: Rating look (built)
+
+- **Chosen rating is clear at a glance:** Good is tinted green with a green border. Poor is tinted red with a red border. The other button fades to grey. With no rating, both show as neutral outlines.
+- **Not colour alone:** the chosen emoji stays in full colour and the other goes grey.
+- **Change or clear:** pressing the other button switches the rating. Pressing the chosen one again clears it. The role page and side panel keep a Clear button too.
+- **Same look** on the list, the side panel and the role page, in light and dark mode.
+- **Duplicates:** reviewed, no change for now. "Bangalore Urban" is not read as Bengaluru, so such pairs are not flagged. Left as is by decision.

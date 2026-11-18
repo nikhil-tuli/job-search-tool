@@ -143,6 +143,8 @@
     var f = event.target;
     var token = loadToken;
     var choice = event.submitter ? event.submitter.value : '';
+    // Pressing the chosen button again clears the rating.
+    if (event.submitter && event.submitter.getAttribute('aria-pressed') === 'true') { choice = 'clear'; }
     var note = f.querySelector('.note');
     var data = new URLSearchParams(new FormData(f));
     data.set('rating', choice);
