@@ -216,7 +216,7 @@
     if (select) { select.value = data.status; }
     row.querySelector('td.applied').textContent = data.applied_on;
     if (data.fit) {
-      var fitCell = row.querySelector('td.fit');
+      var fitCell = row.querySelector('[data-fit]');
       if (fitCell) { fitCell.innerHTML = data.fit.cell; }
       var fitDetail = body.querySelector('[data-fit-detail]');
       if (fitDetail) { fitDetail.innerHTML = data.fit.detail; }

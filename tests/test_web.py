@@ -952,13 +952,15 @@ def fresh() -> str:
     return to_iso(now_ist())
 
 
-def test_fit_column_tags_roles(client: FlaskClient, store: Store, run_id: int) -> None:
+def test_exclusion_reason_shows_in_the_score_column(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
     add_role(store, run_id, "1", fetched_on=fresh())
     add_role(store, run_id, "2", fetched_on=fresh(), company="Amazon Development Centre")
     add_role(store, run_id, "3")  # fetched days ago
     body = text(client.get("/roles"))
-    assert ">Fit</a></th>" in body
-    assert body.count('muted">Eligible<') == 1
+    assert ">Fit</a></th>" not in body  # no Fit column; the reason sits in Score
+    assert 'muted">Eligible<' not in body
     assert "Excluded: company" in body
     assert "Excluded: recency" in body
     assert "company matches Amazon" in body  # the full reason is on hover
@@ -1016,7 +1018,7 @@ def test_fit_filter_paginates_after_filtering(
 
 def test_fit_uses_the_saved_settings(client: FlaskClient, store: Store, run_id: int) -> None:
     add_role(store, run_id, "1", fetched_on=fresh(), company="Initech")
-    assert 'muted">Eligible<' in text(client.get("/roles"))
+    assert "Excluded: company" not in text(client.get("/roles"))
     store.set_config_raw({"fit_excluded_companies": "Initech"})
     assert "Excluded: company" in text(client.get("/roles"))
 
@@ -1227,20 +1229,21 @@ def test_a_status_change_never_changes_fit(client: FlaskClient, store: Store, ru
         data={"ids": "LinkedIn|1", "status": "Closed"},
         headers={"X-Panel": "1"},
     )
-    assert "Eligible" in response.get_json()["fit"]["LinkedIn|1"]
+    assert "Excluded" not in response.get_json()["fit"]["LinkedIn|1"]
     saved = client.post(
         "/roles/LinkedIn/1",
         data={"status": "Skipped", "applied_on": "", "contact_person": "", "comments": ""},
         headers={"X-Panel": "1"},
     )
-    assert "Eligible" in saved.get_json()["fit"]["cell"]
+    assert "Excluded" not in saved.get_json()["fit"]["cell"]
+    assert "Eligible" in saved.get_json()["fit"]["detail"]
 
 
 def test_the_roles_page_marks_the_fit_cell_for_updates(
     client: FlaskClient, store: Store, run_id: int
 ) -> None:
     add_role(store, run_id, "1", fetched_on=fresh())
-    assert '<td class="fit">' in text(client.get("/roles"))
+    assert "data-fit>" in text(client.get("/roles"))
     assert "data-fit-detail" in text(client.get("/roles/LinkedIn/1?partial=1"))
 
 
@@ -1320,3 +1323,12 @@ def test_panel_closes_after_a_successful_save(client: FlaskClient) -> None:
     script.close()
     assert "applySaved(res.data); finishSave();" in code  # close and confirm, only on success
     assert "function finishSave()" in code
+
+
+def test_excluded_role_keeps_its_saved_score_below_the_reason(
+    client: FlaskClient, store: Store, run_id: int
+) -> None:
+    add_role(store, run_id, "1")  # fetched days ago, so excluded by recency
+    cell = text(client.get("/roles")).split('class="nw score"')[1].split("</td>")[0]
+    assert "Excluded: recency" in cell
+    assert "&ndash;" not in cell  # an excluded role with no score shows only the reason

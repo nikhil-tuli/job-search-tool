@@ -1330,3 +1330,15 @@ Interview tracing details: `docs/INTERVIEW_PREP_REQUIREMENTS.md`, section 4.M.
 - **Panel:** the unchosen button is readable (dark text, light fill, softly faded). The Clear button is removed. Pressing the chosen button again clears the rating.
 - **In sync:** a change on the list shows in the panel when it opens. A change in the panel updates the list row at once. Checked in a real browser: rate on the list, open the panel, switch, then clear.
 - **Old CSS or JS:** static file links carry the file's change time, so a browser never shows an older copy.
+
+## Round 32: Fit column merged into Score (built)
+
+- **Fit column removed** from the Roles list, with its sort.
+- **Score cell now shows:**
+  - Excluded role: the exclusion tag, for example "Excluded: industry". With more than one reason it shows "+N", and hovering shows all reasons.
+  - Excluded role that also has a saved score: the tag first, the score below it. This happens when a scored role later becomes excluded (for example by recency), or when you press Score this role on an excluded role. Automatic scoring after a scan skips excluded roles.
+  - Eligible and scored: the score, as before.
+  - Eligible and not scored: a dash. The word "Eligible" no longer shows on the list.
+- **Unchanged:** the Fit filter in the filter bar, and the "Fit filter" line in the side panel (which still says Eligible or lists the reasons).
+- **Sorting:** Score sorting works as before. Excluded roles with no score sort last. An old `sort=fit` link falls back to the default order.
+- **Live updates:** the tag in the Score cell refreshes after a status save or a panel save, as the old Fit cell did.

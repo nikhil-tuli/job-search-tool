@@ -164,7 +164,6 @@ SORT_COLUMNS = {
     "portal": ("Portal", "asc"),
     "posted": ("Posted (IST)", "desc"),
     "fetched": ("Fetched (IST)", "desc"),
-    "fit": ("Fit", "asc"),
     "score": ("Score", "desc"),
     "status": ("Status", "asc"),
     "applied": ("Applied", "desc"),
@@ -1130,9 +1129,6 @@ def create_app(
                 return r.posted_on or None
             if sort == "fetched":
                 return r.fetched_on
-            if sort == "fit":
-                fit = fits[r.key]
-                return f"{0 if fit.eligible else 1}{fit.label}"
             if sort == "score":
                 return views[r.key].final if r.key in views else None
             if sort == "status":

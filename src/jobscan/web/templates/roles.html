@@ -81,9 +81,11 @@
       <td class="date">{{ r | posted }}</td>
       <td class="date">{{ r.fetched_on | ist }}</td>
       {% set fit = fits[r.key] %}
-      <td class="fit">{{ fit_html.cell(fit) }}</td>
       {% set sc = scores.get(r.key) %}
-      <td class="nw score">{% if sc and sc.ai %}{{ ai.pill(sc) }}{% elif sc %}<span class="band {{ sc.band }}{% if sc.stale %} stale{% endif %}" title="{{ sc.detail }}">{{ sc.final }}</span> <small>{{ sc.band | capitalize }}</small>{% else %}<span class="muted">&ndash;</span>{% endif %}</td>
+      <td class="nw score">
+        <div data-fit>{{ fit_html.cell(fit) }}</div>
+        <div>{% if sc and sc.ai %}{{ ai.pill(sc) }}{% elif sc %}<span class="band {{ sc.band }}{% if sc.stale %} stale{% endif %}" title="{{ sc.detail }}">{{ sc.final }}</span> <small>{{ sc.band | capitalize }}</small>{% elif fit.eligible %}<span class="muted">&ndash;</span>{% endif %}</div>
+      </td>
       <td>
         <form method="post" action="{{ url_for('set_status') }}" class="inline">
           <input type="hidden" name="ids" value="{{ r.key }}">

@@ -75,7 +75,7 @@
       select.dataset.prev = select.value;
       var key = form.querySelector('input[name=ids]').value;
       row.querySelector('td.applied').textContent = result.data.applied_on[key] || '';
-      var fitCell = row.querySelector('td.fit');
+      var fitCell = row.querySelector('[data-fit]');
       if (fitCell && result.data.fit && result.data.fit[key] !== undefined) {
         fitCell.innerHTML = result.data.fit[key];  // server-rendered, escaped by the template
       }

@@ -155,7 +155,7 @@ table.roles td.date { width: 5.2em; }
 table.roles select { max-width: 9.5em; padding: 3px 4px; }
 table.roles td.applied { min-width: 5.5em; }
 table.roles th { white-space: normal; }
-table.roles td.fit { max-width: 7.5em; }
+table.roles td.score [data-fit] { max-width: 8em; white-space: normal; }
 table.roles select { max-width: 8.5em; }
 table.roles td.applied { min-width: 0; white-space: normal; }
 
